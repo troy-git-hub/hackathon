@@ -3,11 +3,24 @@ Echo - 悬浮主窗口
 状态机：compact(小窗) -> expanded(掉队分析) -> lesson(30秒补上) -> compact
 课程结束 -> echo(回响页)
 """
+import ctypes
+from ctypes import wintypes
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame, QSizePolicy, QStackedWidget,
                              QSpacerItem)
 from PyQt5.QtCore import Qt, QTimer, QPoint, pyqtSignal, QRectF
 from PyQt5.QtGui import QFont, QCursor, QPainter, QPainterPath, QColor, QBrush
+
+# Win32 常量
+WM_NCHITTEST = 0x0084
+HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT = 10, 11, 12, 13, 14
+HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT = 15, 16, 17
+HTCAPTION = 2
+SC_MINIMIZE = 0xF020
+WM_SYSCOMMAND = 0x0112
+SW_MINIMIZE = 6
+
+user32 = ctypes.windll.user32
 
 from echo.theme import Colors, Radius, font, Spacing
 from echo.components.buttons import StateButton, PrimaryButton, GhostButton
@@ -90,7 +103,19 @@ class FloatingWindow(QWidget):
         self.end_btn.clicked.connect(self._go_echo)
         lay.addWidget(self.end_btn)
 
+        # 最小化按钮
+        self.min_btn = QPushButton("—")
+        self.min_btn.setObjectName("Ghost")
+        self.min_btn.setFixedWidth(28)
+        self.min_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.min_btn.clicked.connect(self._minimize)
+        lay.addWidget(self.min_btn)
+
         return bar
+
+    def _minimize(self):
+        hwnd = int(self.winId())
+        user32.ShowWindow(hwnd, SW_MINIMIZE)
 
     # ----- 桌宠态（默认外壳）-----
     def _build_pet(self) -> QWidget:
@@ -301,27 +326,28 @@ class FloatingWindow(QWidget):
         return page
 
     # ========== 状态切换 ==========
+    def _resize_to(self, w: int):
+        """设最小宽度并 resize，允许用户后续手动拖拽调整"""
+        self.setMinimumWidth(w)
+        self.resize(w, self.sizeHint().height())
+
     def _switch_pet(self):
         self.stack.setCurrentIndex(0)
-        self.setFixedWidth(260)
+        self._resize_to(260)
         self.pet.set_emotion("idle")
-        self.adjustSize()
 
     def _switch_panel(self):
         self.stack.setCurrentIndex(1)
-        self.setFixedWidth(420)
-        self.adjustSize()
+        self._resize_to(420)
 
     def _switch_expanded(self):
         self.stack.setCurrentIndex(2)
-        self.setFixedWidth(520)
-        self.adjustSize()
+        self._resize_to(520)
 
     def _go_lesson(self):
         self.stack.setCurrentIndex(3)
-        self.setFixedWidth(520)
+        self._resize_to(520)
         self.pet.set_emotion("thinking")
-        self.adjustSize()
 
     def _go_echo(self):
         self.echo_hint.setText("正在生成回响…")
@@ -330,8 +356,7 @@ class FloatingWindow(QWidget):
         self._render_chain([], "")
         self.echo.end_lesson()
         self.stack.setCurrentIndex(4)
-        self.setFixedWidth(540)
-        self.adjustSize()
+        self._resize_to(540)
 
     def _restart(self):
         self.current_concept = Concept("00:00", "等待老师开讲…", [], [], "", "now")
@@ -456,6 +481,40 @@ class FloatingWindow(QWidget):
 
     def mouseReleaseEvent(self, e):
         self._drag_pos = None
+
+    def nativeEvent(self, eventType, message):
+        """处理 Win32 消息，实现无边框窗口边缘拖拽调整大小"""
+        msg = ctypes.wintypes.MSG.from_address(int(message))
+        if msg.message == WM_NCHITTEST:
+            # 获取鼠标坐标（屏幕坐标）
+            x = ctypes.c_short(msg.lParam & 0xFFFF).value
+            y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
+            # 转为窗口客户区坐标
+            geo = self.frameGeometry()
+            x -= geo.x()
+            y -= geo.y()
+            bw = 6  # 边缘命中宽度
+            w, h = geo.width(), geo.height()
+
+            # 四角
+            if x < bw and y < bw:
+                return True, HTTOPLEFT
+            if x > w - bw and y < bw:
+                return True, HTTOPRIGHT
+            if x < bw and y > h - bw:
+                return True, HTBOTTOMLEFT
+            if x > w - bw and y > h - bw:
+                return True, HTBOTTOMRIGHT
+            # 四边
+            if x < bw:
+                return True, HTLEFT
+            if x > w - bw:
+                return True, HTRIGHT
+            if y < bw:
+                return True, HTTOP
+            if y > h - bw:
+                return True, HTBOTTOM
+        return super().nativeEvent(eventType, message)
 
     def paintEvent(self, e):
         """绘制 WinUI 风格圆角 + 柔和阴影背景"""
