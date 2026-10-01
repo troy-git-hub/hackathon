@@ -4,6 +4,9 @@ Echo - 后端配置
 """
 import os
 
+# 国内默认走 HF 镜像下载 Whisper 模型
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
 try:
     from dotenv import load_dotenv
     load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
@@ -33,8 +36,8 @@ CONCEPT_MIN_CHARS = _int("ECHO_CONCEPT_MIN_CHARS", 40)
 LOST_WINDOW = _int("ECHO_LOST_WINDOW", 300)
 
 # ---------- 音频来源 ----------
-# demo: 回放示例课 transcript（现场最稳）  mic: 麦克风/立体声混音 + Whisper
-SOURCE = os.getenv("ECHO_SOURCE", "demo")
+# system: 抓电脑正在播放的声音（网课/会议）+ Whisper   mic: 麦克风   demo: 回放示例讲稿
+SOURCE = os.getenv("ECHO_SOURCE", "system")
 DEMO_LINE_INTERVAL = float(os.getenv("ECHO_DEMO_INTERVAL", "3"))
 DEMO_SCRIPT = os.getenv("ECHO_DEMO_SCRIPT", "")  # 可选：自定义 transcript 文本文件
 

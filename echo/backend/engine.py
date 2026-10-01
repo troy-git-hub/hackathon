@@ -136,6 +136,10 @@ class EchoEngine:
     def has_llm(self):
         return self.llm is not None
 
+    def elapsed(self) -> float:
+        """从开课到现在的墙钟秒数（实时音频用）。"""
+        return time.time() - self.start_ts
+
     def now(self) -> float:
         """当前课堂时间（秒）。transcript 带自定义时间戳时以最新一句为准。"""
         with self._lock:
@@ -282,6 +286,11 @@ class EchoEngine:
                             reason=str(data.get("reason") or ""),
                             micro_lesson=str(data.get("micro_lesson") or ""),
                             note=str(data.get("note") or ""))
+        elif self.llm:
+            bp = BreakPoint("", cur, "Echo 还没听到课堂内容",
+                            "请确认网课正在播放，且声音没有静音",
+                            "Echo 会自动抓取电脑正在播放的声音。开始播放网课后，等老师讲一两分钟再点「我掉队了」。",
+                            note="还没有内容")
         else:
             s = SAMPLE_BREAKPOINT
             bp = BreakPoint(s.breakpoint_tc, s.concept, s.missing, s.reason,
@@ -309,9 +318,13 @@ class EchoEngine:
                 return [c]
 
             idx = None
-            for i, e in enumerate(entries):   # 先按知识点名称匹配
+            for i, e in enumerate(entries):   # 先按知识点名称精确匹配
                 if e.concept.topic == bp.concept:
                     idx = i
+            if idx is None and bp.concept:    # 再按名称包含（如「贝叶斯公式的推导」↔「贝叶斯公式」）
+                for i, e in enumerate(entries):
+                    if e.concept.topic in bp.concept or bp.concept in e.concept.topic:
+                        idx = i
             t = parse_tc(bp.breakpoint_tc)
             if idx is None and t is not None:  # 再按时间吸附到所在 concept
                 idx = 0
@@ -329,8 +342,11 @@ class EchoEngine:
             if not bp.note:
                 bp.note = bp.reason[:12]
 
-            start = max(0, min(idx - 1, len(entries) - 4))
-            return [e.concept for e in entries[start:]]
+            # 展示：断点前 1 个 + 断点 + 后 2 个，再接上「现在」
+            shown = entries[max(0, idx - 1): idx + 3]
+            if entries[-1] not in shown:
+                shown.append(entries[-1])
+            return [e.concept for e in shown]
 
     # ================= 回响 =================
     def end_lesson(self):

@@ -2,7 +2,9 @@ PyQt5>=5.15
 Pillow>=10.0
 openai>=1.0
 python-dotenv>=1.0
-# mic 模式（可选）
-sounddevice>=0.4
 numpy
+# 实时语音：系统音频 loopback + 本地 Whisper
+pyaudiowpatch>=0.2.12
 faster-whisper>=1.0
+opencc-python-reimplemented
+sounddevice>=0.4

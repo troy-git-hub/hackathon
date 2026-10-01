@@ -10,21 +10,26 @@ cp .env.example .env      # 填 DEEPSEEK_API_KEY
 python main.py
 ```
 
+打开网课（腾讯会议 / Zoom / B站 / 录播课）正常播放，Echo 会直接抓电脑播放的声音实时转写，不需要麦克风，戴耳机也行。
+第一次启动会从 hf-mirror 下载 Whisper small 模型（约 480MB）。
+
 没有 key 时自动退化为 mock 数据，界面照常可用。
 
-后端冒烟测试（不开界面）：
+自检（不开界面）：
 
 ```bash
-python scripts/smoke_backend.py          # 真实 DeepSeek
-python scripts/smoke_backend.py --mock
+python scripts/live_check.py --direct    # TTS 朗读示例课 → 切句 → Whisper → DeepSeek → 掉队分析
+python scripts/live_check.py             # 同上，但真的从扬声器播放、走系统音频 loopback
+python scripts/smoke_backend.py          # 只测 LLM 部分（直接喂讲稿文字）
 ```
 
 ## 架构
 
 ```
 音频来源 (echo/backend/sources.py)
-  demo : 回放 demo_lesson.txt（现场演示用，不依赖声卡/ASR）
-  mic  : sounddevice 采集 → faster-whisper 本地转写
+  system : WASAPI loopback 抓系统播放声音 → 静音切句 → faster-whisper（热词=已识别知识点）
+  mic    : 麦克风 → 同上
+  demo   : 回放 demo_lesson.txt（离线兜底）
         │ add_transcript(text, t)
         ▼
 EchoEngine (echo/backend/engine.py)
