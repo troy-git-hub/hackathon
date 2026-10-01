@@ -1,33 +1,67 @@
 """
 Echo - 可爱桌宠组件
-BongoCat 风格：白色简笔猫 + 两只前爪交替敲击动画。
+优先加载 assets/emojis/ 下的表情包 PNG，按情绪切换；
+图片缺失时回退到 BongoCat 手绘猫。
 点击触发展开。
 """
+import os
 import math
 from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout
 from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt5.QtGui import (QPainter, QPainterPath, QColor, QBrush, QPen,
-                         QRadialGradient, QLinearGradient, QFont)
+                         QRadialGradient, QLinearGradient, QFont, QPixmap)
+
+# 情绪 -> 表情包文件名（对应 split_emojis.py 切出的 8 张）
+EMOTION_FILES = {
+    "idle": "smug.png",
+    "ok": "happy.png",
+    "warn": "confused.png",
+    "lost": "cry.png",
+    "thinking": "key.png",
+    "fixed": "happy.png",
+}
+
+ASSETS_DIR = os.path.join("assets", "emojis")
 
 
 class PetWidget(QWidget):
-    """桌宠本体：BongoCat 风格白猫（点击发射 clicked 信号）"""
+    """桌宠本体：优先显示表情包，回退手绘 BongoCat"""
 
     clicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(160, 150)
+        self.setFixedSize(160, 160)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setCursor(Qt.PointingHandCursor)
         self._hover = False
-        self._tap_phase = 0.0  # 敲击相位
-        self._tap_dir = 1     # 相位方向
+        self._tap_phase = 0.0
+        self._tap_dir = 1
+        self._emotion = "idle"
 
-        # 敲击动画定时器
+        # 预加载所有表情包
+        self._pixmaps = {}
+        for emo, fname in EMOTION_FILES.items():
+            path = os.path.join(ASSETS_DIR, fname)
+            if os.path.exists(path):
+                pm = QPixmap(path)
+                if not pm.isNull():
+                    self._pixmaps[emo] = pm
+
+        # 敲击动画定时器（仅手绘模式用）
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(60)
+
+    def set_emotion(self, emotion: str):
+        """切换情绪表情包。emotion: idle/ok/warn/lost/thinking/fixed"""
+        if emotion in self._pixmaps:
+            self._emotion = emotion
+            self.update()
+
+    @property
+    def has_emoji(self):
+        return bool(self._pixmaps)
 
     def _tick(self):
         self._tap_phase += 0.25 * self._tap_dir
@@ -55,6 +89,21 @@ class PetWidget(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
 
+        # ---- 有表情包图片则直接绘制 ----
+        pm = self._pixmaps.get(self._emotion)
+        if pm is not None:
+            # 等比缩放到控件大小，居中
+            target_w = self.width()
+            target_h = self.height()
+            scaled = pm.scaled(target_w, target_h,
+                               Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            x = (self.width() - scaled.width()) // 2
+            y = (self.height() - scaled.height()) // 2
+            p.drawPixmap(x, y, scaled)
+            p.end()
+            return
+
+        # ---- 回退：手绘 BongoCat ----
         cx = self.width() / 2
         hx, hy = cx, 56
         hr = 40  # 头半径

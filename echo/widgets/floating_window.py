@@ -249,7 +249,7 @@ class FloatingWindow(QWidget):
 
         act = QHBoxLayout()
         self.btn_gotit = PrimaryButton("✓ 补上了，继续听课")
-        self.btn_gotit.clicked.connect(self._switch_pet)
+        self.btn_gotit.clicked.connect(self._on_fixed)
         act.addWidget(self.btn_gotit)
         lay.addLayout(act)
 
@@ -304,6 +304,7 @@ class FloatingWindow(QWidget):
     def _switch_pet(self):
         self.stack.setCurrentIndex(0)
         self.setFixedWidth(260)
+        self.pet.set_emotion("idle")
         self.adjustSize()
 
     def _switch_panel(self):
@@ -319,6 +320,7 @@ class FloatingWindow(QWidget):
     def _go_lesson(self):
         self.stack.setCurrentIndex(3)
         self.setFixedWidth(520)
+        self.pet.set_emotion("thinking")
         self.adjustSize()
 
     def _go_echo(self):
@@ -344,18 +346,27 @@ class FloatingWindow(QWidget):
     def _on_ok(self):
         self.echo.feedback("ok")
         self._flash(self.btn_ok, Colors.SUCCESS_BG)
+        self.pet.set_emotion("ok")
+        QTimer.singleShot(2500, lambda: self.pet.set_emotion("idle"))
 
     def _on_warn(self):
         self.echo.feedback("warn")
         self._flash(self.btn_warn, Colors.WARNING_BG)
+        self.pet.set_emotion("warn")
 
     def _on_lost(self):
         # 核心：调用 Break Point Engine（异步，结果见 _on_breakpoint）
+        self.pet.set_emotion("lost")
         self.echo.feedback("lost")
         self.timeline.set_concepts(self.echo.engine.concepts()[-4:] or [self.current_concept])
         self.missing_lbl.setText("Echo 正在回看最近几分钟…")
         self.btn_fill.setEnabled(False)
         self._switch_expanded()
+
+    def _on_fixed(self):
+        """补上了：先开心，再缩回桌宠"""
+        self.pet.set_emotion("fixed")
+        QTimer.singleShot(1500, self._switch_pet)
 
     def _flash(self, btn, color):
         pass  # 占位：实际可加短暂高亮动画
