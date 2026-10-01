@@ -98,6 +98,10 @@ class EchoBridge(QObject):
         """学生点了「✓ 补上了，继续听课」。"""
         self.engine.mark_fixed()
 
+    def mark_self(self):
+        """学生点了「我自己看看」。"""
+        self.engine.mark_self()
+
     def end_lesson(self):
         if self.source:
             self.source.stop()

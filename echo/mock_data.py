@@ -30,6 +30,7 @@ class BreakPoint:
     step: str = ""         # ②中间漏的那一步
     now: str = ""          # ③所以现在能听懂什么
     fixed: bool = False    # 学生点了「补上了」
+    self_review: bool = False  # 学生点了「我自己看看」，没用 AI 补
 
 
 @dataclass

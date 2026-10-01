@@ -468,6 +468,12 @@ class EchoEngine:
                     e.fixed = True
                     break
 
+    def mark_self(self):
+        """学生点了「我自己看看」：最近一个断点记为自己回看，回响里仍算待复习。"""
+        with self._lock:
+            if self.breakpoints:
+                self.breakpoints[-1].self_review = True
+
     # ================= 回响 =================
     def end_lesson(self):
         """课程结束：异步生成回响页数据。"""
@@ -494,7 +500,7 @@ class EchoEngine:
                     timeline = self._timeline_text()
                     feedback = self._feedback_text()
                     bps = "\n".join(f"- {b.breakpoint_tc} {b.concept}：缺失「{b.missing}」，{b.reason}"
-                                    f"（{'学生已补上' if b.fixed else '学生没有补上'}）"
+                                    f"（{_bp_outcome(b)}）"
                                     for b in self.breakpoints)
                 data = self.llm.json(prompts.ECHO_SYSTEM,
                                      prompts.ECHO_USER.format(timeline=timeline,
@@ -592,6 +598,14 @@ class EchoEngine:
             log.exception("引擎错误")
             self._emit(sid, "status", "listening")
             self._emit(sid, "error", f"{type(e).__name__}: {e}")
+
+
+def _bp_outcome(b: BreakPoint) -> str:
+    if b.fixed:
+        return "学生已补上"
+    if b.self_review:
+        return "学生选择自己看，未用 AI 补"
+    return "学生没有补上"
 
 
 def _as_list(v) -> List[str]:
