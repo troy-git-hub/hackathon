@@ -67,7 +67,9 @@ class Spacing:
 
 # ---------- 字体 ----------
 def font(size=12, weight=QFont.Normal):
-    f = QFont("Segoe UI Variable", size)
+    # 用像素字号，与 QSS 的 px 保持一致（pt 会随 DPI 放大，高分屏下会比 QSS 文本大一圈）
+    f = QFont("Segoe UI Variable")
+    f.setPixelSize(size + 1)
     f.setWeight(weight)
     return f
 

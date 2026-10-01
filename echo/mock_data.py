@@ -25,6 +25,7 @@ class BreakPoint:
     missing: str
     reason: str
     micro_lesson: str
+    note: str = ""         # 时间轴上的短备注
 
 
 @dataclass

@@ -100,7 +100,7 @@ class ConceptTimeline(QWidget):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(Spacing.SM)
 
-    def set_concepts(self, concepts, breakpoint_tc=None):
+    def set_concepts(self, concepts, breakpoint_tc=None, note="老师快速跳过了推导"):
         # 清空
         while self._layout.count():
             item = self._layout.takeAt(0)
@@ -111,10 +111,8 @@ class ConceptTimeline(QWidget):
         for i, c in enumerate(concepts):
             is_now = (i == len(concepts) - 1)
             is_bp = (breakpoint_tc and c.timecode == breakpoint_tc)
-            note = ""
-            if is_bp:
-                note = "老师快速跳过了推导"
-            node = TimelineNode(c, is_breakpoint=is_bp, is_now=is_now, note=note)
+            node = TimelineNode(c, is_breakpoint=is_bp, is_now=is_now,
+                                note=note if is_bp else "")
             self._layout.addWidget(node)
 
             # 节点之间的竖线
