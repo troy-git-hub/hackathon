@@ -20,7 +20,7 @@ def main():
     win = FloatingWindow()
     # 定位到屏幕右下角偏上
     screen = app.primaryScreen().availableGeometry()
-    win.move(screen.right() - 460, screen.bottom() - 520)
+    win.move(screen.right() - 300, screen.bottom() - 360)
     win.show()
 
     sys.exit(app.exec_())

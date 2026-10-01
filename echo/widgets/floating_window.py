@@ -13,6 +13,7 @@ from echo.theme import Colors, Radius, font, Spacing
 from echo.components.buttons import StateButton, PrimaryButton, GhostButton
 from echo.components.timeline import ConceptTimeline
 from echo.components.progress_bar import MasteryList
+from echo.components.pet import PetWidget, BubbleLabel
 from echo.mock_data import (MockStream, SAMPLE_CONCEPTS, find_breakpoint,
                             SAMPLE_ECHO_SKILLS, SAMPLE_REVIEW_CHAIN, Concept)
 
@@ -33,7 +34,7 @@ class FloatingWindow(QWidget):
         self._drag_pos = None
 
         self._build_ui()
-        self._switch_compact()
+        self._switch_pet()
 
         # 模拟实时 transcript
         self.timer = QTimer(self)
@@ -50,12 +51,13 @@ class FloatingWindow(QWidget):
         root.addWidget(self._build_title_bar())
         root.addSpacing(Spacing.SM)
 
-        # 内容堆叠
+        # 内容堆叠：pet -> panel -> expanded -> lesson -> echo
         self.stack = QStackedWidget()
-        self.stack.addWidget(self._build_compact())     # 0
-        self.stack.addWidget(self._build_expanded())    # 1
-        self.stack.addWidget(self._build_lesson())      # 2
-        self.stack.addWidget(self._build_echo())        # 3
+        self.stack.addWidget(self._build_pet())         # 0
+        self.stack.addWidget(self._build_panel())       # 1
+        self.stack.addWidget(self._build_expanded())    # 2
+        self.stack.addWidget(self._build_lesson())      # 3
+        self.stack.addWidget(self._build_echo())        # 4
         root.addWidget(self.stack)
 
     def _build_title_bar(self) -> QWidget:
@@ -82,8 +84,33 @@ class FloatingWindow(QWidget):
 
         return bar
 
-    # ----- 小窗 -----
-    def _build_compact(self) -> QWidget:
+    # ----- 桌宠态（默认外壳）-----
+    def _build_pet(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        lay.setAlignment(Qt.AlignCenter)
+
+        # 知识点气泡
+        self.bubble = BubbleLabel(f"老师正在讲：{self.current_concept.topic}")
+        self.bubble.setMaximumWidth(200)
+        lay.addWidget(self.bubble, 0, Qt.AlignCenter)
+
+        # 桌宠本体
+        self.pet = PetWidget()
+        self.pet.clicked.connect(self._switch_panel)
+        lay.addWidget(self.pet, 0, Qt.AlignCenter)
+
+        hint = QLabel("点我展开")
+        hint.setObjectName("Caption")
+        hint.setAlignment(Qt.AlignCenter)
+        lay.addWidget(hint)
+
+        return page
+
+    # ----- 功能面板（点桌宠后展开）-----
+    def _build_panel(self) -> QWidget:
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -126,6 +153,11 @@ class FloatingWindow(QWidget):
         btn_row.addWidget(self.btn_warn)
         btn_row.addWidget(self.btn_lost)
         lay.addLayout(btn_row)
+
+        # 返回桌宠
+        back = GhostButton("← 收起")
+        back.clicked.connect(self._switch_pet)
+        lay.addWidget(back, 0, Qt.AlignRight)
 
         return page
 
@@ -174,7 +206,7 @@ class FloatingWindow(QWidget):
         self.btn_fill = PrimaryButton("30 秒帮我补上")
         self.btn_fill.clicked.connect(self._go_lesson)
         self.btn_self = GhostButton("我自己看看")
-        self.btn_self.clicked.connect(self._switch_compact)
+        self.btn_self.clicked.connect(self._switch_panel)
         act.addWidget(self.btn_fill)
         act.addWidget(self.btn_self)
         lay.addLayout(act)
@@ -219,7 +251,7 @@ class FloatingWindow(QWidget):
 
         act = QHBoxLayout()
         self.btn_gotit = PrimaryButton("✓ 补上了，继续听课")
-        self.btn_gotit.clicked.connect(self._switch_compact)
+        self.btn_gotit.clicked.connect(self._switch_pet)
         act.addWidget(self.btn_gotit)
         lay.addLayout(act)
 
@@ -276,31 +308,36 @@ class FloatingWindow(QWidget):
         return page
 
     # ========== 状态切换 ==========
-    def _switch_compact(self):
+    def _switch_pet(self):
         self.stack.setCurrentIndex(0)
+        self.setFixedWidth(260)
+        self.adjustSize()
+
+    def _switch_panel(self):
+        self.stack.setCurrentIndex(1)
         self.setFixedWidth(420)
         self.adjustSize()
 
     def _switch_expanded(self):
-        self.stack.setCurrentIndex(1)
+        self.stack.setCurrentIndex(2)
         self.setFixedWidth(520)
         self.adjustSize()
 
     def _go_lesson(self):
-        self.stack.setCurrentIndex(2)
+        self.stack.setCurrentIndex(3)
         self.setFixedWidth(520)
         self.adjustSize()
 
     def _go_echo(self):
         self.timer.stop()
-        self.stack.setCurrentIndex(3)
+        self.stack.setCurrentIndex(4)
         self.setFixedWidth(540)
         self.adjustSize()
 
     def _restart(self):
         self.stream.reset()
         self.timer.start(3000)
-        self._switch_compact()
+        self._switch_pet()
 
     # ========== 按钮回调 ==========
     def _on_ok(self):
@@ -326,6 +363,9 @@ class FloatingWindow(QWidget):
         tc, text = nxt
         self.current_tc = tc
         self.tc_lbl.setText(tc)
+        # 同步气泡
+        short = text if len(text) <= 16 else text[:15] + "…"
+        self.bubble.setText(f"老师正在讲：{short}")
         # 简单滚动进度
         w = int(340 * (self.stream._idx / len(self.stream._lines)))
         self.progress.setFixedWidth(max(20, w))
