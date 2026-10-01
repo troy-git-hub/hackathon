@@ -103,7 +103,7 @@ class FloatingWindow(QWidget):
         self.progress.setStyleSheet(
             f"background-color: {Colors.PRIMARY}; border-radius: 2px;"
         )
-        self.progress.setFixedWidth(240)
+        self.progress.setFixedWidth(340)
         lay.addWidget(self.progress)
 
         # 时间
@@ -278,23 +278,23 @@ class FloatingWindow(QWidget):
     # ========== 状态切换 ==========
     def _switch_compact(self):
         self.stack.setCurrentIndex(0)
-        self.setFixedWidth(300)
+        self.setFixedWidth(420)
         self.adjustSize()
 
     def _switch_expanded(self):
         self.stack.setCurrentIndex(1)
-        self.setFixedWidth(360)
+        self.setFixedWidth(520)
         self.adjustSize()
 
     def _go_lesson(self):
         self.stack.setCurrentIndex(2)
-        self.setFixedWidth(360)
+        self.setFixedWidth(520)
         self.adjustSize()
 
     def _go_echo(self):
         self.timer.stop()
         self.stack.setCurrentIndex(3)
-        self.setFixedWidth(380)
+        self.setFixedWidth(540)
         self.adjustSize()
 
     def _restart(self):
@@ -327,7 +327,7 @@ class FloatingWindow(QWidget):
         self.current_tc = tc
         self.tc_lbl.setText(tc)
         # 简单滚动进度
-        w = int(240 * (self.stream._idx / len(self.stream._lines)))
+        w = int(340 * (self.stream._idx / len(self.stream._lines)))
         self.progress.setFixedWidth(max(20, w))
 
     # ========== 拖拽 ==========
