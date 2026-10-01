@@ -26,13 +26,17 @@ class BreakPoint:
     reason: str
     micro_lesson: str
     note: str = ""         # 时间轴上的短备注
+    known: str = ""        # 三段式补课 ①你已经知道什么
+    step: str = ""         # ②中间漏的那一步
+    now: str = ""          # ③所以现在能听懂什么
+    fixed: bool = False    # 学生点了「补上了」
 
 
 @dataclass
 class EchoSkill:
     name: str
     mastery: float         # 0~1
-    status: str            # ok / warn / lost
+    status: str            # ok 已跟上 / fixed 掉队过但已补上 / review 待回看
 
 
 # ---------- 一节示例课：概率论 / 贝叶斯 ----------
@@ -71,13 +75,17 @@ SAMPLE_BREAKPOINT = BreakPoint(
         "         P(A|B) = P(B|A)·P(A) / P(B)。\n\n"
         "这就是贝叶斯公式。它只是把「A 交 B」用两种方式表示了一下。"
     ),
+    known="条件概率 P(A|B) = P(A∩B) / P(B)",
+    step=("同理 P(B|A) = P(A∩B) / P(A)，所以 P(A∩B) = P(B|A)·P(A)\n"
+          "把它代回 P(A|B) 的分子：P(A|B) = P(B|A)·P(A) / P(B)"),
+    now="后验概率就是公式左边的 P(A|B)：看到结果 B 之后，对 A 更新后的信念",
 )
 
 SAMPLE_ECHO_SKILLS = [
     EchoSkill("极限", 1.00, "ok"),
     EchoSkill("导数定义", 0.85, "ok"),
-    EchoSkill("瞬时变化率", 0.55, "warn"),
-    EchoSkill("链式法则", 0.15, "lost"),
+    EchoSkill("瞬时变化率", 0.55, "fixed"),
+    EchoSkill("链式法则", 0.15, "review"),
 ]
 
 SAMPLE_REVIEW_CHAIN = ["链式法则", "复合函数", "函数复合"]

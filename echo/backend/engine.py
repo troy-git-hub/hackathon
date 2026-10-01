@@ -73,6 +73,7 @@ class _ConceptEntry:
     t: float
     concept: Concept
     is_bp: bool = False
+    fixed: bool = False     # 该断点已被学生「补上了」
 
 
 class EchoEngine:
@@ -293,18 +294,24 @@ class EchoEngine:
                             missing=str(data.get("missing") or ""),
                             reason=str(data.get("reason") or ""),
                             micro_lesson=str(data.get("micro_lesson") or ""),
-                            note=str(data.get("note") or ""))
+                            note=str(data.get("note") or ""),
+                            known=str(data.get("known") or ""),
+                            step=str(data.get("step") or ""),
+                            now=str(data.get("now") or ""))
         elif self.llm and window:
             bp = self._heuristic_breakpoint(cur)
         elif self.llm:
             bp = BreakPoint("", cur, "Echo 还没听到课堂内容",
                             "请确认网课正在播放，且声音没有静音",
                             "Echo 会自动抓取电脑正在播放的声音。开始播放网课后，等老师讲一两分钟再点「我掉队了」。",
-                            note="还没有内容")
+                            note="还没有内容", known="网课正在播放",
+                            step="确认声音没有静音\n等老师讲一两分钟",
+                            now="再点「我掉队了」，Echo 就能帮你找断点")
         else:
             s = SAMPLE_BREAKPOINT
             bp = BreakPoint(s.breakpoint_tc, s.concept, s.missing, s.reason,
-                            s.micro_lesson, note="老师快速跳过了推导")
+                            s.micro_lesson, note="老师快速跳过了推导",
+                            known=s.known, step=s.step, now=s.now)
 
         if flush:
             # 只短暂等一下：来得及就把最新知识点并进时间轴，来不及也先出断点（concept 稍后照常推送）
@@ -328,7 +335,9 @@ class EchoEngine:
             idx = max(0, len(entries) - 2)
         if not entries:
             return BreakPoint("", cur, f"「{cur}」是怎么来的？", "这一段讲得比较快",
-                              "Echo 暂时连不上 AI，建议回看最近 1~2 分钟的课程内容。", note="讲得比较快")
+                              "Echo 暂时连不上 AI，建议回看最近 1~2 分钟的课程内容。", note="讲得比较快",
+                              known="前面讲过的定义", step="回看最近 1~2 分钟的课程内容",
+                              now=f"再接上老师现在讲的「{cur}」")
         c = entries[idx].concept
         pre = "、".join(c.prerequisites) or "前面的定义"
         lesson = (f"你可能在「{c.topic}」这里掉队了。\n"
@@ -336,7 +345,9 @@ class EchoEngine:
                   f"它依赖的前置知识是：{pre}，先确认这些你都清楚。\n"
                   f"Echo 暂时连不上 AI，建议回看 {c.timecode} 附近的内容，再接上老师现在讲的「{cur}」。")
         return BreakPoint(c.timecode, c.topic, f"「{c.topic}」是怎么来的？",
-                          f"这里依赖{pre}，讲得比较快", lesson, note="这里讲得比较快")
+                          f"这里依赖{pre}，讲得比较快", lesson, note="这里讲得比较快",
+                          known=pre, step=f"{c.summary}\n回看 {c.timecode} 附近，把这一步和{pre}对上",
+                          now=f"再接上老师现在讲的「{cur}」")
 
     def _attach_breakpoint(self, bp: BreakPoint) -> List[Concept]:
         """把断点吸附到时间轴上的某个 concept，返回给 UI 展示的那一段时间轴。"""
@@ -379,6 +390,18 @@ class EchoEngine:
                 shown.append(entries[-1])
             return [e.concept for e in shown]
 
+    def mark_fixed(self):
+        """学生点了「✓ 补上了」：把最近一个断点标记为已补上。"""
+        with self._lock:
+            if not self.breakpoints:
+                return
+            bp = self.breakpoints[-1]
+            bp.fixed = True
+            for e in reversed(self.entries):
+                if e.is_bp and e.concept.timecode == bp.breakpoint_tc:
+                    e.fixed = True
+                    break
+
     # ================= 回响 =================
     def end_lesson(self):
         """课程结束：异步生成回响页数据。"""
@@ -402,6 +425,7 @@ class EchoEngine:
                     timeline = self._timeline_text()
                     feedback = self._feedback_text()
                     bps = "\n".join(f"- {b.breakpoint_tc} {b.concept}：缺失「{b.missing}」，{b.reason}"
+                                    f"（{'学生已补上' if b.fixed else '学生没有补上'}）"
                                     for b in self.breakpoints)
                 data = self.llm.json(prompts.ECHO_SYSTEM,
                                      prompts.ECHO_USER.format(timeline=timeline,
@@ -414,7 +438,8 @@ class EchoEngine:
                         m = max(0.0, min(1.0, float(s.get("mastery", 0.5))))
                     except (TypeError, ValueError):
                         m = 0.5
-                    st = s.get("status") if s.get("status") in ("ok", "warn", "lost") else _status_from_mastery(m)
+                    st = s.get("status")
+                    st = st if st in ("ok", "fixed", "review") else _status_from_mastery(m)
                     skills.append(EchoSkill(str(s.get("name", "")), m, st))
                 chain = [str(x) for x in (data.get("review_chain") or []) if x]
                 if skills:
@@ -435,7 +460,13 @@ class EchoEngine:
         skills = []
         for e, fb in zip(entries, fbs):
             m = min([score[f] for f in fb], default=0.85)
-            skills.append(EchoSkill(e.concept.topic, m, _status_from_mastery(m)))
+            if e.is_bp and e.fixed:
+                m, st = 0.6, "fixed"
+            elif e.is_bp or "warn" in fb or "lost" in fb:
+                st = "review"
+            else:
+                st = "ok"
+            skills.append(EchoSkill(e.concept.topic, m, st))
         chain = []
         if bps:
             b = bps[0]
@@ -452,7 +483,7 @@ class EchoEngine:
             c = e.concept
             fb = "、".join(FEEDBACK_LABEL[f] for f in self._feedback_of(i) if f in FEEDBACK_LABEL)
             if e.is_bp:
-                fb = (fb + "、" if fb else "") + "⚠ 掉队断点"
+                fb = (fb + "、" if fb else "") + ("⚠ 掉队断点（已补上）" if e.fixed else "⚠ 掉队断点")
             out.append(f"[{c.timecode}] {c.topic} —— {c.summary}"
                        f"（前置：{'、'.join(c.prerequisites) or '无'}）"
                        + (f"  学生反馈：{fb}" if fb else ""))
@@ -517,4 +548,4 @@ def _merge(a, b) -> List[str]:
 
 
 def _status_from_mastery(m: float) -> str:
-    return "ok" if m >= 0.75 else "warn" if m >= 0.4 else "lost"
+    return "ok" if m >= 0.75 else "review"

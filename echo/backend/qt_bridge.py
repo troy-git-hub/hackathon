@@ -52,6 +52,10 @@ class EchoBridge(QObject):
     def feedback(self, kind: str):
         self.engine.feedback(kind)
 
+    def mark_fixed(self):
+        """学生点了「✓ 补上了，继续听课」。"""
+        self.engine.mark_fixed()
+
     def end_lesson(self):
         if self.source:
             self.source.stop()

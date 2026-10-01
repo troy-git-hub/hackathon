@@ -30,7 +30,9 @@ def on_bp(bp, shown):
         mark = " ⚠" if c.timecode == bp.breakpoint_tc else ""
         print(f"  {c.timecode} {c.topic} [{c.status}]{mark}")
     print(f"  断点 {bp.breakpoint_tc} · {bp.concept} · {bp.note}")
-    print(f"  缺失：{bp.missing}\n  原因：{bp.reason}\n  补课：\n{bp.micro_lesson}\n")
+    print(f"  缺失：{bp.missing}\n  原因：{bp.reason}")
+    print(f"  ① 你已经知道：{bp.known}\n  ② 漏的一步：\n{bp.step}\n  ③ 现在能听懂：{bp.now}")
+    print(f"  补课：\n{bp.micro_lesson}\n")
     bp_done.set()
 
 
@@ -64,6 +66,8 @@ for i, (t, text) in enumerate(load_script()):
         eng.feedback("lost")
         print("  >>> 学生点了「! 我掉队了」")
         bp_done.wait(90)
+        eng.mark_fixed()
+        print("  >>> 学生点了「✓ 补上了」")
 
 eng.end_lesson()
 done.wait(90)
