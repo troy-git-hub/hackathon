@@ -12,42 +12,47 @@ from echo.mock_data import EchoSkill
 STATUS_TAG = {"ok": "✓", "warn": "?", "lost": "!"}
 STATUS_BAR_OBJ = {"ok": "Ok", "warn": "Warn", "lost": "Lost"}
 STATUS_TAG_COLOR = {"ok": Colors.SUCCESS, "warn": Colors.WARNING, "lost": Colors.DANGER}
+STATUS_TAG_BG = {"ok": Colors.SUCCESS_BG, "warn": "#FFF4CE", "lost": Colors.DANGER_BG}
 
 
 class MasteryRow(QWidget):
     def __init__(self, skill: EchoSkill, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, Spacing.SM, 0, Spacing.SM)
+        layout.setContentsMargins(0, 5, 0, 5)
         layout.setSpacing(Spacing.MD)
 
+        # 名称：固定列宽，过长换行而不是截断
         name = QLabel(skill.name)
-        name.setFixedWidth(100)
-        name.setFont(font(12, QFont.Medium))
-        layout.addWidget(name)
+        name.setFixedWidth(128)
+        name.setWordWrap(True)
+        name.setToolTip(skill.name)
+        name.setFont(font(13, QFont.DemiBold if skill.status == "lost" else QFont.Normal))
+        layout.addWidget(name, 0, Qt.AlignVCenter)
 
         bar = QProgressBar()
         bar.setObjectName(STATUS_BAR_OBJ.get(skill.status, ""))
         bar.setRange(0, 100)
         bar.setValue(int(skill.mastery * 100))
         bar.setTextVisible(False)
-        bar.setFixedHeight(10)
-        layout.addWidget(bar, 1)
+        bar.setFixedHeight(8)
+        layout.addWidget(bar, 1, Qt.AlignVCenter)
 
         pct = QLabel(f"{int(skill.mastery * 100)}%")
-        pct.setObjectName("BodySecondary")
-        pct.setFixedWidth(40)
-        pct.setAlignment(Qt.AlignRight)
+        pct.setObjectName("Timecode")
+        pct.setFixedWidth(34)
+        pct.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         layout.addWidget(pct)
 
-        tag = QLabel(STATUS_TAG.get(skill.status, ""))
-        tag.setFixedWidth(20)
+        st = skill.status if skill.status in STATUS_TAG else "warn"
+        tag = QLabel(STATUS_TAG[st])
+        tag.setFixedSize(20, 20)
         tag.setAlignment(Qt.AlignCenter)
         tag.setStyleSheet(
-            f"color: {STATUS_TAG_COLOR.get(skill.status, Colors.TEXT_SECONDARY)};"
-            f"font-weight: 700;"
+            f"color: {STATUS_TAG_COLOR[st]}; background: {STATUS_TAG_BG[st]};"
+            f"border-radius: 10px; font-weight: 700; font-size: 11px;"
         )
-        layout.addWidget(tag)
+        layout.addWidget(tag, 0, Qt.AlignVCenter)
 
 
 class MasteryList(QWidget):
@@ -65,4 +70,4 @@ class MasteryList(QWidget):
                 w.deleteLater()
         for s in skills:
             self._layout.addWidget(MasteryRow(s))
-        self._layout.addStretch()
+        self.setVisible(bool(skills))

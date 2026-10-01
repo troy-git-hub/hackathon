@@ -21,7 +21,7 @@ EMOTION_FILES = {
     "fixed": "happy.png",
 }
 
-ASSETS_DIR = os.path.join("assets", "emojis")
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", "emojis")
 
 
 class PetWidget(QWidget):
@@ -81,9 +81,26 @@ class PetWidget(QWidget):
         self._hover = False
         self.update()
 
+    # 轻点 = 展开；按住拖动 = 移动整个窗口
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
-            self.clicked.emit()
+            self._press_global = e.globalPos()
+            self._win_origin = self.window().pos()
+            self._dragged = False
+
+    def mouseMoveEvent(self, e):
+        if getattr(self, "_press_global", None) is not None and e.buttons() & Qt.LeftButton:
+            delta = e.globalPos() - self._press_global
+            if delta.manhattanLength() > 4:
+                self._dragged = True
+            if self._dragged:
+                self.window().move(self._win_origin + delta)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton and getattr(self, "_press_global", None) is not None:
+            if not self._dragged:
+                self.clicked.emit()
+            self._press_global = None
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -214,14 +231,15 @@ class BubbleLabel(QLabel):
         super().__init__(text, parent)
         self.setWordWrap(True)
         self.setAlignment(Qt.AlignCenter)
-        self.setFont(QFont("Segoe UI Variable", 11, QFont.DemiBold))
         self.setStyleSheet("""
             QLabel {
                 background-color: #FFFFFF;
                 color: #1A1A1A;
                 border-radius: 14px;
                 padding: 8px 14px;
-                border: 1px solid #E5E5E5;
+                border: 1px solid #E0E0E0;
+                font-size: 13px;
+                font-weight: 600;
             }
         """)
         self.adjustSize()

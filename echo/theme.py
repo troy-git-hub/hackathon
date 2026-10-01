@@ -94,13 +94,13 @@ QWidget#SurfaceCard {{
 }}
 
 QLabel#Title {{
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
     color: {Colors.TEXT_PRIMARY};
 }}
 
 QLabel#Topic {{
-    font-size: 20px;
+    font-size: 19px;
     font-weight: 700;
     color: {Colors.TEXT_PRIMARY};
 }}
@@ -121,7 +121,7 @@ QLabel#BodySecondary {{
 }}
 
 QLabel#Timecode {{
-    font-size: 11px;
+    font-size: 12px;
     color: {Colors.TEXT_SECONDARY};
     font-family: "Consolas", "Cascadia Code", monospace;
 }}
@@ -175,6 +175,49 @@ QPushButton#Ghost:hover {{
     color: {Colors.TEXT_PRIMARY};
 }}
 
+QPushButton#Lost {{
+    background-color: {Colors.DANGER};
+    color: {Colors.TEXT_ON_ACCENT};
+    border: 1px solid {Colors.DANGER};
+    border-radius: {Radius.MD}px;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 8px 16px;
+}}
+QPushButton#Lost:hover {{
+    background-color: #B3262A;
+    border-color: #B3262A;
+}}
+QPushButton#Lost:pressed {{
+    background-color: #8E1F22;
+}}
+
+QPushButton#Primary:disabled {{
+    background-color: {Colors.BORDER};
+    border-color: {Colors.BORDER};
+    color: {Colors.TEXT_DISABLED};
+}}
+
+QPushButton#Small {{
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: {Radius.SM}px;
+    padding: 2px 8px;
+    font-size: 12px;
+    color: {Colors.TEXT_SECONDARY};
+}}
+QPushButton#Small:hover {{
+    background-color: rgba(0, 0, 0, 0.05);
+    color: {Colors.TEXT_PRIMARY};
+}}
+
+QToolTip {{
+    background-color: {Colors.SURFACE};
+    color: {Colors.TEXT_PRIMARY};
+    border: 1px solid {Colors.BORDER};
+    padding: 4px 8px;
+}}
+
 QPushButton#Pill {{
     border-radius: {Radius.PILL}px;
     padding: 4px 12px;
@@ -185,7 +228,6 @@ QProgressBar {{
     background-color: {Colors.BORDER};
     border: none;
     border-radius: {Radius.SM}px;
-    height: 8px;
     text-align: center;
 }}
 QProgressBar::chunk {{

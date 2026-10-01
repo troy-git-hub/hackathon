@@ -21,28 +21,31 @@ class StateButton(QPushButton):
         self.setFont(font(12, QFont.Medium))
 
     def _style_normal(self):
+        # (前景色, 悬停底色, 悬停边框)
         base = {
-            "default": (Colors.SURFACE, Colors.BORDER, Colors.TEXT_PRIMARY),
-            "ok":      (Colors.SUCCESS_BG, "#A6E0A6", Colors.SUCCESS),
-            "warn":    (Colors.WARNING_BG, "#F5D28A", Colors.WARNING),
-            "lost":    (Colors.DANGER_BG, "#F3A8AD", Colors.DANGER),
+            "default": (Colors.TEXT_PRIMARY, Colors.SURFACE_HOVER, Colors.BORDER_STRONG),
+            "ok":      (Colors.SUCCESS, Colors.SUCCESS_BG, "#A6E0A6"),
+            "warn":    (Colors.WARNING, "#FFF4CE", "#F5D28A"),
+            "lost":    (Colors.DANGER, Colors.DANGER_BG, "#F3A8AD"),
         }
-        bg, border, fg = base.get(self.kind, base["default"])
+        fg, hover_bg, hover_border = base.get(self.kind, base["default"])
         self.setStyleSheet(f"""
             QPushButton {{
-                background-color: {bg};
-                border: 1px solid {border};
+                background-color: {Colors.SURFACE};
+                border: 1px solid {Colors.BORDER};
                 border-radius: {Radius.MD}px;
                 color: {fg};
-                padding: 6px 16px;
+                padding: 6px 12px;
+                font-size: 13px;
                 font-weight: 600;
             }}
             QPushButton:hover {{
-                background-color: {Colors.SURFACE_HOVER if self.kind == 'default' else bg};
-                border-color: {Colors.BORDER_STRONG if self.kind == 'default' else border};
+                background-color: {hover_bg};
+                border-color: {hover_border};
             }}
             QPushButton:pressed {{
-                background-color: {Colors.SURFACE_PRESSED if self.kind == 'default' else bg};
+                background-color: {hover_bg};
+                border-color: {fg};
             }}
         """)
 
