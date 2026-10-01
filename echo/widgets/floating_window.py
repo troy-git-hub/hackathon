@@ -6,7 +6,7 @@ Echo - 悬浮主窗口（学习工具风格）
   1 mini     折叠条：猫头像 + 知识点 + 「掉队」
   2 break    断点页（产品主画面）：刚才会的 → 掉队的那一步 → 老师讲到这里 + 你缺的这一步
   3 lesson   补课三段式：你已经知道 → 中间漏了这一步 → 所以现在你能听懂
-  4 echo     回响：知识路径（已跟上 / 已补上 / 待回看）
+  4 echo     回响：每个知识点一条掌握度条 + ✓ ? ! ；你的掉队点 ↓ 前置 ↓ 建议复习
 """
 import html
 import re
@@ -19,8 +19,8 @@ from PyQt5.QtGui import QFont, QCursor, QPainter, QPainterPath, QColor, QBrush, 
 
 from echo.theme import Colors, Radius, font, Spacing
 from echo.components.loading import PulseDots
-from echo.components.study import (CatAvatar, BreakPath, LessonStep, EchoRow,
-                                   echo_status)
+from echo.components.study import (CatAvatar, BreakPath, LessonStep, SkillRow,
+                                   ReviewChain, echo_status, echo_mark)
 from echo.mock_data import Concept
 from echo.backend.engine import parse_tc
 from echo.backend.qt_bridge import EchoBridge
@@ -88,6 +88,7 @@ class FloatingWindow(QWidget):
         self.last_bp = None
         self.last_bp_concepts = []
         self._fixed = set()          # 学生点过「补上了」的断点知识点
+        self._self_look = set()      # 学生点了「我自己看看」的断点知识点
         self._drag_pos = None
         self._page = LISTEN
 
@@ -275,9 +276,15 @@ class FloatingWindow(QWidget):
         ml.addWidget(self.reason_lbl)
         lay.addWidget(self.miss_card)
 
+        row = QHBoxLayout()
+        row.setSpacing(Spacing.SM)
         self.btn_fill = _btn("30 秒补上这一步", "Accent", self._go_lesson)
         self.btn_fill.setMinimumHeight(44)
-        lay.addWidget(self.btn_fill)
+        row.addWidget(self.btn_fill, 3)
+        self.btn_self = _btn("我自己看看", "Quiet", self._on_self_look, "不用 AI 讲，收起来回到课堂")
+        self.btn_self.setMinimumHeight(44)
+        row.addWidget(self.btn_self, 2)
+        lay.addLayout(row)
         return page
 
     # ----- 3 补课三段式 -----
@@ -341,22 +348,7 @@ class FloatingWindow(QWidget):
         self.echo_path_lay.setSpacing(0)
         lay.addWidget(self.echo_path)
 
-        self.review_card = QFrame()
-        self.review_card.setObjectName("ReviewCard")
-        self.review_card.setStyleSheet(
-            f"QFrame#ReviewCard {{ background: {Colors.SURFACE}; border: 1px solid {Colors.BORDER};"
-            f"border-radius: {Radius.MD}px; }}")
-        rl = QVBoxLayout(self.review_card)
-        rl.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
-        rl.setSpacing(4)
-        rl.addWidget(_label("建议先回看", f"color: {Colors.ACCENT}; font-size: 12px; font-weight: 700;"))
-        self.review_first = _label("", f"color: {Colors.TEXT_PRIMARY}; font-size: 17px; font-weight: 700;",
-                                   wrap=True)
-        rl.addWidget(self.review_first)
-        self.review_chain = _label("", CAPTION, wrap=True)
-        rl.addWidget(self.review_chain)
-        self.review_tip = _label("", f"color: {Colors.TEXT_SECONDARY}; font-size: 13px;", wrap=True)
-        rl.addWidget(self.review_tip)
+        self.review_card = ReviewChain()
         lay.addWidget(self.review_card)
 
         row = QHBoxLayout()
@@ -444,6 +436,7 @@ class FloatingWindow(QWidget):
         self.current_concept = None
         self.last_bp = None
         self._fixed.clear()
+        self._self_look.clear()
         self.topic_lbl.setText("等待老师开讲…")
         self.mini_topic.setText("等待老师开讲…")
         self.summary_lbl.setText(WAIT_HINT)
@@ -488,6 +481,16 @@ class FloatingWindow(QWidget):
         if hasattr(self.echo, "mark_fixed"):
             self.echo.mark_fixed()
         self._cat("fixed", 2500)
+        self._show_page(LISTEN)
+
+    def _on_self_look(self):
+        # 学生自己处理：不调 LLM，收起断点页；断点还没出来就只是取消
+        if self.last_bp and self.btn_fill.isEnabled():
+            self._self_look.add(self.last_bp.concept)
+            if hasattr(self.echo, "mark_self"):
+                self.echo.mark_self()
+        self.bp_dots.stop()
+        self._cat("ok", 1500)
         self._show_page(LISTEN)
 
     def _ack(self, btn):
@@ -572,31 +575,29 @@ class FloatingWindow(QWidget):
             w = self.echo_path_lay.takeAt(0).widget()
             if w:
                 w.deleteLater()
+
+        def hit(name, names):
+            return any(n in name or name in n for n in names)
+
         rows = []
-        for s in report.skills:
-            st = echo_status(s.status)
-            if st == "review" and any(f in s.name or s.name in f for f in self._fixed):
+        for sk in report.skills:
+            st = echo_status(sk.status)
+            note = ""
+            if st == "review" and hit(sk.name, self._fixed):
                 st = "fixed"
-            rows.append((s.name, st))
-        for i, (name, st) in enumerate(rows):
-            self.echo_path_lay.addWidget(EchoRow(name, st, first=(i == 0), last=(i == len(rows) - 1)))
+            if st == "fixed":
+                note = "掉队过 · 已补上"
+            elif hit(sk.name, self._self_look):
+                note = "掉队过 · 自己看了"
+            rows.append((sk.name, sk.mastery, echo_mark(st, sk.mastery), note))
+        for name, m, mark, note in rows:
+            self.echo_path_lay.addWidget(SkillRow(name, m, mark, note))
         self.echo_path.setVisible(bool(rows))
 
-        cnt = {k: sum(1 for _, s in rows if s == k) for k in ("ok", "fixed", "review")}
-        self.echo_sub.setText(f"已跟上 {cnt['ok']} · 已补上 {cnt['fixed']} · 待回看 {cnt['review']}")
-
-        chain = [c for c in report.review_chain if c]
-        if chain:
-            # review_chain 是「掉队点 → … → 根源」，展示时反过来当复习顺序
-            order = list(reversed(chain))
-            self.review_first.setText(order[0])
-            self.review_chain.setText("复习顺序：" + "  →  ".join(order) if len(order) > 1 else "")
-            self.review_chain.setVisible(len(chain) > 1)
-            self.review_tip.setText(report.suggestion or "")
-            self.review_tip.setVisible(bool(report.suggestion))
-            self.review_card.show()
-        else:
-            self.review_card.hide()
+        cnt = {k: sum(1 for r in rows if r[2] == k) for k in ("ok", "unsure", "lost")}
+        self.echo_sub.setText(f"✓ 跟上了 {cnt['ok']} · ? 有点懵 {cnt['unsure']} · ! 掉队了 {cnt['lost']}")
+        self.review_card.setVisible(self.review_card.set_chain(report.review_chain, report.suggestion))
+        cnt["review"] = cnt["unsure"] + cnt["lost"]
         self._cat("ok" if not cnt["review"] else "idle")
         self._fit()
 

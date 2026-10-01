@@ -3,11 +3,12 @@ Echo - 学习工具风格组件
   CatAvatar   矢量线稿猫头（只负责情绪反馈，随主题变色，高分屏清晰）
   BreakPath   断点页三节点：刚才会的 → 掉队的那一步 → 老师讲到这里
   LessonStep  补课页三段式中的一段（左侧轨道 + 标签 + 内容）
-  EchoRow     回响页知识路径的一行：已跟上 / 已补上 / 待回看
+  SkillRow    回响页一行：知识点 + 掌握度条 + ✓ ? ! 三态
+  ReviewChain 回响页复习链：你的掉队点 ↓ 前置 ↓ 建议复习
 """
 import math
 
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
 from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer
 from PyQt5.QtGui import QPainter, QPainterPath, QColor, QPen, QBrush, QFont
 
@@ -337,60 +338,169 @@ class LessonStep(QWidget):
         p.end()
 
 
-# ======================= 回响知识路径 =======================
-ECHO_STATUS = {
-    "ok":     ("已跟上", "OK_FG", "OK_SOFT"),
-    "fixed":  ("已补上", "ACCENT", "SURFACE_HOVER"),
-    "review": ("待回看", "ON_ACCENT", "ACCENT"),
-}
-
-
+# ======================= 回响：掌握度条 + 复习链 =======================
 def echo_status(raw):
     if raw in ("ok", "fixed"):
         return raw
     return "review"
 
 
-class EchoRow(QWidget):
-    def __init__(self, name, status, first=False, last=False, parent=None):
+def echo_mark(status, mastery):
+    """回响行的三态图标：✓ 跟上了（含已补上）/ ? 有点懵 / ! 掉队了。"""
+    if status in ("ok", "fixed"):
+        return "ok"
+    return "unsure" if mastery >= 0.5 else "lost"
+
+
+# mark → (图标字, 颜色键, 实心?, 进度条颜色键)
+MARK_STYLE = {
+    "ok":     ("✓", "OK_FG", True, "OK_FG"),
+    "unsure": ("?", "ACCENT", False, "ACCENT_BORDER"),
+    "lost":   ("!", "ACCENT", True, "ACCENT"),
+}
+
+
+class _MasteryBar(QWidget):
+    def __init__(self, value, color, parent=None):
         super().__init__(parent)
-        self.status, self.first, self.last = status, first, last
-        text, fg, bg = ECHO_STATUS[status]
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(TEXT_LEFT, 6, 0, 6)
-        lay.setSpacing(Spacing.SM)
-        n = QLabel(name)
-        n.setWordWrap(True)
-        n.setToolTip(name)
-        n.setStyleSheet(f"color: {Colors.TEXT_PRIMARY if status != 'ok' else Colors.TEXT_SECONDARY};"
-                        f"font-size: 14px; font-weight: {600 if status == 'review' else 400};"
-                        "background: transparent;")
-        lay.addWidget(n, 1)
-        chip = QLabel(text)
-        chip.setStyleSheet(f"color: {getattr(Colors, fg)}; background: {getattr(Colors, bg)};"
-                           f"border-radius: 10px; padding: 2px 10px; font-size: 12px; font-weight: 600;"
-                           + (f"border: 1px solid {Colors.ACCENT_BORDER};" if status == "fixed" else ""))
-        lay.addWidget(chip, 0, Qt.AlignVCenter)
+        self.value = max(0.06, min(1.0, value))   # 再低也露一点头，截图里看得出是条
+        self.color = QColor(color)
+        self.setFixedHeight(8)
+        self.setMinimumWidth(80)
 
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        cy = self.height() / 2
-        p.setPen(QPen(QColor(Colors.BORDER_STRONG), 2))
-        if not self.first:
-            p.drawLine(QPointF(RAIL_X, 0), QPointF(RAIL_X, cy - 6))
-        if not self.last:
-            p.drawLine(QPointF(RAIL_X, cy + 6), QPointF(RAIL_X, self.height()))
-        if self.status == "ok":
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor(Colors.OK_FG))
-            p.drawEllipse(QPointF(RAIL_X, cy), 4, 4)
-        elif self.status == "fixed":
-            p.setPen(QPen(QColor(Colors.ACCENT), 2))
-            p.setBrush(QColor(Colors.WINDOW_BG))
-            p.drawEllipse(QPointF(RAIL_X, cy), 5, 5)
-        else:
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor(Colors.ACCENT))
-            p.drawEllipse(QPointF(RAIL_X, cy), 6, 6)
+        p.setPen(Qt.NoPen)
+        r = QRectF(self.rect())
+        p.setBrush(QColor(Colors.BORDER))
+        p.drawRoundedRect(r, 4, 4)
+        p.setBrush(self.color)
+        p.drawRoundedRect(QRectF(0, 0, r.width() * self.value, r.height()), 4, 4)
         p.end()
+
+
+class _MarkIcon(QWidget):
+    def __init__(self, mark, parent=None):
+        super().__init__(parent)
+        self.glyph, ck, self.solid, _ = MARK_STYLE[mark]
+        self.color = QColor(getattr(Colors, ck))
+        self.setFixedSize(20, 20)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(1.5, 1.5, 17, 17)
+        if self.solid:
+            p.setPen(Qt.NoPen)
+            p.setBrush(self.color)
+            fg = QColor(Colors.ON_ACCENT)
+        else:
+            p.setPen(QPen(self.color, 1.6))
+            p.setBrush(QColor(Colors.WINDOW_BG))
+            fg = self.color
+        p.drawEllipse(r)
+        if self.glyph == "✓":            # 对勾自己画，小尺寸下比字形清楚
+            path = QPainterPath()
+            path.moveTo(5.8, 10.4)
+            path.lineTo(8.8, 13.3)
+            path.lineTo(14.4, 7.2)
+            p.setPen(QPen(fg, 2.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            p.setBrush(Qt.NoBrush)
+            p.drawPath(path)
+        else:
+            p.setPen(fg)
+            p.setFont(font(11, QFont.Black))
+            p.drawText(r, Qt.AlignCenter, self.glyph)
+        p.end()
+
+
+class SkillRow(QWidget):
+    """回响页一行：知识点 ━━━━━░░ ✓ / ? / !；note 是名字下的小字（已补上 / 自己看了）。"""
+
+    def __init__(self, name, mastery, mark, note="", parent=None):
+        super().__init__(parent)
+        _, _, _, bar_ck = MARK_STYLE[mark]
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 5, 0, 5)
+        lay.setSpacing(Spacing.MD)
+
+        col = QVBoxLayout()
+        col.setSpacing(0)
+        n = QLabel(name)
+        n.setFixedWidth(128)
+        n.setWordWrap(True)
+        n.setToolTip(name)
+        n.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-size: 14px;"
+                        f"font-weight: {600 if mark == 'lost' else 400}; background: transparent;")
+        col.addWidget(n)
+        if note:
+            t = QLabel(note)
+            t.setStyleSheet(f"color: {Colors.ACCENT}; font-size: 11px; background: transparent;")
+            col.addWidget(t)
+        lay.addLayout(col)
+
+        lay.addWidget(_MasteryBar(mastery, getattr(Colors, bar_ck)), 1, Qt.AlignVCenter)
+        lay.addWidget(_MarkIcon(mark), 0, Qt.AlignVCenter)
+
+
+class ReviewChain(QFrame):
+    """你的掉队点 ↓ 前置 ↓ 建议复习：根源。chain 为「掉队点 → … → 根源」。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("ReviewChain")
+        self.setStyleSheet(
+            f"QFrame#ReviewChain {{ background: {Colors.SURFACE}; border: 1px solid {Colors.BORDER};"
+            f"border-radius: {Radius.MD}px; }}")
+        self._lay = QVBoxLayout(self)
+        self._lay.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        self._lay.setSpacing(2)
+
+    def _add(self, text, style):
+        l = QLabel(text)
+        l.setWordWrap(True)
+        l.setAlignment(Qt.AlignHCenter)
+        l.setStyleSheet(style + "background: transparent; border: none;")
+        self._lay.addWidget(l)
+
+    def _arrow(self):
+        self._add("↓", f"color: {Colors.TEXT_DISABLED}; font-size: 14px;")
+
+    def set_chain(self, chain, suggestion=""):
+        """有内容返回 True；没有掉队点也没有建议则返回 False（调用方隐藏）。"""
+        while self._lay.count():
+            w = self._lay.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        items = []
+        for c in chain:
+            c = str(c).strip()
+            if c and (not items or items[-1] != c):
+                items.append(c)
+        suggestion = (suggestion or "").strip()
+        if not items:
+            if not suggestion:
+                return False
+            self._add(suggestion, f"color: {Colors.TEXT_PRIMARY}; font-size: 15px; font-weight: 600;")
+            return True
+
+        cap = f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"
+        self._add("你的掉队点", f"color: {Colors.ACCENT}; font-size: 11px; font-weight: 700;")
+        self._add(items[0], f"color: {Colors.TEXT_PRIMARY}; font-size: 17px; font-weight: 700;")
+        for mid in items[1:-1]:
+            self._arrow()
+            self._add("前置", cap)
+            self._add(mid, f"color: {Colors.TEXT_PRIMARY}; font-size: 14px;")
+        root = items[-1] if len(items) > 1 else None
+        self._arrow()
+        if root:
+            self._add(f"建议复习：{root}",
+                      f"color: {Colors.ACCENT}; font-size: 16px; font-weight: 700;")
+            if suggestion and not (suggestion.startswith("建议复习") and root in suggestion):
+                self._lay.addSpacing(6)
+                self._add(suggestion, f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;")
+        else:
+            self._add(suggestion or f"建议复习：{items[0]}",
+                      f"color: {Colors.ACCENT}; font-size: 16px; font-weight: 700;")
+        return True
