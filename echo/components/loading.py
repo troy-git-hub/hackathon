@@ -52,7 +52,7 @@ class LoadingCard(QFrame):
         self.setStyleSheet(f"""
             QFrame#LoadingCard {{
                 background-color: {Colors.PRIMARY_LIGHT};
-                border: 1px solid #C7E0F4;
+                border: 1px solid {Colors.INFO_BORDER};
                 border-radius: {Radius.MD}px;
             }}
         """)

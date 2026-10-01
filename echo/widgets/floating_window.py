@@ -59,7 +59,7 @@ def lesson_html(text: str) -> str:
         esc = html.escape(ln)
         esc = _FORMULA.sub(
             lambda m: (f'<span style="font-family:Consolas,\'Cascadia Mono\',monospace;'
-                       f'background-color:#F3F3F3;">{m.group(1)}</span>')
+                       f'background-color:{Colors.CODE_BG};">{m.group(1)}</span>')
             if ("(" in m.group(1) or "=" in m.group(1)) else m.group(1), esc)
         esc = re.sub(r"^(第[一二三四五六七八九十]+步[：:]|\d+[\.、．])",
                      rf'<b style="color:{Colors.PRIMARY}">\1</b>', esc)
@@ -158,7 +158,7 @@ class FloatingWindow(QWidget):
         self.min_btn.clicked.connect(self._switch_pet)
         lay.addWidget(self.min_btn)
 
-        self._set_status("正在听课", Colors.SUCCESS, "#E9F7E8")
+        self._set_status("正在听课", Colors.SUCCESS, Colors.SUCCESS_SOFT)
         return bar
 
     def _set_status(self, text, color, bg, busy=False):
@@ -285,7 +285,7 @@ class FloatingWindow(QWidget):
         lay.addWidget(self.bp_loading)
 
         # 缺失提示
-        self.miss_card = _card("MissCard", "#FFF8E6", "#F7D58A",
+        self.miss_card = _card("MissCard", Colors.WARNING_CARD, Colors.WARNING_CARD_BORDER,
                                f"border-left: 4px solid {Colors.NODE_WARN};")
         ml = QVBoxLayout(self.miss_card)
         ml.setContentsMargins(Spacing.MD, Spacing.SM + 2, Spacing.MD, Spacing.SM + 2)
@@ -476,7 +476,7 @@ class FloatingWindow(QWidget):
         self._set_bubble(self.current_concept.topic)
         self.tc_lbl.setText("00:00")
         self.progress.setValue(0)
-        self._set_status("正在听课", Colors.SUCCESS, "#E9F7E8")
+        self._set_status("正在听课", Colors.SUCCESS, Colors.SUCCESS_SOFT)
         self.echo.start()
         self._switch_pet()
 
@@ -526,10 +526,9 @@ class FloatingWindow(QWidget):
         self.tc_lbl.setText(tc)
         short = text if len(text) <= 60 else text[:58] + "…"
         self.caption_lbl.setText(f"“{short}”")
-        if self.caption_lbl.isHidden():
-            self.caption_lbl.show()
-            if self.stack.currentIndex() == 1:
-                self._fit()
+        self.caption_lbl.show()
+        if self.stack.currentIndex() == 1:   # 字幕行数会变（1~2 行），每句都重新算高度
+            self._fit()
         if not self.echo.engine.current_concept():
             s = text if len(text) <= 16 else text[:15] + "…"
             self._set_bubble(s)
@@ -625,8 +624,8 @@ class FloatingWindow(QWidget):
         self.suggest_lbl.setVisible(bool(self.suggest_lbl.text()))
 
     STATUS_STYLE = {
-        "listening":   ("正在听课", Colors.SUCCESS, "#E9F7E8", False),
-        "analyzing":   ("分析中", Colors.WARNING, "#FFF4CE", True),
+        "listening":   ("正在听课", Colors.SUCCESS, Colors.SUCCESS_SOFT, False),
+        "analyzing":   ("分析中", Colors.WARNING, Colors.WARNING_SOFT, True),
         "summarizing": ("生成回响", Colors.PRIMARY, Colors.PRIMARY_LIGHT, True),
         "loading_asr": ("正在加载语音识别", Colors.PRIMARY, Colors.PRIMARY_LIGHT, True),
         "done":        ("已下课", Colors.TEXT_SECONDARY, Colors.SURFACE_PRESSED, False),
@@ -686,13 +685,13 @@ class FloatingWindow(QWidget):
         # 阴影：多层半透明圆角矩形向外扩散，略向下偏移
         p.setPen(Qt.NoPen)
         for i in range(SHADOW, 0, -1):
-            a = int(22 * (1 - i / SHADOW) ** 2)
+            a = int(Colors.SHADOW_ALPHA * (1 - i / SHADOW) ** 2)
             p.setBrush(QColor(0, 0, 0, a))
             p.drawRoundedRect(rect.adjusted(-i, -i + 3, i, i + 3), Radius.LG + i, Radius.LG + i)
         path = QPainterPath()
         path.addRoundedRect(rect, Radius.LG, Radius.LG)
-        p.fillPath(path, QBrush(QColor("#F9F9F9")))
+        p.fillPath(path, QBrush(QColor(Colors.WINDOW_BG)))
         p.setBrush(Qt.NoBrush)
-        p.setPen(QPen(QColor("#DADADA"), 1))
+        p.setPen(QPen(QColor(Colors.WINDOW_BORDER), 1))
         p.drawPath(path)
         p.end()

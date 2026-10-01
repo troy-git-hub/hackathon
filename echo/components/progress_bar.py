@@ -12,7 +12,7 @@ from echo.mock_data import EchoSkill
 STATUS_TAG = {"ok": "✓", "warn": "?", "lost": "!"}
 STATUS_BAR_OBJ = {"ok": "Ok", "warn": "Warn", "lost": "Lost"}
 STATUS_TAG_COLOR = {"ok": Colors.SUCCESS, "warn": Colors.WARNING, "lost": Colors.DANGER}
-STATUS_TAG_BG = {"ok": Colors.SUCCESS_BG, "warn": "#FFF4CE", "lost": Colors.DANGER_BG}
+STATUS_TAG_BG = {"ok": Colors.SUCCESS_BG, "warn": Colors.WARNING_SOFT, "lost": Colors.DANGER_BG}
 
 
 class MasteryRow(QWidget):

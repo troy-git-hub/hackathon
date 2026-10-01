@@ -24,9 +24,9 @@ class StateButton(QPushButton):
         # (前景色, 悬停底色, 悬停边框)
         base = {
             "default": (Colors.TEXT_PRIMARY, Colors.SURFACE_HOVER, Colors.BORDER_STRONG),
-            "ok":      (Colors.SUCCESS, Colors.SUCCESS_BG, "#A6E0A6"),
-            "warn":    (Colors.WARNING, "#FFF4CE", "#F5D28A"),
-            "lost":    (Colors.DANGER, Colors.DANGER_BG, "#F3A8AD"),
+            "ok":      (Colors.SUCCESS, Colors.SUCCESS_BG, Colors.SUCCESS_BORDER),
+            "warn":    (Colors.WARNING, Colors.WARNING_SOFT, Colors.WARNING_BORDER),
+            "lost":    (Colors.DANGER, Colors.DANGER_BG, Colors.DANGER_BORDER),
         }
         fg, hover_bg, hover_border = base.get(self.kind, base["default"])
         self.setStyleSheet(f"""

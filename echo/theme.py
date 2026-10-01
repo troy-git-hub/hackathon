@@ -2,49 +2,74 @@
 Echo - WinUI 风格主题
 参考 Windows 11 Fluent Design / WinUI 3 配色与圆角规范。
 """
+import os
+
 from PyQt5.QtGui import QColor, QFont, QPalette
 from PyQt5.QtCore import Qt
 
 
-# ---------- 调色板 (WinUI Light) ----------
+# ---------- 调色板：跟随 Windows 深浅色（ECHO_THEME=dark/light 可强制） ----------
+def _system_dark() -> bool:
+    mode = os.getenv("ECHO_THEME", "auto").lower()
+    if mode in ("dark", "light"):
+        return mode == "dark"
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as k:
+            return winreg.QueryValueEx(k, "AppsUseLightTheme")[0] == 0
+    except Exception:
+        return False
+
+
+IS_DARK = _system_dark()
+
+_LIGHT = dict(
+    WINDOW_BG="#F9F9F9", WINDOW_BORDER="#DADADA", SHADOW_ALPHA=22,
+    MICA_LIGHT="#F3F3F3", MICA_DARK="#202020",
+    SURFACE="#FFFFFF", SURFACE_HOVER="#F5F5F5", SURFACE_PRESSED="#EDEDED",
+    CODE_BG="#F0F0F0", HOVER_OVERLAY="rgba(0, 0, 0, 0.05)",
+    PRIMARY="#0078D4", PRIMARY_HOVER="#106EBE", PRESSED="#005A9E", PRIMARY_LIGHT="#DEECF9",
+    INFO_BORDER="#C7E0F4",
+    TEXT_PRIMARY="#1A1A1A", TEXT_SECONDARY="#616161", TEXT_DISABLED="#A0A0A0", TEXT_ON_ACCENT="#FFFFFF",
+    BORDER="#E5E5E5", BORDER_STRONG="#D1D1D1",
+    SUCCESS="#107C10", SUCCESS_BG="#DFF6DD", SUCCESS_SOFT="#E9F7E8", SUCCESS_BORDER="#A6E0A6",
+    WARNING="#CA5010", WARNING_BG="#FDE7B0", WARNING_SOFT="#FFF4CE", WARNING_BORDER="#F5D28A",
+    WARNING_CARD="#FFF8E6", WARNING_CARD_BORDER="#F7D58A",
+    DANGER="#D13438", DANGER_BG="#FDE7E9", DANGER_BORDER="#F3A8AD",
+    DANGER_HOVER="{Colors.DANGER_HOVER}", DANGER_PRESSED="{Colors.DANGER_PRESSED}",
+    NODE_OK="#107C10", NODE_WARN="#FF8C00", NODE_LOST="#D13438", NODE_NOW="#0078D4",
+    NODE_GLYPH="#FFFFFF",
+    BUBBLE_BG="#FFFFFF", BUBBLE_BORDER="#E0E0E0",
+)
+
+_DARK = dict(
+    WINDOW_BG="#2B2B2B", WINDOW_BORDER="#3F3F3F", SHADOW_ALPHA=60,
+    MICA_LIGHT="#202020", MICA_DARK="#202020",
+    SURFACE="#363636", SURFACE_HOVER="#3E3E3E", SURFACE_PRESSED="#2F2F2F",
+    CODE_BG="#1F1F1F", HOVER_OVERLAY="rgba(255, 255, 255, 0.08)",
+    PRIMARY="#4CC2FF", PRIMARY_HOVER="#47B1E8", PRESSED="#42A1D2", PRIMARY_LIGHT="#14374D",
+    INFO_BORDER="#1F5A7A",
+    TEXT_PRIMARY="#FFFFFF", TEXT_SECONDARY="#C8C8C8", TEXT_DISABLED="#7A7A7A", TEXT_ON_ACCENT="#000000",
+    BORDER="#454545", BORDER_STRONG="#5A5A5A",
+    SUCCESS="#6CCB5F", SUCCESS_BG="#253A22", SUCCESS_SOFT="#22331F", SUCCESS_BORDER="#3E6B37",
+    WARNING="#FFB547", WARNING_BG="#4A3A17", WARNING_SOFT="#3D3218", WARNING_BORDER="#7A5E22",
+    WARNING_CARD="#3A3020", WARNING_CARD_BORDER="#7A5E22",
+    DANGER="#FF6B6B", DANGER_BG="#4A2426", DANGER_BORDER="#7D3A3E",
+    DANGER_HOVER="#E65A5A", DANGER_PRESSED="#C94A4A",
+    NODE_OK="#6CCB5F", NODE_WARN="#FFB547", NODE_LOST="#FF6B6B", NODE_NOW="#4CC2FF",
+    NODE_GLYPH="#1A1A1A",
+    BUBBLE_BG="#2B2B2B", BUBBLE_BORDER="#454545",
+)
+
+
 class Colors:
-    # 背景层
-    MICA_LIGHT = "#F3F3F3"          # Mica 基色（浅）
-    MICA_DARK = "#202020"           # Mica 基色（深）
-    SURFACE = "#FFFFFF"             # 卡片/浮层表面
-    SURFACE_HOVER = "#F9F9F9"
-    SURFACE_PRESSED = "#F0F0F0"
-
-    # 主色（Windows 强调色蓝）
-    PRIMARY = "#0078D4"
-    PRIMARY_HOVER = "#106EBE"
-    PRESSED = "#005A9E"
-    PRIMARY_LIGHT = "#DEECF9"
-
-    # 文本
-    TEXT_PRIMARY = "#1A1A1A"
-    TEXT_SECONDARY = "#616161"
-    TEXT_DISABLED = "#A0A0A0"
-    TEXT_ON_ACCENT = "#FFFFFF"
-
-    # 分割线 / 边框
-    BORDER = "#E5E5E5"
-    BORDER_STRONG = "#D1D1D1"
-
-    # 语义色
-    SUCCESS = "#107C10"
-    SUCCESS_BG = "#DFF6DD"
-    WARNING = "#CA5010"
-    WARNING_BG = "#FDE7B0"
-    DANGER = "#D13438"
-    DANGER_BG = "#FDE7E9"
     INFO = "#0078D4"
 
-    # 时间轴节点
-    NODE_OK = "#107C10"
-    NODE_WARN = "#FF8C00"
-    NODE_LOST = "#D13438"
-    NODE_NOW = "#0078D4"
+
+for _k, _v in (_DARK if IS_DARK else _LIGHT).items():
+    setattr(Colors, _k, _v)
+Colors.INFO = Colors.PRIMARY
 
 
 # ---------- 圆角与间距 ----------
@@ -158,11 +183,11 @@ QPushButton#Primary:pressed {{
 
 QPushButton#Danger {{
     background-color: {Colors.DANGER};
-    color: {Colors.TEXT_ON_ACCENT};
+    color: {"#1A1A1A" if IS_DARK else "#FFFFFF"};
     border: 1px solid {Colors.DANGER};
 }}
 QPushButton#Danger:hover {{
-    background-color: #B3262A;
+    background-color: {Colors.DANGER_HOVER};
 }}
 
 QPushButton#Ghost {{
@@ -177,7 +202,7 @@ QPushButton#Ghost:hover {{
 
 QPushButton#Lost {{
     background-color: {Colors.DANGER};
-    color: {Colors.TEXT_ON_ACCENT};
+    color: {"#1A1A1A" if IS_DARK else "#FFFFFF"};
     border: 1px solid {Colors.DANGER};
     border-radius: {Radius.MD}px;
     font-size: 14px;
@@ -185,11 +210,11 @@ QPushButton#Lost {{
     padding: 8px 16px;
 }}
 QPushButton#Lost:hover {{
-    background-color: #B3262A;
-    border-color: #B3262A;
+    background-color: {Colors.DANGER_HOVER};
+    border-color: {Colors.DANGER_HOVER};
 }}
 QPushButton#Lost:pressed {{
-    background-color: #8E1F22;
+    background-color: {Colors.DANGER_PRESSED};
 }}
 
 QPushButton#Primary:disabled {{
@@ -207,7 +232,7 @@ QPushButton#Small {{
     color: {Colors.TEXT_SECONDARY};
 }}
 QPushButton#Small:hover {{
-    background-color: rgba(0, 0, 0, 0.05);
+    background-color: {Colors.HOVER_OVERLAY};
     color: {Colors.TEXT_PRIMARY};
 }}
 

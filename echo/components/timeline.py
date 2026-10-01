@@ -59,7 +59,7 @@ class TimelineNode(QWidget):
         if is_now:
             top.addWidget(self._tag("现在", Colors.PRIMARY, Colors.PRIMARY_LIGHT), 0, Qt.AlignTop)
         elif is_breakpoint:
-            top.addWidget(self._tag("断点", Colors.WARNING, "#FFF4CE"), 0, Qt.AlignTop)
+            top.addWidget(self._tag("断点", Colors.WARNING, Colors.WARNING_SOFT), 0, Qt.AlignTop)
         layout.addLayout(top)
 
         if note:
@@ -83,8 +83,8 @@ class TimelineNode(QWidget):
 
         # 断点行高亮背景
         if self.is_bp:
-            p.setPen(QPen(QColor("#F7D58A"), 1))
-            p.setBrush(QBrush(QColor("#FFF8E6")))
+            p.setPen(QPen(QColor(Colors.WARNING_CARD_BORDER), 1))
+            p.setBrush(QBrush(QColor(Colors.WARNING_CARD)))
             p.drawRoundedRect(QRectF(CONTENT_LEFT - 4, 1, self.width() - CONTENT_LEFT + 3, h - 2),
                               Radius.MD, Radius.MD)
 
@@ -107,13 +107,13 @@ class TimelineNode(QWidget):
         p.drawEllipse(QPointF(RAIL_X, cy), DOT_R, DOT_R)
         glyph = STATUS_GLYPH.get(self.status, "")
         if glyph:
-            p.setPen(QColor("#FFFFFF"))
+            p.setPen(QColor(Colors.NODE_GLYPH))
             f = font(10, QFont.Bold)
             p.setFont(f)
             p.drawText(QRectF(RAIL_X - DOT_R, cy - DOT_R, DOT_R * 2, DOT_R * 2),
                        Qt.AlignCenter, glyph)
         else:
-            p.setBrush(QColor("#FFFFFF"))
+            p.setBrush(QColor(Colors.WINDOW_BG))
             p.drawEllipse(QPointF(RAIL_X, cy), 3, 3)
         p.end()
 

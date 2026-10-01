@@ -11,6 +11,8 @@ from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt5.QtGui import (QPainter, QPainterPath, QColor, QBrush, QPen,
                          QRadialGradient, QLinearGradient, QFont, QPixmap)
 
+from echo.theme import Colors
+
 # 情绪 -> 表情包文件名（对应 split_emojis.py 切出的 8 张）
 EMOTION_FILES = {
     "idle": "smug.png",
@@ -231,15 +233,15 @@ class BubbleLabel(QLabel):
         super().__init__(text, parent)
         self.setWordWrap(True)
         self.setAlignment(Qt.AlignCenter)
-        self.setStyleSheet("""
-            QLabel {
-                background-color: #FFFFFF;
-                color: #1A1A1A;
+        self.setStyleSheet(f"""
+            QLabel {{
+                background-color: {Colors.BUBBLE_BG};
+                color: {Colors.TEXT_PRIMARY};
                 border-radius: 14px;
                 padding: 8px 14px;
-                border: 1px solid #E0E0E0;
+                border: 1px solid {Colors.BUBBLE_BORDER};
                 font-size: 13px;
                 font-weight: 600;
-            }
+            }}
         """)
         self.adjustSize()
