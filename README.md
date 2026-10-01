@@ -5,22 +5,41 @@
 ## 运行
 
 ```bash
+python -m venv venv && venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env      # 填 DEEPSEEK_API_KEY
 python main.py
 ```
 
 打开网课（腾讯会议 / Zoom / B站 / 录播课）正常播放，Echo 会直接抓电脑播放的声音实时转写，不需要麦克风，戴耳机也行。
-第一次启动会从 hf-mirror 下载 Whisper small 模型（约 480MB）。
+第一次启动会从 hf-mirror 下载 Whisper small 模型（约 480MB），建议演示前先跑一次让模型缓存好。
 
 没有 key 时自动退化为 mock 数据，界面照常可用。
+
+### 配置（.env）
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `DEEPSEEK_API_KEY` | 空 | 不填 = 离线 mock |
+| `ECHO_SOURCE` | `system` | `system` 抓系统声音 / `mic` 麦克风 / `demo` 回放示例讲稿 |
+| `ECHO_AUDIO_DEVICE` | 空 | `mic` 时可填设备序号或名称片段 |
+| `ECHO_WHISPER_MODEL` | `small` | `medium` 更准但更慢 |
+| `ECHO_AUTO_DEMO` | `1` | 音频采集失败时自动改放示例讲稿 |
+| `ECHO_OFFLINE` | `0` | `1` = 不调 LLM，全走规则 / mock（断网演示） |
+| `ECHO_DEMO_INTERVAL` | `3` | 示例讲稿每句间隔秒数 |
+
+### 现场演示
+
+1. 稳妥路线：`.env` 里 `ECHO_SOURCE=demo`，Echo 自己回放贝叶斯示例课，约 1 分钟后点「! 我掉队了」→ 断点 → 「30 秒补上这一步」→「✓ 补上了」→「下课」看回响。
+2. 真实路线：`ECHO_SOURCE=system`，B站放一段课，等时间轴出现 2～3 个知识点后再点掉队。
+3. 兜底：声卡 / loopback 出错会自动切到示例讲稿（`ECHO_AUTO_DEMO`）；断网时设 `ECHO_OFFLINE=1`，掉队分析和回响走规则兜底，界面流程不变。
+   代码里也可以随时切：`bridge.use_demo(offline=True)` / `bridge.switch_source("system")` / `bridge.set_offline(True)`，状态通过 `mode` 信号通知 UI。
 
 自检（不开界面）：
 
 ```bash
-python scripts/live_check.py --direct    # TTS 朗读示例课 → 切句 → Whisper → DeepSeek → 掉队分析
-python scripts/live_check.py             # 同上，但真的从扬声器播放、走系统音频 loopback
-python scripts/smoke_backend.py          # 只测 LLM 部分（直接喂讲稿文字）
+python scripts/smoke_backend.py          # 喂示例讲稿 → 时间轴 → 掉队分析 → 补课 → 回响（有 key 走 DeepSeek）
+python scripts/session_check.py          # 结束 / 重开课程后旧任务不串课
 ```
 
 ## 架构
@@ -50,5 +69,6 @@ EchoBridge (echo/backend/qt_bridge.py) → Qt 信号 → FloatingWindow
 | `echo` | `EchoReport(skills, review_chain, suggestion)` | 回响页 |
 | `status` | `listening / analyzing / summarizing / loading_asr / done` | |
 | `error` | `str` | |
+| `mode` | `kind, offline` | 音频来源切换 / 在线离线切换 |
 
 Prompt 都在 `echo/backend/prompts.py`，配置项见 `echo/backend/config.py`。

@@ -101,7 +101,8 @@ class EchoEngine:
         self.concept_interval = concept_interval or config.CONCEPT_INTERVAL
 
         self.llm: Optional[LLM] = None
-        if use_llm:
+        self._online_llm: Optional[LLM] = None   # 切离线时先存着，恢复在线再放回来
+        if use_llm and not config.OFFLINE:
             try:
                 self.llm = LLM()
             except Exception as e:  # 无 key / 无 openai 包 → 退化为 mock
@@ -171,6 +172,14 @@ class EchoEngine:
     @property
     def has_llm(self):
         return self.llm is not None
+
+    def set_offline(self, offline: bool):
+        """断网兜底：离线时不再调 LLM，时间轴 / 断点 / 回响全部走规则和 mock。"""
+        with self._lock:
+            if offline and self.llm:
+                self._online_llm, self.llm = self.llm, None
+            elif not offline and self._online_llm:
+                self.llm, self._online_llm = self._online_llm, None
 
     def elapsed(self) -> float:
         """从开课到现在的墙钟秒数（实时音频用）。"""

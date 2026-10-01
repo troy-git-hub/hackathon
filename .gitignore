@@ -22,3 +22,6 @@ debug.log
 
 # secrets
 .env
+
+# 大纲含明文密钥
+大纲.txt

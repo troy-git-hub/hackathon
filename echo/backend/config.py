@@ -44,6 +44,10 @@ FLUSH_GRACE = float(os.getenv("ECHO_FLUSH_GRACE", "2"))
 SOURCE = os.getenv("ECHO_SOURCE", "system")
 DEMO_LINE_INTERVAL = float(os.getenv("ECHO_DEMO_INTERVAL", "3"))
 DEMO_SCRIPT = os.getenv("ECHO_DEMO_SCRIPT", "")  # 可选：自定义 transcript 文本文件
+# 现场兜底：音频采集失败时自动改放示例讲稿（1=开，0=关）
+AUTO_DEMO = os.getenv("ECHO_AUTO_DEMO", "1") != "0"
+# 强制离线：不调 LLM，全部走规则 / mock（断网演示用）
+OFFLINE = os.getenv("ECHO_OFFLINE", "0") == "1"
 
 # ---------- ASR ----------
 AUDIO_DEVICE = os.getenv("ECHO_AUDIO_DEVICE", "")  # 空=默认输入；可填设备序号或名称片段（如“立体声混音”）
