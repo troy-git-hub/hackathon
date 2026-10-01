@@ -3,7 +3,7 @@ Echo - WinUI 风格按钮组件
 """
 from PyQt5.QtWidgets import QPushButton
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QCursor
+from PyQt5.QtGui import QCursor, QFont
 
 from echo.theme import Colors, Radius, font
 
