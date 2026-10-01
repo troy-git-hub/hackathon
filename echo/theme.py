@@ -63,11 +63,32 @@ _DARK = dict(
 )
 
 
+# 学习工具风格：中性灰底 + 唯一强调色（琥珀）只给「掉队/断点」，绿色只做弱提示
+_STUDY_LIGHT = dict(
+    WINDOW_BG="#FBFBFA", WINDOW_BORDER="#E3E3E0", SHADOW_ALPHA=26,
+    SURFACE="#FFFFFF", SURFACE_HOVER="#F4F4F2", SURFACE_PRESSED="#ECECEA",
+    BORDER="#E6E6E3", BORDER_STRONG="#D4D4D0", CODE_BG="#F2F2EF",
+    TEXT_PRIMARY="#1D1E20", TEXT_SECONDARY="#6B6D72", TEXT_DISABLED="#A8AAAE",
+    ACCENT="#D9861A", ACCENT_HOVER="#C77812", ACCENT_PRESSED="#B06A0F",
+    ACCENT_SOFT="#FCF1E0", ACCENT_BORDER="#EFCB92", ON_ACCENT="#FFFFFF",
+    OK_FG="#3E8E50", OK_SOFT="#EAF5EC", NOW_FG="#1D1E20",
+)
+_STUDY_DARK = dict(
+    WINDOW_BG="#1C1D21", WINDOW_BORDER="#2E3036", SHADOW_ALPHA=70,
+    SURFACE="#24262B", SURFACE_HOVER="#2B2D33", SURFACE_PRESSED="#202226",
+    BORDER="#32343A", BORDER_STRONG="#3E4047", CODE_BG="#16171A",
+    TEXT_PRIMARY="#ECEDEF", TEXT_SECONDARY="#9EA1A8", TEXT_DISABLED="#63666D",
+    ACCENT="#F2A93B", ACCENT_HOVER="#F5B755", ACCENT_PRESSED="#D9922A",
+    ACCENT_SOFT="#2F2619", ACCENT_BORDER="#6B4F22", ON_ACCENT="#1B1406",
+    OK_FG="#8CC79A", OK_SOFT="#1F2B23", NOW_FG="#ECEDEF",
+)
+
+
 class Colors:
     INFO = "#0078D4"
 
 
-for _k, _v in (_DARK if IS_DARK else _LIGHT).items():
+for _k, _v in {**(_DARK if IS_DARK else _LIGHT), **(_STUDY_DARK if IS_DARK else _STUDY_LIGHT)}.items():
     setattr(Colors, _k, _v)
 Colors.INFO = Colors.PRIMARY
 
@@ -102,7 +123,7 @@ def font(size=12, weight=QFont.Normal):
 # ---------- 全局 QSS ----------
 GLOBAL_QSS = f"""
 * {{
-    font-family: "Segoe UI Variable", "Microsoft YaHei UI", "Segoe UI", sans-serif;
+    font-family: "Segoe UI Variable Text", "Microsoft YaHei UI", "Segoe UI", sans-serif;
     color: {Colors.TEXT_PRIMARY};
     outline: none;
 }}
@@ -262,6 +283,61 @@ QProgressBar::chunk {{
 QProgressBar#Ok::chunk {{ background-color: {Colors.SUCCESS}; }}
 QProgressBar#Warn::chunk {{ background-color: {Colors.WARNING}; }}
 QProgressBar#Lost::chunk {{ background-color: {Colors.DANGER}; }}
+
+/* ---------- 学习工具风格按钮 ---------- */
+QPushButton#Accent {{
+    background-color: {Colors.ACCENT};
+    border: 1px solid {Colors.ACCENT};
+    border-radius: {Radius.MD}px;
+    color: {Colors.ON_ACCENT};
+    font-size: 15px;
+    font-weight: 700;
+    padding: 10px 16px;
+}}
+QPushButton#Accent:hover {{ background-color: {Colors.ACCENT_HOVER}; border-color: {Colors.ACCENT_HOVER}; }}
+QPushButton#Accent:pressed {{ background-color: {Colors.ACCENT_PRESSED}; }}
+QPushButton#Accent:disabled {{
+    background-color: {Colors.SURFACE_HOVER};
+    border-color: {Colors.BORDER};
+    color: {Colors.TEXT_DISABLED};
+}}
+QPushButton#Solid {{
+    background-color: {Colors.TEXT_PRIMARY};
+    border: 1px solid {Colors.TEXT_PRIMARY};
+    border-radius: {Radius.MD}px;
+    color: {Colors.WINDOW_BG};
+    font-size: 14px;
+    font-weight: 700;
+    padding: 9px 16px;
+}}
+QPushButton#Solid:hover {{ background-color: {Colors.TEXT_SECONDARY}; border-color: {Colors.TEXT_SECONDARY}; }}
+QPushButton#Quiet {{
+    background-color: transparent;
+    border: 1px solid {Colors.BORDER};
+    border-radius: {Radius.MD}px;
+    color: {Colors.TEXT_SECONDARY};
+    font-size: 13px;
+    padding: 6px 10px;
+}}
+QPushButton#Quiet:hover {{ background-color: {Colors.SURFACE_HOVER}; color: {Colors.TEXT_PRIMARY}; }}
+QPushButton#Quiet:disabled {{ color: {Colors.OK_FG}; border-color: {Colors.BORDER}; }}
+QPushButton#Link {{
+    background: transparent;
+    border: none;
+    color: {Colors.TEXT_SECONDARY};
+    font-size: 13px;
+    padding: 4px 6px;
+}}
+QPushButton#Link:hover {{ color: {Colors.TEXT_PRIMARY}; }}
+QPushButton#IconBtn {{
+    background: transparent;
+    border: none;
+    border-radius: {Radius.SM}px;
+    color: {Colors.TEXT_SECONDARY};
+    font-size: 15px;
+    padding: 0px;
+}}
+QPushButton#IconBtn:hover {{ background: {Colors.HOVER_OVERLAY}; color: {Colors.TEXT_PRIMARY}; }}
 """
 
 

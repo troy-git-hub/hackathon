@@ -1,56 +1,65 @@
 """
-Echo - 悬浮主窗口
-状态机：pet(桌宠) -> panel(听课面板) -> expanded(掉队分析) -> lesson(30秒补上) -> pet
-课程结束 -> echo(回响页)
+Echo - 悬浮主窗口（学习工具风格）
+
+页面：
+  0 listen   默认听课卡片：当前知识点 + 实时字幕 + 始终可见的「我掉队了」
+  1 mini     折叠条：猫头像 + 知识点 + 「掉队」
+  2 break    断点页（产品主画面）：刚才会的 → 掉队的那一步 → 老师讲到这里 + 你缺的这一步
+  3 lesson   补课三段式：你已经知道 → 中间漏了这一步 → 所以现在你能听懂
+  4 echo     回响：知识路径（已跟上 / 已补上 / 待回看）
 """
 import html
 import re
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame, QSizePolicy, QStackedWidget,
-                             QProgressBar)
-from PyQt5.QtCore import Qt, QTimer, QRectF
+                             QProgressBar, QApplication)
+from PyQt5.QtCore import Qt, QTimer, QRectF, QPoint
 from PyQt5.QtGui import QFont, QCursor, QPainter, QPainterPath, QColor, QBrush, QPen
 
 from echo.theme import Colors, Radius, font, Spacing
-from echo.components.buttons import StateButton, PrimaryButton, GhostButton
-from echo.components.timeline import ConceptTimeline
-from echo.components.progress_bar import MasteryList
-from echo.components.pet import PetWidget, BubbleLabel
-from echo.components.loading import LoadingCard, PulseDots
+from echo.components.loading import PulseDots
+from echo.components.study import (CatAvatar, BreakPath, LessonStep, EchoRow,
+                                   echo_status)
 from echo.mock_data import Concept
 from echo.backend.engine import parse_tc
 from echo.backend.qt_bridge import EchoBridge
 
 SHADOW = 14
-WAIT_HINT = "播放网课后，Echo 会自动开始听"          # 窗口四周留给阴影的空间
+WAIT_HINT = "播放网课后，Echo 会自动开始听"
+LISTEN, MINI, BREAK, LESSON, ECHO = range(5)
 # 各页内容区宽度（不含阴影与内边距）
-PAGE_WIDTH = {0: 210, 1: 340, 2: 400, 3: 400, 4: 420}
+PAGE_WIDTH = {LISTEN: 340, MINI: 300, BREAK: 380, LESSON: 400, ECHO: 380}
 
 
-def _card(name, bg=Colors.SURFACE, border=Colors.BORDER, extra=""):
-    f = QFrame()
-    f.setObjectName(name)
-    f.setStyleSheet(f"QFrame#{name} {{ background-color: {bg}; border: 1px solid {border};"
-                    f" border-radius: {Radius.MD}px; {extra} }}")
-    return f
-
-
-def _label(text="", obj=None, wrap=False):
+def _label(text="", style="", wrap=False):
     l = QLabel(text)
-    if obj:
-        l.setObjectName(obj)
     l.setWordWrap(wrap)
+    if style:
+        l.setStyleSheet(style + "background: transparent;")
     return l
 
+
+def _btn(text, obj, slot, tip=""):
+    b = QPushButton(text)
+    b.setObjectName(obj)
+    b.setCursor(QCursor(Qt.PointingHandCursor))
+    b.clicked.connect(slot)
+    if tip:
+        b.setToolTip(tip)
+    return b
+
+
+CAPTION = f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;"
+TITLE = f"color: {Colors.TEXT_PRIMARY}; font-size: 17px; font-weight: 700;"
 
 _FORMULA = re.compile(r"((?:[A-Za-z]\([^()（）]{1,24}\)|[A-Za-z]\b)"
                       r"(?:[\s·*/+\-=×÷^|∩∪A-Za-z0-9().]|&#x27;|乘|除以)*"
                       r"[A-Za-z0-9)])")
 
 
-def lesson_html(text: str) -> str:
-    """micro lesson 纯文本 → 富文本：步骤序号加粗着色，公式等宽高亮，行距放宽。"""
+def rich(text: str) -> str:
+    """纯文本 → 富文本：公式等宽高亮，行距放宽，步骤序号弱化。"""
     paras = []
     for ln in (text or "").strip().split("\n"):
         ln = ln.strip()
@@ -59,11 +68,11 @@ def lesson_html(text: str) -> str:
         esc = html.escape(ln)
         esc = _FORMULA.sub(
             lambda m: (f'<span style="font-family:Consolas,\'Cascadia Mono\',monospace;'
-                       f'background-color:{Colors.CODE_BG};">{m.group(1)}</span>')
+                       f'white-space:nowrap; background-color:{Colors.CODE_BG};">&nbsp;{m.group(1)}&nbsp;</span>')
             if ("(" in m.group(1) or "=" in m.group(1)) else m.group(1), esc)
-        esc = re.sub(r"^(第[一二三四五六七八九十]+步[：:]|\d+[\.、．])",
-                     rf'<b style="color:{Colors.PRIMARY}">\1</b>', esc)
-        paras.append(f'<p style="margin:0 0 8px 0; line-height:155%;">{esc}</p>')
+        esc = re.sub(r"^(第[一二三四五六七八九十\d]+步[：:]|\d+[\.、．])",
+                     rf'<span style="color:{Colors.TEXT_SECONDARY}">\1</span>', esc)
+        paras.append(f'<p style="margin:0 0 6px 0; line-height:150%;">{esc}</p>')
     return "".join(paras)
 
 
@@ -75,14 +84,15 @@ class FloatingWindow(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
         self.current_tc = "00:00"
-        self.current_concept = Concept("00:00", "等待老师开讲…", [], [], "", "now")
+        self.current_concept = None
         self.last_bp = None
-
-        # 拖拽
+        self.last_bp_concepts = []
+        self._fixed = set()          # 学生点过「补上了」的断点知识点
         self._drag_pos = None
+        self._page = LISTEN
 
         self._build_ui()
-        self._switch_pet()
+        self._show_page(LISTEN)
 
         # 后端：transcript → concept timeline → break point → 回响
         self.echo = EchoBridge(parent=self)
@@ -94,174 +104,184 @@ class FloatingWindow(QWidget):
         self.echo.error.connect(self._on_error)
         self.echo.start()
 
-    # ========== UI 构建 ==========
+    # ================= UI 构建 =================
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(SHADOW + Spacing.MD, SHADOW + Spacing.SM,
-                                SHADOW + Spacing.MD, SHADOW + Spacing.MD)
-        root.setSpacing(0)
+        root.setContentsMargins(SHADOW + Spacing.LG, SHADOW + Spacing.MD,
+                                SHADOW + Spacing.LG, SHADOW + Spacing.LG)
+        root.setSpacing(Spacing.MD)
 
-        # 标题栏
-        self.title_bar = self._build_title_bar()
-        root.addWidget(self.title_bar)
-        self.title_gap = QWidget()
-        self.title_gap.setFixedHeight(Spacing.SM)
-        root.addWidget(self.title_gap)
+        self.header = self._build_header()
+        root.addWidget(self.header)
 
-        # 内容堆叠：pet -> panel -> expanded -> lesson -> echo
         self.stack = QStackedWidget()
-        self.stack.addWidget(self._build_pet())         # 0
-        self.stack.addWidget(self._build_panel())       # 1
-        self.stack.addWidget(self._build_expanded())    # 2
-        self.stack.addWidget(self._build_lesson())      # 3
-        self.stack.addWidget(self._build_echo())        # 4
+        self.stack.addWidget(self._build_listen())   # 0
+        self.stack.addWidget(self._build_mini())     # 1
+        self.stack.addWidget(self._build_break())    # 2
+        self.stack.addWidget(self._build_lesson())   # 3
+        self.stack.addWidget(self._build_echo())     # 4
         root.addWidget(self.stack)
 
-    def _build_title_bar(self) -> QWidget:
+    def _build_header(self) -> QWidget:
         bar = QWidget()
-        bar.setFixedHeight(32)
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(Spacing.SM)
 
-        logo = QLabel("Echo")
-        logo.setFont(font(14, QFont.Bold))
-        logo.setStyleSheet(f"color: {Colors.PRIMARY};")
-        lay.addWidget(logo)
+        self.cat = CatAvatar(30)
+        self.cat.setToolTip("Echo")
+        lay.addWidget(self.cat)
 
-        # 状态胶囊：● 正在听课 / 分析中 ··· / 出错
-        self.status_pill = QFrame()
-        self.status_pill.setObjectName("StatusPill")
-        sp = QHBoxLayout(self.status_pill)
-        sp.setContentsMargins(8, 2, 10, 2)
-        sp.setSpacing(5)
-        self.dot = QLabel("●")
-        sp.addWidget(self.dot)
-        self.status_lbl = QLabel("")
-        sp.addWidget(self.status_lbl)
-        self.status_dots = PulseDots(Colors.WARNING)
+        name = _label("Echo", f"color: {Colors.TEXT_PRIMARY}; font-size: 15px; font-weight: 700;")
+        lay.addWidget(name)
+
+        self.status_dot = _label("●", f"color: {Colors.OK_FG}; font-size: 8px;")
+        lay.addWidget(self.status_dot)
+        self.status_dots = PulseDots(Colors.ACCENT)
         self.status_dots.hide()
-        sp.addWidget(self.status_dots)
-        lay.addWidget(self.status_pill)
+        lay.addWidget(self.status_dots)
+        self.status_lbl = _label("正在听课", CAPTION)
+        lay.addWidget(self.status_lbl)
         lay.addStretch()
 
-        self.end_btn = QPushButton("结束课程")
-        self.end_btn.setObjectName("Small")
-        self.end_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self.end_btn.clicked.connect(self._go_echo)
+        self.back_btn = _btn("← 回到课堂", "Link", self._back_to_listen)
+        lay.addWidget(self.back_btn)
+        self.end_btn = _btn("下课", "Link", self._go_echo, "结束这节课，生成回响")
         lay.addWidget(self.end_btn)
-
-        self.min_btn = QPushButton("—")
-        self.min_btn.setObjectName("Small")
-        self.min_btn.setToolTip("收起成桌宠")
-        self.min_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self.min_btn.clicked.connect(self._switch_pet)
-        lay.addWidget(self.min_btn)
-
-        self._set_status("正在听课", Colors.SUCCESS, Colors.SUCCESS_SOFT)
+        self.fold_btn = _btn("–", "IconBtn", lambda: self._show_page(MINI), "折叠")
+        self.fold_btn.setFixedSize(26, 26)
+        lay.addWidget(self.fold_btn)
         return bar
 
-    def _set_status(self, text, color, bg, busy=False):
-        self.status_pill.setStyleSheet(
-            f"QFrame#StatusPill {{ background: {bg}; border-radius: 10px; }}"
-            f"QLabel {{ color: {color}; font-size: 12px; font-weight: 600; background: transparent; }}")
-        self.dot.setStyleSheet(f"color: {color}; font-size: 9px; background: transparent;")
-        self.status_lbl.setText(text)
-        self.dot.setVisible(not busy)
-        if busy:
-            self.status_dots._color = QColor(color)
-            self.status_dots.start()
-        else:
-            self.status_dots.stop()
-
-    # ----- 桌宠态（默认外壳）-----
-    def _build_pet(self) -> QWidget:
+    # ----- 0 默认听课卡片 -----
+    def _build_listen(self) -> QWidget:
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(2)
-        lay.setAlignment(Qt.AlignCenter)
-
-        # 知识点气泡
-        self.bubble = BubbleLabel("")
-        self.bubble.setFixedWidth(196)
-        self._set_bubble(self.current_concept.topic)
-        lay.addWidget(self.bubble, 0, Qt.AlignCenter)
-
-        # 桌宠本体
-        self.pet = PetWidget()
-        self.pet.setToolTip("点我展开，按住拖动")
-        self.pet.clicked.connect(self._switch_panel)
-        lay.addWidget(self.pet, 0, Qt.AlignCenter)
-
-        return page
-
-    def _set_bubble(self, topic, caption="老师正在讲"):
-        self.bubble.setText(
-            f'<span style="font-size:11px; font-weight:400; color:{Colors.TEXT_SECONDARY};">'
-            f'{caption}</span><br>{html.escape(topic)}')
-
-    # ----- 功能面板（点桌宠后展开）-----
-    def _build_panel(self) -> QWidget:
-        page = QWidget()
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(Spacing.SM)
+        lay.setSpacing(6)
 
         head = QHBoxLayout()
-        head.addWidget(_label("老师正在讲", "Caption"))
+        head.addWidget(_label("老师正在讲", CAPTION))
         head.addStretch()
-        self.tc_lbl = _label(self.current_tc, "Timecode")
+        self.tc_lbl = _label("00:00", f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;"
+                                      "font-family: Consolas, 'Cascadia Mono', monospace;")
         head.addWidget(self.tc_lbl)
         lay.addLayout(head)
 
-        self.topic_lbl = _label(self.current_concept.topic, "Topic", wrap=True)
+        self.topic_lbl = _label("等待老师开讲…", f"color: {Colors.TEXT_PRIMARY}; font-size: 21px;"
+                                              "font-weight: 700;", wrap=True)
         lay.addWidget(self.topic_lbl)
-
-        self.summary_lbl = _label(WAIT_HINT, "BodySecondary", wrap=True)
+        self.summary_lbl = _label(WAIT_HINT, f"color: {Colors.TEXT_SECONDARY}; font-size: 13px;",
+                                  wrap=True)
         lay.addWidget(self.summary_lbl)
 
-        # 课程进度
         self.progress = QProgressBar()
         self.progress.setRange(0, 1000)
-        self.progress.setValue(0)
         self.progress.setTextVisible(False)
-        self.progress.setFixedHeight(4)
-        self.progress.hide()        # 实时听课没有总时长，只有 demo 回放才显示进度
+        self.progress.setFixedHeight(3)
+        self.progress.setStyleSheet(
+            f"QProgressBar {{ background: {Colors.BORDER}; border: none; border-radius: 1px; }}"
+            f"QProgressBar::chunk {{ background: {Colors.TEXT_SECONDARY}; border-radius: 1px; }}")
+        self.progress.hide()        # 实时听课没有总时长，只有 demo 回放显示进度
         lay.addWidget(self.progress)
 
-        # 实时字幕
-        self.caption_lbl = _label("", wrap=True)
-        self.caption_lbl.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 12px; background: {Colors.SURFACE};"
-            f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.MD}px; padding: 8px 10px;")
+        # 实时字幕：左侧细线，安静地滚动
+        self.caption_lbl = _label("", f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;"
+                                      f"border-left: 2px solid {Colors.BORDER_STRONG};"
+                                      "padding: 2px 0 2px 10px;", wrap=True)
         self.caption_lbl.hide()
         lay.addWidget(self.caption_lbl)
 
-        lay.addSpacing(Spacing.XS)
-
-        # 次要反馈 + 主行动「我掉队了」
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(Spacing.SM)
-        self.btn_ok = StateButton("✓", "跟上了", "ok")
-        self.btn_warn = StateButton("?", "有点懵", "warn")
-        self.btn_ok.clicked.connect(self._on_ok)
-        self.btn_warn.clicked.connect(self._on_warn)
-        btn_row.addWidget(self.btn_ok)
-        btn_row.addWidget(self.btn_warn)
-        lay.addLayout(btn_row)
-
-        self.btn_lost = QPushButton("!   我掉队了")
-        self.btn_lost.setObjectName("Lost")
-        self.btn_lost.setCursor(QCursor(Qt.PointingHandCursor))
-        self.btn_lost.setMinimumHeight(42)
-        self.btn_lost.clicked.connect(self._on_lost)
+        lay.addSpacing(Spacing.SM)
+        self.btn_lost = _btn("我掉队了", "Accent", self._on_lost, "Echo 回看最近几分钟，找到你从哪一步开始没听懂")
+        self.btn_lost.setMinimumHeight(46)
         lay.addWidget(self.btn_lost)
 
+        row = QHBoxLayout()
+        row.setSpacing(Spacing.SM)
+        self.btn_ok = _btn("✓  跟上了", "Quiet", self._on_ok)
+        self.btn_warn = _btn("?  有点懵", "Quiet", self._on_warn)
+        row.addWidget(self.btn_ok)
+        row.addWidget(self.btn_warn)
+        lay.addLayout(row)
         return page
 
-    # ----- 掉队展开面板 -----
-    def _build_expanded(self) -> QWidget:
+    # ----- 1 折叠条 -----
+    def _build_mini(self) -> QWidget:
+        page = QWidget()
+        lay = QHBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(Spacing.SM)
+        self.mini_cat = CatAvatar(28)
+        lay.addWidget(self.mini_cat)
+        col = QVBoxLayout()
+        col.setSpacing(0)
+        col.addWidget(_label("老师正在讲", f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"))
+        self.mini_topic = _label("等待老师开讲…", f"color: {Colors.TEXT_PRIMARY}; font-size: 14px;"
+                                                "font-weight: 600;")
+        self.mini_topic.setMinimumWidth(10)
+        self.mini_topic.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        col.addWidget(self.mini_topic)
+        lay.addLayout(col, 1)
+        b = _btn("掉队了", "Accent", self._on_lost)
+        b.setStyleSheet("font-size: 13px; padding: 6px 12px;")
+        lay.addWidget(b)
+        ex = _btn("⌃", "IconBtn", lambda: self._show_page(LISTEN), "展开")
+        ex.setFixedSize(26, 26)
+        lay.addWidget(ex)
+        return page
+
+    # ----- 2 断点页（主画面）-----
+    def _build_break(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(Spacing.MD)
+
+        self.break_cap = _label("你可能从这里开始掉队", TITLE)
+        lay.addWidget(self.break_cap)
+
+        # 加载
+        self.bp_loading = QFrame()
+        self.bp_loading.setObjectName("BpLoading")
+        self.bp_loading.setStyleSheet(f"QFrame#BpLoading {{ background: {Colors.SURFACE};"
+                                      f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.MD}px; }}")
+        bl = QHBoxLayout(self.bp_loading)
+        bl.setContentsMargins(Spacing.LG, Spacing.LG, Spacing.LG, Spacing.LG)
+        self.bp_dots = PulseDots(Colors.ACCENT)
+        bl.addWidget(self.bp_dots, 0, Qt.AlignVCenter)
+        self.bp_loading_lbl = _label("正在回看最近几分钟的课…", f"color: {Colors.TEXT_PRIMARY}; font-size: 14px;",
+                                     wrap=True)
+        bl.addWidget(self.bp_loading_lbl, 1)
+        lay.addWidget(self.bp_loading)
+
+        self.path = BreakPath()
+        lay.addWidget(self.path)
+
+        # 你缺的这一步：全页最大、最醒目
+        self.miss_card = QFrame()
+        self.miss_card.setObjectName("MissCard")
+        self.miss_card.setStyleSheet(
+            f"QFrame#MissCard {{ background: {Colors.SURFACE}; border: 1px solid {Colors.ACCENT_BORDER};"
+            f"border-left: 4px solid {Colors.ACCENT}; border-radius: {Radius.MD}px; }}")
+        ml = QVBoxLayout(self.miss_card)
+        ml.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        ml.setSpacing(6)
+        ml.addWidget(_label("你缺的这一步", f"color: {Colors.ACCENT}; font-size: 12px; font-weight: 700;"))
+        self.missing_lbl = _label("", f"color: {Colors.TEXT_PRIMARY}; font-size: 19px; font-weight: 700;",
+                                  wrap=True)
+        ml.addWidget(self.missing_lbl)
+        self.reason_lbl = _label("", f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;", wrap=True)
+        ml.addWidget(self.reason_lbl)
+        lay.addWidget(self.miss_card)
+
+        self.btn_fill = _btn("30 秒补上这一步", "Accent", self._go_lesson)
+        self.btn_fill.setMinimumHeight(44)
+        lay.addWidget(self.btn_fill)
+        return page
+
+    # ----- 3 补课三段式 -----
+    def _build_lesson(self) -> QWidget:
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -269,89 +289,27 @@ class FloatingWindow(QWidget):
 
         head = QVBoxLayout()
         head.setSpacing(2)
-        head.addWidget(_label("你可能在这里掉队了", "Title"))
-        self.bp_reason_lbl = _label("", "BodySecondary", wrap=True)
-        self.bp_reason_lbl.hide()
-        head.addWidget(self.bp_reason_lbl)
+        head.addWidget(_label("补上这一步 · 约 30 秒", CAPTION))
+        self.lesson_title = _label("", TITLE, wrap=True)
+        head.addWidget(self.lesson_title)
         lay.addLayout(head)
 
-        # Concept Timeline
-        self.timeline = ConceptTimeline()
-        lay.addWidget(self.timeline)
-
-        # 加载中
-        self.bp_loading = LoadingCard("Echo 正在回看最近几分钟")
-        self.bp_loading.hide()
-        lay.addWidget(self.bp_loading)
-
-        # 缺失提示
-        self.miss_card = _card("MissCard", Colors.WARNING_CARD, Colors.WARNING_CARD_BORDER,
-                               f"border-left: 4px solid {Colors.NODE_WARN};")
-        ml = QVBoxLayout(self.miss_card)
-        ml.setContentsMargins(Spacing.MD, Spacing.SM + 2, Spacing.MD, Spacing.SM + 2)
-        ml.setSpacing(4)
-        cap = _label("可能缺失的一步")
-        cap.setStyleSheet(f"color: {Colors.WARNING}; font-size: 12px; font-weight: 600;"
-                          "background: transparent; border: none;")
-        ml.addWidget(cap)
-        self.missing_lbl = _label("", wrap=True)
-        self.missing_lbl.setStyleSheet("font-size: 15px; font-weight: 600;"
-                                       "background: transparent; border: none;")
-        ml.addWidget(self.missing_lbl)
-        lay.addWidget(self.miss_card)
-
-        # 操作按钮
-        act = QHBoxLayout()
-        act.setSpacing(Spacing.SM)
-        self.btn_fill = PrimaryButton("30 秒帮我补上")
-        self.btn_fill.setMinimumHeight(38)
-        self.btn_fill.clicked.connect(self._go_lesson)
-        self.btn_self = GhostButton("我自己看看")
-        self.btn_self.setMinimumHeight(38)
-        self.btn_self.clicked.connect(self._switch_panel)
-        act.addWidget(self.btn_fill, 3)
-        act.addWidget(self.btn_self, 2)
-        lay.addLayout(act)
-
-        return page
-
-    # ----- 30 秒补上 -----
-    def _build_lesson(self) -> QWidget:
-        page = QWidget()
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(Spacing.SM)
-
-        lay.addWidget(_label("补上这一步 · 约 30 秒", "Caption"))
-
-        self.lesson_concept_lbl = _label("", "Topic", wrap=True)
-        lay.addWidget(self.lesson_concept_lbl)
-
-        self.lesson_missing_lbl = _label("", wrap=True)
-        self.lesson_missing_lbl.setStyleSheet(f"color: {Colors.WARNING}; font-size: 13px;")
-        lay.addWidget(self.lesson_missing_lbl)
-
-        # micro lesson 内容
-        card = _card("LessonCard")
-        cl = QVBoxLayout(card)
-        cl.setContentsMargins(Spacing.LG, Spacing.MD + 2, Spacing.LG, Spacing.SM)
-        self.lesson_body = _label("", "Body", wrap=True)
-        self.lesson_body.setTextFormat(Qt.RichText)
-        self.lesson_body.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.lesson_body.setStyleSheet("font-size: 13px; background: transparent; border: none;")
-        cl.addWidget(self.lesson_body)
-        lay.addWidget(card)
+        steps = QVBoxLayout()
+        steps.setSpacing(0)
+        self.step_known = LessonStep("known")
+        self.step_main = LessonStep("step")
+        self.step_now = LessonStep("now")
+        for w in (self.step_known, self.step_main, self.step_now):
+            steps.addWidget(w)
+        lay.addLayout(steps)
 
         lay.addSpacing(Spacing.XS)
-
-        self.btn_gotit = PrimaryButton("✓  补上了，继续听课")
-        self.btn_gotit.setMinimumHeight(38)
-        self.btn_gotit.clicked.connect(self._on_fixed)
+        self.btn_gotit = _btn("✓  补上了，回到课堂", "Solid", self._on_fixed)
+        self.btn_gotit.setMinimumHeight(42)
         lay.addWidget(self.btn_gotit)
-
         return page
 
-    # ----- 回响页 -----
+    # ----- 4 回响 -----
     def _build_echo(self) -> QWidget:
         page = QWidget()
         lay = QVBoxLayout(page)
@@ -360,315 +318,344 @@ class FloatingWindow(QWidget):
 
         head = QVBoxLayout()
         head.setSpacing(2)
-        head.addWidget(_label("今天的课", "Title"))
-        self.echo_sub = _label("", "Caption")
+        head.addWidget(_label("今天的课", TITLE))
+        self.echo_sub = _label("", CAPTION)
         head.addWidget(self.echo_sub)
         lay.addLayout(head)
 
-        self.echo_hint = LoadingCard("Echo 正在生成课堂回响")
-        lay.addWidget(self.echo_hint)
+        self.echo_loading = QFrame()
+        self.echo_loading.setObjectName("EchoLoading")
+        self.echo_loading.setStyleSheet(f"QFrame#EchoLoading {{ background: {Colors.SURFACE};"
+                                        f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.MD}px; }}")
+        el = QHBoxLayout(self.echo_loading)
+        el.setContentsMargins(Spacing.LG, Spacing.LG, Spacing.LG, Spacing.LG)
+        self.echo_dots = PulseDots(Colors.TEXT_SECONDARY)
+        el.addWidget(self.echo_dots, 0, Qt.AlignVCenter)
+        self.echo_loading_lbl = _label("正在整理这节课…", f"color: {Colors.TEXT_PRIMARY}; font-size: 14px;")
+        el.addWidget(self.echo_loading_lbl, 1)
+        lay.addWidget(self.echo_loading)
 
-        self.mastery_card = _card("MasteryCard")
-        mc = QVBoxLayout(self.mastery_card)
-        mc.setContentsMargins(Spacing.MD, Spacing.SM, Spacing.MD, Spacing.SM)
-        self.mastery = MasteryList()
-        mc.addWidget(self.mastery)
-        lay.addWidget(self.mastery_card)
+        self.echo_path = QWidget()
+        self.echo_path_lay = QVBoxLayout(self.echo_path)
+        self.echo_path_lay.setContentsMargins(0, 0, 0, 0)
+        self.echo_path_lay.setSpacing(0)
+        lay.addWidget(self.echo_path)
 
-        # 掉队点复习链
-        self.chain_card = _card("ChainCard")
-        cl = QVBoxLayout(self.chain_card)
-        cl.setContentsMargins(Spacing.MD, Spacing.MD, Spacing.MD, Spacing.MD)
-        cl.setSpacing(Spacing.SM)
-        cap = _label("你的掉队点 → 复习路径", "Caption")
-        cap.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 12px; font-weight: 600;")
-        cl.addWidget(cap)
+        self.review_card = QFrame()
+        self.review_card.setObjectName("ReviewCard")
+        self.review_card.setStyleSheet(
+            f"QFrame#ReviewCard {{ background: {Colors.SURFACE}; border: 1px solid {Colors.BORDER};"
+            f"border-radius: {Radius.MD}px; }}")
+        rl = QVBoxLayout(self.review_card)
+        rl.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        rl.setSpacing(4)
+        rl.addWidget(_label("建议先回看", f"color: {Colors.ACCENT}; font-size: 12px; font-weight: 700;"))
+        self.review_first = _label("", f"color: {Colors.TEXT_PRIMARY}; font-size: 17px; font-weight: 700;",
+                                   wrap=True)
+        rl.addWidget(self.review_first)
+        self.review_chain = _label("", CAPTION, wrap=True)
+        rl.addWidget(self.review_chain)
+        self.review_tip = _label("", f"color: {Colors.TEXT_SECONDARY}; font-size: 13px;", wrap=True)
+        rl.addWidget(self.review_tip)
+        lay.addWidget(self.review_card)
 
-        self.chain_box = QWidget()
-        self.chain_lay = QVBoxLayout(self.chain_box)
-        self.chain_lay.setContentsMargins(0, 0, 0, 0)
-        self.chain_lay.setSpacing(0)
-        cl.addWidget(self.chain_box)
-
-        self.suggest_lbl = _label("", wrap=True)
-        self.suggest_lbl.setStyleSheet(
-            f"color: {Colors.PRIMARY}; background: {Colors.PRIMARY_LIGHT}; font-size: 12px;"
-            f"border-radius: {Radius.SM}px; padding: 6px 8px;")
-        cl.addWidget(self.suggest_lbl)
-        lay.addWidget(self.chain_card)
-
-        self.btn_restart = QPushButton("重新开始一节课")
-        self.btn_restart.setObjectName("Small")
-        self.btn_restart.setCursor(QCursor(Qt.PointingHandCursor))
-        self.btn_restart.clicked.connect(self._restart)
-        lay.addWidget(self.btn_restart, 0, Qt.AlignRight)
-
+        row = QHBoxLayout()
+        row.addStretch()
+        row.addWidget(_btn("开始新的一节课", "Link", self._restart))
+        lay.addLayout(row)
         return page
 
-    # ========== 状态切换 ==========
+    # ================= 页面切换 / 尺寸 =================
     def _show_page(self, idx):
-        # 非当前页设为 Ignored，避免 QStackedWidget 按最高的页面撑高窗口
-        for i in range(self.stack.count()):
-            self.stack.widget(i).setSizePolicy(
-                QSizePolicy.Preferred if i == idx else QSizePolicy.Ignored,
-                QSizePolicy.Preferred if i == idx else QSizePolicy.Ignored)
+        self._page = idx
+        for i in range(self.stack.count()):     # 非当前页不参与尺寸计算
+            pol = QSizePolicy.Preferred if i == idx else QSizePolicy.Ignored
+            self.stack.widget(i).setSizePolicy(pol, pol)
         self.stack.setCurrentIndex(idx)
-        is_pet = idx == 0
-        if is_pet:
-            self.layout().setContentsMargins(4, 4, 4, 4)
-        else:
-            self.layout().setContentsMargins(SHADOW + Spacing.MD, SHADOW + Spacing.SM,
-                                             SHADOW + Spacing.MD, SHADOW + Spacing.MD)
-        self.title_bar.setVisible(not is_pet)
-        self.title_gap.setVisible(not is_pet)
-        self.min_btn.setVisible(idx in (1, 2, 3))
-        self.end_btn.setVisible(idx != 4)
-        m = self.layout().contentsMargins()
-        self.setFixedWidth(PAGE_WIDTH[idx] + m.left() + m.right())
+
+        mini = idx == MINI
+        self.header.setVisible(not mini)
+        self.back_btn.setVisible(idx in (BREAK, LESSON))
+        self.end_btn.setVisible(idx == LISTEN)
+        self.fold_btn.setVisible(idx == LISTEN)
+        m = Spacing.MD if mini else Spacing.LG
+        self.layout().setContentsMargins(SHADOW + m, SHADOW + (Spacing.SM if mini else Spacing.MD),
+                                         SHADOW + m, SHADOW + (Spacing.SM if mini else Spacing.LG))
         self._fit()
 
     def _fit(self):
-        # 只按当前页计算高度（QStackedLayout 的 heightForWidth 会取所有页的最大值）
+        """按当前页内容算窗口大小；窗口在屏幕下半部时保持底边不动（往上长），不跑出屏幕。"""
         def do():
             idx = self.stack.currentIndex()
-            page = self.stack.currentWidget()
-            pl = page.layout()
+            pl = self.stack.currentWidget().layout()
             pl.activate()
             w = PAGE_WIDTH[idx]
             h = pl.totalHeightForWidth(w) if pl.hasHeightForWidth() else pl.totalSizeHint().height()
             m = self.layout().contentsMargins()
-            if self.title_bar.isVisible():
-                h += self.title_bar.height() + self.title_gap.height()
-            self.setFixedHeight(h + m.top() + m.bottom())
+            if self.header.isVisible():
+                h += self.header.sizeHint().height() + self.layout().spacing()
+            W, H = w + m.left() + m.right(), h + m.top() + m.bottom()
+
+            old = self.geometry()
+            scr = (self.screen() or QApplication.primaryScreen()).availableGeometry()
+            x, y = old.x(), old.y()
+            if self.isVisible():
+                if old.center().y() > scr.center().y():
+                    y = old.bottom() + 1 - H
+                if old.center().x() > scr.center().x():
+                    x = old.right() + 1 - W
+                x = max(scr.left() - SHADOW, min(x, scr.right() + SHADOW - W))
+                y = max(scr.top() - SHADOW, min(y, scr.bottom() + SHADOW - H))
+            self.setFixedSize(W, H)
+            if self.isVisible() and (x, y) != (old.x(), old.y()):
+                self.move(x, y)
         do()
         QTimer.singleShot(0, do)   # 换行文本需要一轮事件循环后才能算准高度
         self.update()
 
-    def _switch_pet(self):
-        self._show_page(0)
-        self.pet.set_emotion("idle")
+    def _back_to_listen(self):
+        self._show_page(LISTEN)
 
+    # 兼容旧调用
     def _switch_panel(self):
-        self._show_page(1)
+        self._show_page(LISTEN)
+
+    def _switch_pet(self):
+        self._show_page(MINI)
 
     def _switch_expanded(self):
-        self._show_page(2)
+        self._show_page(BREAK)
 
     def _go_lesson(self):
-        self._show_page(3)
-        self.pet.set_emotion("thinking")
+        self._show_page(LESSON)
+        self._cat("thinking")
 
     def _go_echo(self):
-        self.echo_hint.start("Echo 正在生成课堂回响")
+        self.echo_loading_lbl.setText("正在整理这节课…")
+        self.echo_dots.start()
+        self.echo_loading.show()
+        self.echo_path.hide()
+        self.review_card.hide()
         self.echo_sub.setText("")
-        self.mastery_card.hide()
-        self.chain_card.hide()
-        self._render_chain([], "")
         self.echo.end_lesson()
-        self._show_page(4)
+        self._show_page(ECHO)
 
     def _restart(self):
-        self.current_concept = Concept("00:00", "等待老师开讲…", [], [], "", "now")
-        self.topic_lbl.setText(self.current_concept.topic)
+        self.current_concept = None
+        self.last_bp = None
+        self._fixed.clear()
+        self.topic_lbl.setText("等待老师开讲…")
+        self.mini_topic.setText("等待老师开讲…")
         self.summary_lbl.setText(WAIT_HINT)
         self.summary_lbl.show()
         self.caption_lbl.hide()
-        self._set_bubble(self.current_concept.topic)
         self.tc_lbl.setText("00:00")
         self.progress.setValue(0)
-        self._set_status("正在听课", Colors.SUCCESS, Colors.SUCCESS_SOFT)
         self.echo.start()
-        self._switch_pet()
+        self._show_page(LISTEN)
 
-    # ========== 按钮回调 ==========
+    def _cat(self, emotion, hold_ms=0):
+        self.cat.set_emotion(emotion, hold_ms)
+        self.mini_cat.set_emotion(emotion, hold_ms)
+
+    # ================= 按钮 =================
     def _on_ok(self):
         self.echo.feedback("ok")
-        self._flash(self.btn_ok, Colors.SUCCESS_BG)
-        self.pet.set_emotion("ok")
-        QTimer.singleShot(2500, lambda: self.pet.set_emotion("idle"))
+        self._ack(self.btn_ok)
+        self._cat("ok", 2200)
 
     def _on_warn(self):
         self.echo.feedback("warn")
-        self._flash(self.btn_warn, Colors.WARNING_BG)
-        self.pet.set_emotion("warn")
+        self._ack(self.btn_warn)
+        self._cat("warn", 3000)
 
     def _on_lost(self):
-        # 核心：调用 Break Point Engine（异步，结果见 _on_breakpoint）
-        self.pet.set_emotion("lost")
+        # 核心：Break Point Engine（异步，结果见 _on_breakpoint）
+        self._cat("lost")
         self.echo.feedback("lost")
-        self.timeline.set_concepts(self.echo.engine.concepts()[-4:] or [self.current_concept])
-        self.bp_reason_lbl.hide()
+        self.break_cap.setText("Echo 正在找你掉队的地方")
+        self.path.clear()
         self.miss_card.hide()
-        self.bp_loading.start("Echo 正在回看最近几分钟，寻找你的知识断点")
+        self.bp_loading_lbl.setText("正在回看最近几分钟的课…")
+        self.bp_dots.start()
+        self.bp_loading.show()
         self.btn_fill.setEnabled(False)
-        self._switch_expanded()
+        self._show_page(BREAK)
 
     def _on_fixed(self):
-        """补上了：先开心，再缩回桌宠"""
-        self.pet.set_emotion("fixed")
-        QTimer.singleShot(1500, self._switch_pet)
+        if self.last_bp:
+            self._fixed.add(self.last_bp.concept)
+        if hasattr(self.echo, "mark_fixed"):
+            self.echo.mark_fixed()
+        self._cat("fixed", 2500)
+        self._show_page(LISTEN)
 
-    def _flash(self, btn, color):
+    def _ack(self, btn):
         """点击后短暂显示「已记录」，给学生一个确认感。"""
         if getattr(btn, "_orig_text", None) is None:
             btn._orig_text = btn.text()
-        btn.setText("  已记录")
+        btn.setText("已记录")
         btn.setEnabled(False)
 
         def restore():
             btn.setText(btn._orig_text)
             btn.setEnabled(True)
-        QTimer.singleShot(900, restore)
+        QTimer.singleShot(1000, restore)
 
-    # ========== 后端信号 ==========
+    # ================= 后端信号 =================
     def _on_transcript(self, tc, text):
         self.current_tc = tc
         self.tc_lbl.setText(tc)
-        short = text if len(text) <= 60 else text[:58] + "…"
-        self.caption_lbl.setText(f"“{short}”")
+        short = text if len(text) <= 56 else text[:54] + "…"
+        self.caption_lbl.setText(short)
         self.caption_lbl.show()
-        if self.stack.currentIndex() == 1:   # 字幕行数会变（1~2 行），每句都重新算高度
-            self._fit()
-        if not self.echo.engine.current_concept():
-            s = text if len(text) <= 16 else text[:15] + "…"
-            self._set_bubble(s)
-            if self.stack.currentIndex() == 0:
-                self._fit()
         total = self.echo.total_seconds
-        t = parse_tc(tc) or 0
         self.progress.setVisible(bool(total))
         if total:
-            self.progress.setValue(int(1000 * min(1.0, t / total)))
+            self.progress.setValue(int(1000 * min(1.0, (parse_tc(tc) or 0) / total)))
+        if not self.echo.engine.current_concept():
+            self.summary_lbl.setText("正在听，马上识别知识点…")
+        if self._page == LISTEN:   # 字幕行数会变，每句重新算高度
+            self._fit()
 
     def _on_concept(self, c):
         cur = self.echo.engine.current_concept()
-        if cur is not None:
-            self.current_concept = cur
-            self.topic_lbl.setText(cur.topic)
-            self.summary_lbl.setText(cur.summary)
-            self.summary_lbl.setVisible(bool(cur.summary))
-            self._set_bubble(cur.topic)
-            if self.stack.currentIndex() in (0, 1):
-                self._fit()
+        if cur is None:
+            return
+        self.current_concept = cur
+        self.topic_lbl.setText(cur.topic)
+        self.mini_topic.setText(cur.topic)
+        self.summary_lbl.setText(cur.summary)
+        self.summary_lbl.setVisible(bool(cur.summary))
+        if self._page in (LISTEN, MINI):
+            self._fit()
 
     def _on_breakpoint(self, bp, concepts):
         self.last_bp = bp
-        self.timeline.set_concepts(concepts, breakpoint_tc=bp.breakpoint_tc,
-                                   note=bp.note or "老师快速跳过了推导")
-        self.bp_loading.stop()
-        self.bp_reason_lbl.setText(bp.reason)
-        self.bp_reason_lbl.setVisible(bool(bp.reason))
-        self.missing_lbl.setText(f"「{bp.missing}」")
+        self.last_bp_concepts = list(concepts or [])
+        self.bp_dots.stop()
+        self.bp_loading.hide()
+        self.break_cap.setText("你可能从这里开始掉队")
+        self.path.set_path(self.last_bp_concepts, bp.breakpoint_tc, bp.note)
+        self.missing_lbl.setText(bp.missing)
+        self.reason_lbl.setText(bp.reason)
+        self.reason_lbl.setVisible(bool(bp.reason))
         self.miss_card.show()
-        self.lesson_concept_lbl.setText(bp.concept)
-        self.lesson_missing_lbl.setText(f"「{bp.missing}」")
-        self.lesson_body.setText(lesson_html(bp.micro_lesson))
         self.btn_fill.setEnabled(True)
-        if self.stack.currentIndex() in (2, 3):
+        self._fill_lesson(bp)
+        if self._page in (BREAK, LESSON):
             self._fit()
 
+    def _fill_lesson(self, bp):
+        """三段式：优先用后端的 known / step / now，缺了就从时间轴和 micro_lesson 拼出来。"""
+        cs = self.last_bp_concepts
+        idx = next((i for i, c in enumerate(cs) if c.timecode == bp.breakpoint_tc), None)
+        prev = cs[idx - 1] if idx else None
+        now = cs[-1] if cs else None
+
+        known = getattr(bp, "known", "") or (
+            f"{prev.topic}：{prev.summary}" if prev and prev.summary else (prev.topic if prev else "前面的定义和例子"))
+        step = getattr(bp, "step", "") or bp.micro_lesson
+        now_txt = getattr(bp, "now", "") or (
+            f"老师现在讲的「{now.topic}」就是用这一步接着往下推的。" if now else "回到课堂，继续往下听。")
+
+        self.lesson_title.setText(bp.missing or bp.concept)
+        self.step_known.setText(rich(known))
+        self.step_main.setText(rich(step))
+        self.step_now.setText(rich(now_txt))
+
     def _on_echo(self, report):
-        self.echo_hint.stop()
-        self.mastery.set_skills(report.skills)
-        self.mastery_card.setVisible(bool(report.skills))
-        weak = sum(1 for s in report.skills if s.status != "ok")
-        self.echo_sub.setText(f"{len(report.skills)} 个知识点 · {weak} 个需要复习")
-        self._render_chain(report.review_chain, report.suggestion)
-        self.chain_card.setVisible(bool(report.review_chain or report.suggestion))
+        self.echo_dots.stop()
+        self.echo_loading.hide()
+
+        while self.echo_path_lay.count():
+            w = self.echo_path_lay.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        rows = []
+        for s in report.skills:
+            st = echo_status(s.status)
+            if st == "review" and any(f in s.name or s.name in f for f in self._fixed):
+                st = "fixed"
+            rows.append((s.name, st))
+        for i, (name, st) in enumerate(rows):
+            self.echo_path_lay.addWidget(EchoRow(name, st, first=(i == 0), last=(i == len(rows) - 1)))
+        self.echo_path.setVisible(bool(rows))
+
+        cnt = {k: sum(1 for _, s in rows if s == k) for k in ("ok", "fixed", "review")}
+        self.echo_sub.setText(f"已跟上 {cnt['ok']} · 已补上 {cnt['fixed']} · 待回看 {cnt['review']}")
+
+        chain = [c for c in report.review_chain if c]
+        if chain:
+            # review_chain 是「掉队点 → … → 根源」，展示时反过来当复习顺序
+            order = list(reversed(chain))
+            self.review_first.setText(order[0])
+            self.review_chain.setText("复习顺序：" + "  →  ".join(order) if len(order) > 1 else "")
+            self.review_chain.setVisible(len(chain) > 1)
+            self.review_tip.setText(report.suggestion or "")
+            self.review_tip.setVisible(bool(report.suggestion))
+            self.review_card.show()
+        else:
+            self.review_card.hide()
+        self._cat("ok" if not cnt["review"] else "idle")
         self._fit()
 
-    def _render_chain(self, chain, suggestion):
-        while self.chain_lay.count():
-            item = self.chain_lay.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        n = len(chain)
-        for i, name in enumerate(chain):
-            if i > 0:
-                arrow = QLabel("↓")
-                arrow.setFixedWidth(28)
-                arrow.setAlignment(Qt.AlignCenter)
-                arrow.setStyleSheet(f"color: {Colors.TEXT_DISABLED}; font-size: 13px;")
-                self.chain_lay.addWidget(arrow)
-            row = QHBoxLayout()
-            row.setSpacing(Spacing.SM)
-            if i == 0:
-                fg, bg, tag = Colors.DANGER, Colors.DANGER_BG, "掉队点"
-            elif i == n - 1:
-                fg, bg, tag = Colors.PRIMARY, Colors.PRIMARY_LIGHT, "先复习这里"
-            else:
-                fg, bg, tag = Colors.TEXT_PRIMARY, Colors.SURFACE_PRESSED, ""
-            chip = QLabel(name)
-            if len(name) > 18:
-                chip.setWordWrap(True)
-                chip.setFixedWidth(300)
-            chip.setStyleSheet(f"color: {fg}; background: {bg}; border-radius: {Radius.SM}px;"
-                               f"padding: 4px 10px; font-size: 13px;"
-                               f"font-weight: {600 if tag else 400};")
-            row.addWidget(chip, 0)
-            if tag:
-                t = QLabel(tag)
-                t.setStyleSheet(f"color: {fg}; font-size: 11px;")
-                row.addWidget(t)
-            row.addStretch()
-            holder = QWidget()
-            holder.setLayout(row)
-            row.setContentsMargins(0, 0, 0, 0)
-            self.chain_lay.addWidget(holder)
-        if suggestion:
-            self.suggest_lbl.setText(suggestion)
-        elif chain:
-            self.suggest_lbl.setText(f"建议复习：{chain[-1]}")
-        else:
-            self.suggest_lbl.setText("")
-        self.suggest_lbl.setVisible(bool(self.suggest_lbl.text()))
-
-    STATUS_STYLE = {
-        "listening":   ("正在听课", Colors.SUCCESS, Colors.SUCCESS_SOFT, False),
-        "analyzing":   ("分析中", Colors.WARNING, Colors.WARNING_SOFT, True),
-        "summarizing": ("生成回响", Colors.PRIMARY, Colors.PRIMARY_LIGHT, True),
-        "loading_asr": ("正在加载语音识别", Colors.PRIMARY, Colors.PRIMARY_LIGHT, True),
-        "done":        ("已下课", Colors.TEXT_SECONDARY, Colors.SURFACE_PRESSED, False),
+    STATUS = {
+        "listening":   ("正在听课", False),
+        "analyzing":   ("正在分析", True),
+        "summarizing": ("正在整理", True),
+        "loading_asr": ("正在加载语音识别", True),
+        "done":        ("已下课", False),
     }
 
     def _on_status(self, st):
-        text, color, bg, busy = self.STATUS_STYLE.get(st, self.STATUS_STYLE["listening"])
-        self._set_status(text, color, bg, busy)
-        self.status_pill.setToolTip("")
-        # 还没有知识点时，桌宠气泡和面板也同步提示启动状态
+        text, busy = self.STATUS.get(st, self.STATUS["listening"])
+        self.status_lbl.setText(text)
+        self.status_lbl.setToolTip("")
+        self.status_dot.setVisible(not busy)
+        self.status_dot.setStyleSheet(
+            f"color: {Colors.OK_FG if st == 'listening' else Colors.TEXT_DISABLED}; font-size: 8px;"
+            "background: transparent;")
+        if busy:
+            self.status_dots.start()
+        else:
+            self.status_dots.stop()
         if not self.echo.engine.current_concept():
             if st == "loading_asr":
-                self._set_bubble("正在加载语音识别…", caption="Echo 准备中")
                 self.summary_lbl.setText("首次加载约 10 秒，之后会自动开始听")
             elif st == "listening":
-                self._set_bubble(self.current_concept.topic)
                 self.summary_lbl.setText(WAIT_HINT)
-            if self.stack.currentIndex() in (0, 1):
+            if self._page == LISTEN:
                 self._fit()
 
     def _on_error(self, msg):
-        self._set_status("AI 出错", Colors.DANGER, Colors.DANGER_BG)
-        self.status_pill.setToolTip(msg)
-        if self.stack.currentIndex() == 2 and not self.btn_fill.isEnabled():
-            self.bp_loading.stop()
-            self.missing_lbl.setText("分析失败，请再点一次「我掉队了」")
-            self.miss_card.show()
+        self.status_lbl.setText("网络或 AI 出错")
+        self.status_lbl.setToolTip(msg)
+        self.status_dot.setStyleSheet(f"color: {Colors.ACCENT}; font-size: 8px; background: transparent;")
+        if self._page == BREAK and not self.btn_fill.isEnabled():
+            self.bp_dots.stop()
+            self.bp_loading_lbl.setText("这次没分析出来，回到课堂再点一次「我掉队了」试试")
             self._fit()
-        if self.stack.currentIndex() == 4 and self.echo_hint.isVisible():
-            self.echo_hint.setText("回响生成失败，请检查网络后重试")
+        if self._page == ECHO and self.echo_loading.isVisible():
+            self.echo_dots.stop()
+            self.echo_loading_lbl.setText("回响生成失败，请检查网络后重试")
 
     def closeEvent(self, e):
         self.echo.shutdown()
         super().closeEvent(e)
 
-    # ========== 拖拽 ==========
+    # ================= 拖动：整张卡片任意空白处都能拖 =================
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
+            h = self.windowHandle()
+            if h is not None and hasattr(h, "startSystemMove") and h.startSystemMove():
+                e.accept()
+                return
             self._drag_pos = e.globalPos() - self.frameGeometry().topLeft()
             e.accept()
 
     def mouseMoveEvent(self, e):
-        if self._drag_pos and e.buttons() & Qt.LeftButton:
+        if self._drag_pos is not None and e.buttons() & Qt.LeftButton:
             self.move(e.globalPos() - self._drag_pos)
             e.accept()
 
@@ -676,20 +663,17 @@ class FloatingWindow(QWidget):
         self._drag_pos = None
 
     def paintEvent(self, e):
-        """WinUI 风格圆角卡片 + 柔和阴影；桌宠态完全透明。"""
-        if self.stack.currentIndex() == 0:
-            return
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         rect = QRectF(self.rect()).adjusted(SHADOW, SHADOW, -SHADOW, -SHADOW)
-        # 阴影：多层半透明圆角矩形向外扩散，略向下偏移
+        r = Radius.LG + 2
         p.setPen(Qt.NoPen)
-        for i in range(SHADOW, 0, -1):
+        for i in range(SHADOW, 0, -1):    # 柔和阴影
             a = int(Colors.SHADOW_ALPHA * (1 - i / SHADOW) ** 2)
             p.setBrush(QColor(0, 0, 0, a))
-            p.drawRoundedRect(rect.adjusted(-i, -i + 3, i, i + 3), Radius.LG + i, Radius.LG + i)
+            p.drawRoundedRect(rect.adjusted(-i, -i + 3, i, i + 3), r + i, r + i)
         path = QPainterPath()
-        path.addRoundedRect(rect, Radius.LG, Radius.LG)
+        path.addRoundedRect(rect, r, r)
         p.fillPath(path, QBrush(QColor(Colors.WINDOW_BG)))
         p.setBrush(Qt.NoBrush)
         p.setPen(QPen(QColor(Colors.WINDOW_BORDER), 1))
