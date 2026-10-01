@@ -34,6 +34,10 @@ CONCEPT_INTERVAL = _int("ECHO_CONCEPT_INTERVAL", 30)
 CONCEPT_MIN_CHARS = _int("ECHO_CONCEPT_MIN_CHARS", 40)
 # 点「我掉队了」时回看多少秒 transcript
 LOST_WINDOW = _int("ECHO_LOST_WINDOW", 300)
+# 掉队分析的 LLM 超时（秒），超时走规则兜底，保证 UI 不会一直转圈
+BREAKPOINT_TIMEOUT = _int("ECHO_BREAKPOINT_TIMEOUT", 12)
+# 断点结果出来后，最多再等多久让未处理转写并入时间轴（秒）
+FLUSH_GRACE = float(os.getenv("ECHO_FLUSH_GRACE", "2"))
 
 # ---------- 音频来源 ----------
 # system: 抓电脑正在播放的声音（网课/会议）+ Whisper   mic: 麦克风   demo: 回放示例讲稿

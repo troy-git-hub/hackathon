@@ -201,8 +201,10 @@ class EchoEngine:
                         continue
                     topic = str(seg.get("topic") or "").strip() or "课堂内容"
                     prev = self.entries[-1] if self.entries else None
-                    if prev and prev.concept.topic == topic:
+                    if prev and _same_topic(prev.concept.topic, topic):
                         c = prev.concept
+                        if len(topic) < len(c.topic):   # 「贝叶斯公式引入」→「贝叶斯公式」取更短的正式名
+                            c.topic = topic
                         c.concepts = _merge(c.concepts, seg.get("concepts"))[:6]
                         c.prerequisites = _merge(c.prerequisites, seg.get("prerequisites"))[:4]
                         c.summary = seg.get("summary") or c.summary
@@ -270,8 +272,10 @@ class EchoEngine:
             feedback = self._feedback_text()
             cur = self.entries[-1].concept.topic if self.entries else "（未知）"
 
+        data = None
         if self.llm and window:
-            data = self.llm.json(
+            try:
+                data = self.llm.json(
                 prompts.BREAKPOINT_SYSTEM,
                 prompts.BREAKPOINT_USER.format(
                     timeline=timeline or "（暂无）",
@@ -279,13 +283,19 @@ class EchoEngine:
                     window=f"{config.LOST_WINDOW // 60} 分钟",
                     transcript="\n".join(f"[{l.tc}] {l.text}" for l in window),
                     current=cur, now=fmt_tc(now)),
-                temperature=0.4, max_tokens=1000)
+                temperature=0.4, max_tokens=800,
+                timeout=config.BREAKPOINT_TIMEOUT, attempts=1)
+            except Exception as e:   # 掉队是核心交互，LLM 挂了也要给出断点，不能让 UI 卡在 analyzing
+                log.warning("断点 LLM 失败，使用规则兜底: %s", e)
+        if data is not None:
             bp = BreakPoint(breakpoint_tc=str(data.get("breakpoint") or ""),
                             concept=str(data.get("concept") or cur),
                             missing=str(data.get("missing") or ""),
                             reason=str(data.get("reason") or ""),
                             micro_lesson=str(data.get("micro_lesson") or ""),
                             note=str(data.get("note") or ""))
+        elif self.llm and window:
+            bp = self._heuristic_breakpoint(cur)
         elif self.llm:
             bp = BreakPoint("", cur, "Echo 还没听到课堂内容",
                             "请确认网课正在播放，且声音没有静音",
@@ -297,15 +307,36 @@ class EchoEngine:
                             s.micro_lesson, note="老师快速跳过了推导")
 
         if flush:
+            # 只短暂等一下：来得及就把最新知识点并进时间轴，来不及也先出断点（concept 稍后照常推送）
             try:
-                flush.result(timeout=config.LLM_TIMEOUT)
+                flush.result(timeout=config.FLUSH_GRACE)
             except Exception as e:
-                log.warning("flush concept 失败: %s", e)
+                log.info("flush concept 未及时完成: %s", e)
         shown = self._attach_breakpoint(bp)
         with self._lock:
             self.breakpoints.append(bp)
         self.on_status("listening")
         self.on_breakpoint(bp, shown)
+
+    def _heuristic_breakpoint(self, cur: str) -> BreakPoint:
+        """规则兜底：取最近一个点过「有点懵」的知识点，否则取「现在」的前一个。"""
+        with self._lock:
+            entries = list(self.entries)
+            idx = next((i for i in range(len(entries) - 1, -1, -1)
+                        if "warn" in self._feedback_of(i)), None)
+        if idx is None:
+            idx = max(0, len(entries) - 2)
+        if not entries:
+            return BreakPoint("", cur, f"「{cur}」是怎么来的？", "这一段讲得比较快",
+                              "Echo 暂时连不上 AI，建议回看最近 1~2 分钟的课程内容。", note="讲得比较快")
+        c = entries[idx].concept
+        pre = "、".join(c.prerequisites) or "前面的定义"
+        lesson = (f"你可能在「{c.topic}」这里掉队了。\n"
+                  f"老师在讲：{c.summary}\n"
+                  f"它依赖的前置知识是：{pre}，先确认这些你都清楚。\n"
+                  f"Echo 暂时连不上 AI，建议回看 {c.timecode} 附近的内容，再接上老师现在讲的「{cur}」。")
+        return BreakPoint(c.timecode, c.topic, f"「{c.topic}」是怎么来的？",
+                          f"这里依赖{pre}，讲得比较快", lesson, note="这里讲得比较快")
 
     def _attach_breakpoint(self, bp: BreakPoint) -> List[Concept]:
         """把断点吸附到时间轴上的某个 concept，返回给 UI 展示的那一段时间轴。"""
@@ -467,6 +498,14 @@ def _as_list(v) -> List[str]:
     if isinstance(v, str):
         return [v] if v else []
     return [str(x) for x in (v or []) if x]
+
+
+def _same_topic(a: str, b: str) -> bool:
+    """同名，或一个是另一个加了「引入/推导/定义」等后缀的近似名。"""
+    if a == b:
+        return True
+    short, long_ = sorted((a, b), key=len)
+    return len(short) >= 3 and long_.startswith(short) and len(long_) - len(short) <= 3
 
 
 def _merge(a, b) -> List[str]:
