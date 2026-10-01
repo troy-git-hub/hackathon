@@ -17,3 +17,5 @@ Thumbs.db
 
 # PyQt
 *.pyc
+
+debug.log
