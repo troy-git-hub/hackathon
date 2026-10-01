@@ -2,13 +2,16 @@
 Echo - 后端 ↔ PyQt 桥接
 引擎回调发生在后台线程，这里转成 Qt 信号，UI 槽函数会自动在主线程执行。
 
+课程隔离：引擎的所有事件都带 session 号，先经内部信号排队到主线程，
+在主线程再核对一次——重开课程前已经排进 Qt 队列、但还没送到的旧事件也会被丢掉。
+
 用法：
     self.echo = EchoBridge()
     self.echo.transcript.connect(...)
     self.echo.start()
     self.echo.feedback("lost")
 """
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 
 from echo.backend import config
 from echo.backend.engine import EchoEngine
@@ -23,26 +26,35 @@ class EchoBridge(QObject):
     status = pyqtSignal(str)                 # listening / analyzing / summarizing / loading_asr / done
     error = pyqtSignal(str)
 
+    _event = pyqtSignal(int, str, object)    # 内部：session, 事件名, 参数元组
+
     def __init__(self, source=None, parent=None):
         super().__init__(parent)
         self.source_kind = (source or config.SOURCE).lower()
         interval = config.DEMO_LINE_INTERVAL * 3 if self.source_kind == "demo" else None
+        self._event.connect(self._dispatch)
         self.engine = EchoEngine(
-            on_transcript=self.transcript.emit,
-            on_concept=self.concept.emit,
-            on_breakpoint=self.breakpoint.emit,
-            on_echo=self.echo.emit,
-            on_status=self.status.emit,
-            on_error=self.error.emit,
+            on_event=lambda sid, name, *args: self._event.emit(sid, name, args),
             concept_interval=interval,
         )
         self.source = None
+
+    @pyqtSlot(int, str, object)
+    def _dispatch(self, sid, name, args):
+        if sid != self.engine.session:      # 上一节课的迟到事件
+            return
+        getattr(self, name).emit(*args)
+
+    @property
+    def session(self):
+        return self.engine.session
 
     @property
     def total_seconds(self):
         return getattr(self.source, "total", 0) or 0
 
     def start(self):
+        """开始（或重新开始）一节课：停掉旧音频来源，新 session，新来源。"""
         if self.source:
             self.source.stop()
         self.engine.start()

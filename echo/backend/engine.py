@@ -8,6 +8,9 @@ Echo - 课堂引擎（后端核心）
 
 线程模型：所有 LLM 调用在后台线程执行，结果通过回调抛出。
 回调会在后台线程里被调用，UI 层请自行切回主线程（见 qt_bridge.py）。
+
+课程隔离：每次 start() 开一个新 session。所有后台任务都带着发起时的 session 号，
+写状态、发回调前都会核对；结束/重开课程后，上一节课迟到的 LLM 结果和转写一律丢弃。
 """
 import logging
 import threading
@@ -85,13 +88,16 @@ class EchoEngine:
                  on_status: Callable[[str], None] = None,
                  on_error: Callable[[str], None] = None,
                  concept_interval: float = None,
-                 use_llm: bool = True):
+                 use_llm: bool = True,
+                 on_event: Callable = None):
         self.on_transcript = on_transcript or (lambda tc, text: None)
         self.on_concept = on_concept or (lambda c: None)
         self.on_breakpoint = on_breakpoint or (lambda bp, cs: None)
         self.on_echo = on_echo or (lambda r: None)
         self.on_status = on_status or (lambda s: None)
         self.on_error = on_error or (lambda e: None)
+        # 可选：统一事件出口 on_event(session, name, *args)，给 Qt 桥接在主线程再核对一次 session
+        self.on_event = on_event
         self.concept_interval = concept_interval or config.CONCEPT_INTERVAL
 
         self.llm: Optional[LLM] = None
@@ -102,15 +108,19 @@ class EchoEngine:
                 log.warning("LLM 不可用，使用 mock 数据: %s", e)
 
         self._lock = threading.RLock()
-        self._concept_lock = threading.Lock()
-        self._pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="echo-llm")
+        # 上一节课还没跑完的 LLM 任务会占着线程，多留几个，不拖慢新课
+        self._pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="echo-llm")
+        self.session = 0
         self._stop = threading.Event()
         self._ticker: Optional[threading.Thread] = None
         self.reset()
 
     # ================= 生命周期 =================
     def reset(self):
+        """开一个新 session：清空课堂数据，之前发起的后台任务全部作废。"""
         with self._lock:
+            self.session += 1
+            self._concept_lock = threading.Lock()   # 每节课一把，旧任务卡住也不会挡新课
             self.start_ts = time.time()
             self.lines: List[Line] = []
             self.entries: List[_ConceptEntry] = []
@@ -120,14 +130,39 @@ class EchoEngine:
             self._last_extract = time.time()
 
     def start(self):
+        self._stop.set()                 # 先停掉上一节课的 ticker
         self.reset()
-        self._stop.clear()
-        self._ticker = threading.Thread(target=self._tick_loop, daemon=True, name="echo-ticker")
+        self._stop = threading.Event()   # 每节课一个独立的停止信号，旧 ticker 不会被「复活」
+        sid = self.session
+        self._ticker = threading.Thread(target=self._tick_loop, args=(sid, self._stop),
+                                        daemon=True, name=f"echo-ticker-{sid}")
         self._ticker.start()
-        self.on_status("listening")
+        self._emit(sid, "status", "listening")
 
     def stop(self):
         self._stop.set()
+
+    # ---------- session 隔离 ----------
+    def _live(self, sid) -> bool:
+        return sid == self.session
+
+    def _emit(self, sid, name, *args):
+        """只把当前这节课的结果交给 UI。"""
+        with self._lock:
+            if not self._live(sid):
+                log.info("丢弃上一节课的 %s 事件", name)
+                return
+        if self.on_event:
+            self.on_event(sid, name, *args)
+        else:
+            getattr(self, "on_" + name)(*args)
+
+    def emit_status(self, sid, st):
+        """给音频来源用：带 session 发状态。"""
+        self._emit(sid, "status", st)
+
+    def emit_error(self, sid, msg):
+        self._emit(sid, "error", msg)
 
     def shutdown(self):
         self.stop()
@@ -150,32 +185,45 @@ class EchoEngine:
             return wall
 
     # ================= 输入：transcript =================
-    def add_transcript(self, text: str, t: float = None):
+    def add_transcript(self, text: str, t: float = None, session: int = None):
+        """session：音频来源开始时拿到的 session 号；不是当前这节课的转写直接丢弃。"""
         text = (text or "").strip()
         if not text:
             return
         with self._lock:
+            sid = self.session if session is None else session
+            if not self._live(sid):
+                return
             if t is None:
                 t = time.time() - self.start_ts
             line = Line(t, text)
             self.lines.append(line)
-        self.on_transcript(line.tc, text)
+        self._emit(sid, "transcript", line.tc, text)
 
-    def _tick_loop(self):
-        while not self._stop.wait(1.0):
+    def _tick_loop(self, sid, stop_event):
+        while not stop_event.wait(1.0):
             with self._lock:
+                if not self._live(sid):
+                    return
                 pending = self.lines[self._pending_from:]
                 chars = sum(len(l.text) for l in pending)
                 due = time.time() - self._last_extract >= self.concept_interval
             if pending and (chars >= config.CONCEPT_MIN_CHARS and due or chars >= 400):
-                self._pool.submit(self._safe, self._extract_concept)
+                self._pool.submit(self._safe, sid, self._extract_concept, False, sid)
 
     # ================= Concept Timeline =================
-    def _extract_concept(self, force=False):
-        if not self._concept_lock.acquire(blocking=force):
+    def _extract_concept(self, force=False, sid=None):
+        with self._lock:
+            sid = self.session if sid is None else sid
+            if not self._live(sid):
+                return
+            concept_lock = self._concept_lock
+        if not concept_lock.acquire(blocking=force):
             return
         try:
             with self._lock:
+                if not self._live(sid):
+                    return
                 pending = self.lines[self._pending_from:]
                 if not pending:
                     return
@@ -195,6 +243,8 @@ class EchoEngine:
 
             changed = []
             with self._lock:
+                if not self._live(sid):   # LLM 返回时已经换了一节课：结果作废
+                    return
                 self._pending_from = end_idx
                 self._last_extract = time.time()
                 for seg in segs:
@@ -227,9 +277,9 @@ class EchoEngine:
                     if c not in changed:
                         changed.append(c)
             for c in changed:
-                self.on_concept(c)
+                self._emit(sid, "concept", c)
         finally:
-            self._concept_lock.release()
+            concept_lock.release()
 
     def _mock_concept(self, chunk):
         for c in SAMPLE_CONCEPTS:
@@ -254,17 +304,20 @@ class EchoEngine:
         with self._lock:
             cur = self.entries[-1] if self.entries else None
             self.feedbacks.append(Feedback(self.now(), kind, cur.concept.topic if cur else ""))
+            sid = self.session
         if kind == "lost":
-            self.on_status("analyzing")
-            self._pool.submit(self._safe, self._find_breakpoint)
+            self._emit(sid, "status", "analyzing")
+            self._pool.submit(self._safe, sid, self._find_breakpoint, sid)
 
     # ================= Break Point Engine =================
-    def _find_breakpoint(self):
+    def _find_breakpoint(self, sid):
         # 同时把还没处理的 transcript 抽成 concept（并行，不阻塞断点分析；
         # 断点 prompt 本身带原始转写，时间轴只用于展示和吸附）
         with self._lock:
+            if not self._live(sid):
+                return
             has_pending = sum(len(l.text) for l in self.lines[self._pending_from:]) >= 10
-        flush = self._pool.submit(self._extract_concept, True) if has_pending else None
+        flush = self._pool.submit(self._extract_concept, True, sid) if has_pending else None
 
         with self._lock:
             now = self.now()
@@ -300,18 +353,20 @@ class EchoEngine:
                             now=str(data.get("now") or ""))
         elif self.llm and window:
             bp = self._heuristic_breakpoint(cur)
-        elif self.llm:
+        elif not window:
             bp = BreakPoint("", cur, "Echo 还没听到课堂内容",
                             "请确认网课正在播放，且声音没有静音",
                             "Echo 会自动抓取电脑正在播放的声音。开始播放网课后，等老师讲一两分钟再点「我掉队了」。",
                             note="还没有内容", known="网课正在播放",
                             step="确认声音没有静音\n等老师讲一两分钟",
                             now="再点「我掉队了」，Echo 就能帮你找断点")
-        else:
+        elif any("贝叶斯" in line.text for line in window):
             s = SAMPLE_BREAKPOINT
             bp = BreakPoint(s.breakpoint_tc, s.concept, s.missing, s.reason,
                             s.micro_lesson, note="老师快速跳过了推导",
                             known=s.known, step=s.step, now=s.now)
+        else:
+            bp = self._heuristic_breakpoint(cur)
 
         if flush:
             # 只短暂等一下：来得及就把最新知识点并进时间轴，来不及也先出断点（concept 稍后照常推送）
@@ -319,11 +374,13 @@ class EchoEngine:
                 flush.result(timeout=config.FLUSH_GRACE)
             except Exception as e:
                 log.info("flush concept 未及时完成: %s", e)
-        shown = self._attach_breakpoint(bp)
         with self._lock:
+            if not self._live(sid):   # 分析期间已经下课/重开：不往新课里写断点
+                return
+            shown = self._attach_breakpoint(bp)
             self.breakpoints.append(bp)
-        self.on_status("listening")
-        self.on_breakpoint(bp, shown)
+        self._emit(sid, "status", "listening")
+        self._emit(sid, "breakpoint", bp, shown)
 
     def _heuristic_breakpoint(self, cur: str) -> BreakPoint:
         """规则兜底：取最近一个点过「有点懵」的知识点，否则取「现在」的前一个。"""
@@ -406,15 +463,18 @@ class EchoEngine:
     def end_lesson(self):
         """课程结束：异步生成回响页数据。"""
         self.stop()
-        self.on_status("summarizing")
-        self._pool.submit(self._safe, self._make_echo)
+        sid = self.session
+        self._emit(sid, "status", "summarizing")
+        self._pool.submit(self._safe, sid, self._make_echo, sid)
 
-    def _make_echo(self):
+    def _make_echo(self, sid):
         with self._lock:
+            if not self._live(sid):
+                return
             has_pending = bool(self.lines[self._pending_from:])
         if has_pending:
             try:
-                self._extract_concept(force=True)
+                self._extract_concept(True, sid)
             except Exception as e:
                 log.warning("flush concept 失败: %s", e)
 
@@ -448,8 +508,8 @@ class EchoEngine:
                 log.warning("回响 LLM 失败，使用规则兜底: %s", e)
         if report is None:
             report = self._heuristic_echo()
-        self.on_status("done")
-        self.on_echo(report)
+        self._emit(sid, "status", "done")
+        self._emit(sid, "echo", report)
 
     def _heuristic_echo(self) -> EchoReport:
         with self._lock:
@@ -512,17 +572,17 @@ class EchoEngine:
         return "\n".join(f"[{fmt_tc(f.t)}] {FEEDBACK_LABEL[f.kind]}（当时在讲：{topic_at(f.t)}）"
                          for f in self.feedbacks)
 
-    def _safe(self, fn, *a):
+    def _safe(self, sid, fn, *a):
         try:
             fn(*a)
         except LLMError as e:
             log.exception("LLM 错误")
-            self.on_status("listening")
-            self.on_error(str(e))
+            self._emit(sid, "status", "listening")
+            self._emit(sid, "error", str(e))
         except Exception as e:
             log.exception("引擎错误")
-            self.on_status("listening")
-            self.on_error(f"{type(e).__name__}: {e}")
+            self._emit(sid, "status", "listening")
+            self._emit(sid, "error", f"{type(e).__name__}: {e}")
 
 
 def _as_list(v) -> List[str]:

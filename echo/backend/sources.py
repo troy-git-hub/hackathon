@@ -39,6 +39,7 @@ def load_script(path=None):
 class DemoSource:
     def __init__(self, engine: EchoEngine, path=None, interval=None):
         self.engine = engine
+        self.session = engine.session     # 只往创建时那节课里送转写
         self.lines = load_script(path or config.DEMO_SCRIPT or None)
         self.interval = interval or config.DEMO_LINE_INTERVAL
         self._stop = threading.Event()
@@ -55,7 +56,7 @@ class DemoSource:
         for t, text in self.lines:
             if self._stop.wait(self.interval):
                 return
-            self.engine.add_transcript(text, t=t)
+            self.engine.add_transcript(text, t=t, session=self.session)
 
 
 # ================= 切句 + 转写 =================
@@ -120,6 +121,7 @@ class _WhisperWorker:
 
     def __init__(self, engine: EchoEngine):
         self.engine = engine
+        self.session = engine.session
         self.q = queue.Queue()
         self._stop = threading.Event()
         self._prev = ""
@@ -148,11 +150,11 @@ class _WhisperWorker:
 
     def _run(self):
         try:
-            model = self.load(self.engine.on_status)
-            self.engine.on_status("listening")
+            model = self.load(lambda st: self.engine.emit_status(self.session, st))
+            self.engine.emit_status(self.session, "listening")
         except Exception as e:
             log.exception("Whisper 加载失败")
-            self.engine.on_error(f"语音识别加载失败：{e}")
+            self.engine.emit_error(self.session, f"语音识别加载失败：{e}")
             return
         while not self._stop.is_set():
             try:
@@ -173,9 +175,11 @@ class _WhisperWorker:
             except Exception as e:
                 log.warning("ASR 失败: %s", e)
                 continue
+            if self._stop.is_set():      # 已下课/换课：正在转写的这段不再送进去
+                break
             if len(text) > 1 and not any(h in text for h in _HALLUCINATIONS):
                 self._prev = text
-                self.engine.add_transcript(text, t=t)
+                self.engine.add_transcript(text, t=t, session=self.session)
 
 
 def _resample(audio, sr):
@@ -191,6 +195,7 @@ class _LiveSource:
 
     def __init__(self, engine: EchoEngine):
         self.engine = engine
+        self.session = engine.session
         self.asr = _WhisperWorker(engine)
         self.seg = _Segmenter(self.asr.put)
         self._stop = threading.Event()
@@ -210,7 +215,7 @@ class _LiveSource:
             self.seg.flush()
         except Exception as e:
             log.exception("音频采集失败")
-            self.engine.on_error(f"音频采集失败：{e}")
+            self.engine.emit_error(self.session, f"音频采集失败：{e}")
 
     def _feed(self, mono, sr):
         self.seg.feed(_resample(mono, sr), self.engine.elapsed())
