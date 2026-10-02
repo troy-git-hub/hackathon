@@ -133,9 +133,20 @@ class _WhisperWorker:
                 from faster_whisper import WhisperModel
                 if on_status:
                     on_status("loading_asr")
-                cls._model = WhisperModel(config.WHISPER_MODEL, device=config.WHISPER_DEVICE,
-                                          compute_type=config.WHISPER_COMPUTE,
-                                          cpu_threads=min(8, os.cpu_count() or 4))
+                kw = dict(device=config.WHISPER_DEVICE, compute_type=config.WHISPER_COMPUTE,
+                          cpu_threads=min(8, os.cpu_count() or 4))
+                # 先只用本地缓存：模型下过一次就不再联网（现场网络/SSL 抽风时联网会卡很久）
+                try:
+                    cls._model = WhisperModel(config.WHISPER_MODEL, local_files_only=True, **kw)
+                    log.info("Whisper 从本地缓存加载：%s", config.WHISPER_MODEL)
+                except Exception as e:
+                    log.info("本地没有 Whisper 模型（%s），开始下载…", e)
+                    try:
+                        cls._model = WhisperModel(config.WHISPER_MODEL, **kw)
+                    except Exception as e2:
+                        raise RuntimeError(
+                            f"Whisper 模型 {config.WHISPER_MODEL} 下载失败（{type(e2).__name__}）。"
+                            "请检查网络后重试，或把 ECHO_WHISPER_MODEL 设成已下载好的模型文件夹路径") from e2
         return cls._model
 
     def start(self):
