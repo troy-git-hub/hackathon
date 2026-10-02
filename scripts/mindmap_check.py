@@ -12,6 +12,7 @@ Echo - 知识地图自检
   F. 出题 —— make_item 拼出的形状能被 practice.generate_sync 吃下，且带回解析
   G. from_report —— 刚下课的回响对象能直接转成课程记录
   H. 引擎 —— 一节课跑完，report.graph 里是真实的前置关系
+  M. 占位知识点 —— AI 填的「（未知）」「课堂内容」不能进时间轴和地图
 
 退出码：全部通过为 0。
 """
@@ -344,6 +345,60 @@ blank.resize(300, 200)
 blank.set_graph({"nodes": [], "edges": []})
 blank.grab()
 check("空图绘制不崩", True)
+
+# ---------- M. 占位知识点 ----------
+section("M. AI 填的占位名不能当知识点")
+check("空名 / 未知 / 课堂内容 都算占位",
+      all(mindmap.is_placeholder_topic(x)
+          for x in ("", "   ", "（未知）", "未知", "未命名课程", "课堂内容", "未知知识点")))
+check("真知识点不算占位",
+      not any(mindmap.is_placeholder_topic(x)
+              for x in ("条件概率", "极限", "贝叶斯公式", "定义域", "f(x)定义域")))
+
+ph = mindmap.build({"graph": {"nodes": ["（未知）", "条件概率", "未知"],
+                              "edges": [["（未知）", "条件概率"], ["条件概率", "未知"]]}}, [])
+check("占位节点不进地图", [n["topic"] for n in ph["nodes"]] == ["条件概率"], str(ph["nodes"]))
+check("连着占位节点的边也丢掉", ph["edges"] == [], str(ph["edges"]))
+ph2 = mindmap.build({"skills_detail": [{"name": "未知", "status": "review"},
+                                       {"name": "极限", "status": "ok"}]}, [])
+check("skills 里的占位名同样过滤掉", [n["topic"] for n in ph2["nodes"]] == ["极限"],
+      str(ph2["nodes"]))
+ph3 = mindmap.build({"skills_detail": [{"name": "极限"}],
+                     "review_chain": ["（未知）", "极限"]}, [])
+check("复习链里的占位名不会变成地图节点",
+      [n["topic"] for n in ph3["nodes"]] == ["极限"] and ph3["review_first"] == "极限",
+      f"{ph3['nodes']} / {ph3['review_first']}")
+ph4 = mindmap.build({"graph": {"nodes": ["（未知）"], "edges": []}}, [])
+check("整节课只有占位名时，地图是空的而不是一个「（未知）」节点",
+      ph4["nodes"] == [] and ph4["edges"] == [])
+
+eng_p = EchoEngine(use_llm=False)
+eng_p.start()
+with eng_p._lock:
+    eng_p.entries = [
+        _ConceptEntry(0, Concept("00:01", "（未知）", [], [], "")),
+        _ConceptEntry(10, Concept("00:10", "条件概率", [], [], "")),
+    ]
+gp = eng_p._concept_graph()
+check("引擎图里没有占位知识点", gp["nodes"] == ["条件概率"], str(gp["nodes"]))
+eng_p.shutdown()
+
+
+class _StubLLM:
+    def json(self, *a, **k):
+        return {"segments": [{"start": "00:05", "topic": "（未知）", "concepts": [],
+                              "prerequisites": [], "summary": "老师在调设备"}]}
+
+
+eng_s = EchoEngine(use_llm=False)
+eng_s.start()
+eng_s.llm = _StubLLM()
+sid_s = eng_s.session
+eng_s.add_transcript("嗯，好，我们先等一下，我调一下设备", t=1.0, session=sid_s)
+eng_s._extract_concept(force=True, sid=sid_s)
+check("AI 给的占位知识点被丢掉，不进时间轴", len(eng_s.entries) == 0,
+      f"跑出了 {len(eng_s.entries)} 个")
+eng_s.shutdown()
 
 print("\n" + "=" * 56)
 if FAILED:

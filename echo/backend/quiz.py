@@ -74,10 +74,12 @@ def _self_checkin(topic: str, tc: str, why: str = "") -> dict:
 
 
 def make_checkin_sync(timeline: str, transcript: str, current: str,
-                      tc: str = "", llm=None, use_llm: bool = True) -> dict:
+                      tc: str = "", focus: str = "", llm=None, use_llm: bool = True) -> dict:
     """同步生成一道抽问题。永远返回非空 dict（最差也有自评题兜底）。
 
     use_llm=False 表示调用方明确要求不走 AI（离线模式），此时不再自己造 LLM。
+    focus 是学生此刻的状态（刚掉队过的地方、之前抽问答错的知识点），
+    出题时带上它，题目才接得上学生正在补的内容。
     """
     if llm is None and use_llm and not config.OFFLINE and config.DEEPSEEK_API_KEY:
         try:
@@ -91,7 +93,8 @@ def make_checkin_sync(timeline: str, transcript: str, current: str,
                 prompts.CHECKIN_USER.format(
                     timeline=timeline or "（暂无）",
                     transcript=transcript or "（暂无）",
-                    current=current or "（未知）",
+                    current=current or "（还没识别到知识点）",
+                    focus=focus or "（没什么特别的，正常听课）",
                 ),
                 temperature=0.6, max_tokens=500,
                 timeout=config.CHECKIN_TIMEOUT, attempts=1)

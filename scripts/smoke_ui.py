@@ -32,6 +32,9 @@ from echo.widgets import floating_window as ui
 
 
 class FakeEngine:
+    def __init__(self):
+        self.active = False
+
     def current_concept(self):
         return SAMPLE_CONCEPTS[-1]
 
@@ -56,6 +59,11 @@ class FakeBridge(QObject):
         self.engine = FakeEngine()
         self.source_kind = "system"
         self.total_seconds = 0
+        self.asks = 0            # 学生按了几次「考考我」
+
+    def ask_checkin_now(self):
+        self.asks += 1
+        return True
 
     def start(self):
         pass
@@ -204,6 +212,66 @@ app.processEvents()
 assert window._page == ui.MINDMAP, "老课程打不开知识地图"
 assert len(window.mindmap_page.canvas._nodes) == 2, "老课程没画出知识点"
 assert window.mindmap_page.lesson_summary.text(), "老课程没显示课程摘要"
+
+# 练习页从哪儿进来的，练完就回哪儿 —— 不能一律弹回主页
+ts3 = store.save_lesson("概率复习课", [{"name": "条件概率定义", "mastery": 0.9, "status": "ok"},
+                                      {"name": "贝叶斯公式", "mastery": 0.3, "status": "review"}],
+                        ["贝叶斯公式", "条件概率定义"],
+                        graph={"nodes": ["条件概率定义", "贝叶斯公式"],
+                               "edges": [["条件概率定义", "贝叶斯公式"]]})
+window._show_detail(ts3)
+app.processEvents()
+map_btns = [b for b in window.findChildren(QPushButton)
+            if b.text() == "知识地图" and b.isVisible()]
+QTest.mouseClick(map_btns[0], Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.MINDMAP
+
+window.mindmap_page.select("贝叶斯公式")
+app.processEvents()
+QTest.mouseClick(window.mindmap_page.detail.practice_btn, Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.PRACTICE, "知识地图的「出题练一练」没进练习页"
+assert window.back_btn.text() == "← 知识地图", \
+    f"从地图进来的练习页，返回按钮却写着「{window.back_btn.text()}」"
+
+window._prac_qs = [{"question": "P(A|B)=？", "options": ["A. 甲", "B. 乙"], "answer": "A"}]
+master = [b for b in window.findChildren(QPushButton)
+          if b.text() == "✓ 这个我会了" and b.isVisible()]
+assert master, "练习页上没有「✓ 这个我会了」"
+QTest.mouseClick(master[0], Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.MINDMAP, "练完点「我会了」应该回知识地图，而不是弹回主页"
+assert window.mindmap_page.canvas._selected == "贝叶斯公式", "回到地图后没选回刚才那个知识点"
+assert window.back_btn.text() == "← 主页", "地图页的返回按钮被练习页的标签带跑了"
+
+# 从课程回顾进来的，就回课程回顾
+window._show_detail(ts3)
+app.processEvents()
+quiz_btns = [b for b in window.findChildren(QPushButton)
+             if b.text() == "出几道题练练" and b.isVisible()]
+QTest.mouseClick(quiz_btns[0], Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.PRACTICE
+assert window.back_btn.text() == "← 课程回顾", \
+    f"返回按钮写着「{window.back_btn.text()}」"
+QTest.mouseClick(window.back_btn, Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.DETAIL, "练习页点返回没有回到课程回顾"
+
+# 听课页「考考我」：学生主动要一道课上小题
+window.echo.engine.active = True
+window._show_page(ui.LISTEN)
+app.processEvents()
+assert window.btn_ask.isVisible(), "听课页上没有「考考我」按钮"
+asks_before = window.echo.asks
+QTest.mouseClick(window.btn_ask, Qt.LeftButton)
+app.processEvents()
+assert window.echo.asks == asks_before + 1, "点「考考我」没有跟引擎要题"
+assert window.checkin_card.isVisible(), "点了「考考我」，抽问卡片没亮出来"
+assert window.checkin_card.question_lbl.text(), "抽问卡片上一个字都没有"
+window.checkin_card.dismiss()
+window.echo.engine.active = False
 
 # 课程管理：搜索过滤 + 重命名 + 批量删除（对话框在 offscreen 下会阻塞，这里只测非交互路径）
 window._show_courses()

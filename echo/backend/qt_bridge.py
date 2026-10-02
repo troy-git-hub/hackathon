@@ -114,6 +114,10 @@ class EchoBridge(QObject):
         """学生把抽问关掉了。"""
         self.engine.skip_checkin()
 
+    def ask_checkin_now(self):
+        """学生按「考考我」主动要一道课上小题。已有一道没答完时返回 False。"""
+        return self.engine.ask_checkin_now()
+
     def make_lesson_quiz(self, lesson: dict, n: int = 4):
         """按一节课的要点出课后练习题，出好后发 quiz_ready(list)。
 

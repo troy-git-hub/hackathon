@@ -59,8 +59,32 @@ def main():
     tray.pet = pet
     pet.place_default()
     pet.show()
+    wire_pet_checkin(win, pet)
 
     sys.exit(app.exec_())
+
+
+def wire_pet_checkin(win, pet):
+    """课堂抽问（课上突然被问一道）时让桌宠喊一声。
+
+    学生正低头听课、或者面板收起来了，不提醒根本不知道有人在问他。
+    窗口不在面前时再亮个红点，点一下桌宠就能把窗口调出来答题。
+    """
+    if not hasattr(win.echo, "checkin"):
+        return
+
+    def on_checkin(q):
+        topic = (q or {}).get("topic") or ""
+        who = f"「{topic}」" if topic else "刚讲的内容"
+        pet.say(f"老师刚讲的{who}还记得吗？点我答一道～", 12000, "alert", 4000)
+        if not win.isVisible():
+            pet.badge = True
+
+    def on_result(_record):
+        pet.badge = False           # 答完了，红点收掉
+
+    win.echo.checkin.connect(on_checkin)
+    win.echo.checkin_result.connect(on_result)
 
 
 if __name__ == "__main__":

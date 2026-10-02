@@ -101,6 +101,7 @@ class CheckinCard(QFrame):
             }}
             QFrame#CheckinCard QLabel {{ color: {Colors.TEXT_PRIMARY}; background: transparent; }}
             QLabel#CheckinTag {{ color: {Colors.ACCENT}; }}
+            QLabel#CheckinHint {{ color: {Colors.TEXT_SECONDARY}; }}
             QPushButton#CheckinClose {{
                 background: transparent; border: none;
                 color: {Colors.TEXT_SECONDARY}; font-size: 12px;
@@ -139,6 +140,24 @@ class CheckinCard(QFrame):
     def asking(self) -> bool:
         """是否正等着学生作答（宿主可用来判断要不要拦别的交互）。"""
         return self.isVisible() and not self._locked
+
+    def preparing(self, text: str = "Echo 正在看老师刚讲了什么…"):
+        """学生自己按了「考考我」：先把卡片亮出来，题目回来再填进去。
+
+        否则点了按钮要等好几秒才出东西，学生会以为没反应。
+        """
+        self._question = {}
+        self._locked = True
+        self.topic.setText("")
+        self.question_lbl.setText(text)
+        self.result_box.hide()
+        self._clear_options()
+        hint = QLabel("出题中…")
+        hint.setObjectName("CheckinHint")
+        hint.setFont(font(11))
+        self.options_box.addWidget(hint)
+        self.show()
+        self.raise_()
 
     def ask(self, question: dict):
         """弹出一道抽问题。question 来自 bridge.checkin 信号。"""

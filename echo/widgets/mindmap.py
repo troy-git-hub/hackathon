@@ -241,7 +241,7 @@ class _Canvas(QWidget):
                 y1, y2 = ra.top(), rb.bottom()
             mid = (y1 + y2) / 2
             hot = self._selected and (a == self._selected or b == self._selected)
-            pen = QPen(QColor(Colors.ACCENT if hot else Colors.BORDER_STRONG), 2.2 if hot else 1.5)
+            pen = QPen(QColor(Colors.ACCENT if hot else Colors.BORDER_STRONG), 3.0 if hot else 2.0)
             pen.setCapStyle(Qt.RoundCap)
             p.setPen(pen)
             path = QPainterPath(QPointF(x1, y1))
@@ -251,8 +251,8 @@ class _Canvas(QWidget):
             direction = 1 if y2 >= y1 else -1
             tip = QPointF(x2, y2)
             arrow = QPainterPath(tip)
-            arrow.lineTo(x2 - 4.5, y2 - 6 * direction)
-            arrow.lineTo(x2 + 4.5, y2 - 6 * direction)
+            arrow.lineTo(x2 - 5.5, y2 - 7.5 * direction)
+            arrow.lineTo(x2 + 5.5, y2 - 7.5 * direction)
             arrow.closeSubpath()
             p.setBrush(QBrush(QColor(Colors.ACCENT if hot else Colors.BORDER_STRONG)))
             p.setPen(Qt.NoPen)

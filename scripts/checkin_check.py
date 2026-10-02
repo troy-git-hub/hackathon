@@ -9,6 +9,8 @@ Echo - 课堂抽问自检
   C. 触发条件 —— 只有「开课中 + 过了热身 + 学生久没动手 + 距上次够久」才抽问
   D. 答错入错题本 —— 字段形状和「错题复习」页约好的一致
   E. 课程隔离 —— 重开课程后，上一节课的抽问不能再作答、也不写进新课
+  F. 接上课程上下文 —— 课上答错的点写回时间轴，课后回响/知识地图才看得见；
+     学生也能自己按「考考我」主动要一道
 
 退出码：全部通过为 0。
 """
@@ -135,6 +137,67 @@ check("旧 sid 的抽问不会写进新课", eng._live(sid) is False)
 eng.end_lesson()
 check("下课后不抽问", eng._checkin_due() is False)
 eng.shutdown()
+
+# ---------- F. 抽问接上课程上下文 ----------
+section("F. 抽问接上课程上下文")
+eng2 = EchoEngine(use_llm=False)
+eng2.start()
+sid2 = eng2.session
+for text in ("下面我们讲条件概率的定义", "接下来是贝叶斯公式", "最后看后验概率"):
+    eng2.add_transcript(text, t=eng2.elapsed(), session=sid2)
+    eng2._extract_concept(force=True, sid=sid2)
+check("时间轴上有知识点", len(eng2.entries) >= 2, f"{len(eng2.entries)}")
+
+
+def wait_pending(engine, seconds=10.0):
+    deadline = time.time() + seconds
+    while engine.pending_checkin is None and time.time() < deadline:
+        time.sleep(0.05)
+    return engine.pending_checkin
+
+
+def ask_now(engine, tries=40):
+    for _ in range(tries):
+        if engine.ask_checkin_now():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+# 学生主动按「考考我」
+check("学生主动要题 → 出得出来", ask_now(eng2))
+q2 = wait_pending(eng2)
+check("主动要题后有待答题", q2 is not None)
+check("出题期间不重复派第二道", eng2.ask_checkin_now() is False)
+
+topic2 = q2.get("topic")
+n_fb = len(eng2.feedbacks)
+last = len(q2["options"]) - 1                    # 自评题的「没跟上」
+eng2.answer_checkin(last)
+check("答不上来 → 记一次 warn 反馈",
+      len(eng2.feedbacks) == n_fb + 1 and eng2.feedbacks[-1].kind == "warn",
+      f"{len(eng2.feedbacks) - n_fb} 条")
+check("warn 挂在被问的那个知识点上", eng2.feedbacks[-1].concept == topic2,
+      f"{eng2.feedbacks[-1].concept!r} vs {topic2!r}")
+hit = [e.concept for e in eng2.entries if e.concept.topic == topic2]
+check("对应知识点在时间轴上标黄（回响/地图看得见）",
+      bool(hit) and hit[0].status == "warn")
+check("课后回响能按它算掌握度",
+      any("warn" in eng2._feedback_of(i) for i in range(len(eng2.entries))))
+
+focus = eng2._checkin_focus()
+check("出题时带上了学生刚才答错的知识点",
+      bool(topic2) and topic2 in focus, focus)
+
+# 答对不该留痕
+check("再要一道", ask_now(eng2))
+q3 = wait_pending(eng2)
+check("第二道拿到了", q3 is not None)
+n_fb = len(eng2.feedbacks)
+eng2.answer_checkin(0)                           # 自评题的「记得」
+check("答对了不写 warn", len(eng2.feedbacks) == n_fb, f"{len(eng2.feedbacks) - n_fb} 条")
+
+eng2.shutdown()
 
 print("\n" + "=" * 56)
 if FAILED:

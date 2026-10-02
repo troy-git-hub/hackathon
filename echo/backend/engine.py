@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
-from echo.backend import config, prompts, quiz, store
+from echo.backend import config, mindmap, prompts, quiz, store
 from echo.backend.llm import LLM, LLMError
 from echo.mock_data import (BreakPoint, Concept, EchoSkill, SAMPLE_BREAKPOINT,
                             SAMPLE_CONCEPTS)
@@ -149,6 +149,7 @@ class EchoEngine:
             self.pending_checkin: Optional[dict] = None   # 当前等着回答的那道题
             self._last_interaction = time.time()    # 学生最近一次动手（反馈/补课/答题）
             self._last_checkin_at = 0.0             # 上一次抽问的墙钟时间
+            self._checkin_asking = False            # 有一道正在出（防抖：出题要几秒，别重复派）
 
     def start(self):
         self._stop.set()                 # 先停掉上一节课的 ticker
@@ -257,10 +258,17 @@ class EchoEngine:
                 except RuntimeError:      # 程序退出时线程池已关闭
                     return
             if checkin:
-                try:
-                    self._pool.submit(self._safe, sid, self._ask_checkin, sid)
-                except RuntimeError:
-                    return
+                # 出题要几秒，这中间 _checkin_due 还一直是真 —— 先占住，别连着派好几道
+                with self._lock:
+                    busy = self._checkin_asking
+                    self._checkin_asking = True
+                if not busy:
+                    try:
+                        self._pool.submit(self._safe, sid, self._ask_checkin, sid)
+                    except RuntimeError:      # 程序退出时线程池已关闭
+                        with self._lock:
+                            self._checkin_asking = False
+                        return
 
     # ================= Concept Timeline =================
     def _extract_concept(self, force=False, sid=None):
@@ -303,7 +311,11 @@ class EchoEngine:
                 for seg in segs:
                     if not isinstance(seg, dict):
                         continue
-                    topic = str(seg.get("topic") or "").strip() or "课堂内容"
+                    topic = str(seg.get("topic") or "").strip()
+                    # 没听清 / 这段没讲实质内容时，模型会填「未知」「课堂内容」交差。
+                    # 这种片段宁可不要 —— 放进来就成了地图上一个叫「（未知）」的知识点。
+                    if mindmap.is_placeholder_topic(topic):
+                        continue
                     prev = self.entries[-1] if self.entries else None
                     if prev and _same_topic(prev.concept.topic, topic):
                         c = prev.concept
@@ -379,7 +391,8 @@ class EchoEngine:
             window = [l for l in self.lines if l.t >= now - config.LOST_WINDOW] or self.lines[-30:]
             timeline = self._timeline_text()
             feedback = self._feedback_text()
-            cur = self.entries[-1].concept.topic if self.entries else "（未知）"
+            cur = self.entries[-1].concept.topic if self.entries else ""
+            current = cur or "（还没识别到知识点）"
 
         data = None
         if self.llm and window:
@@ -391,14 +404,19 @@ class EchoEngine:
                     feedback=feedback or "（无）",
                     window=f"{config.LOST_WINDOW // 60} 分钟",
                     transcript="\n".join(f"[{l.tc}] {l.text}" for l in window),
-                    current=cur, now=fmt_tc(now)),
+                    current=current, now=fmt_tc(now)),
                 temperature=0.4, max_tokens=800,
                 timeout=config.BREAKPOINT_TIMEOUT, attempts=1)
             except Exception as e:   # 掉队是核心交互，LLM 挂了也要给出断点，不能让 UI 卡在 analyzing
                 log.warning("断点 LLM 失败，使用规则兜底: %s", e)
         if data is not None:
+            # 模型有时会把我们传进去的「当前在讲」原样回敬成概念名（那句本身是占位提示），
+            # 这种名字不能当知识点用，宁可留空走时间吸附。
+            name = str(data.get("concept") or "").strip() or cur
+            if mindmap.is_placeholder_topic(name):
+                name = ""
             bp = BreakPoint(breakpoint_tc=str(data.get("breakpoint") or ""),
-                            concept=str(data.get("concept") or cur),
+                            concept=name,
                             missing=str(data.get("missing") or ""),
                             reason=str(data.get("reason") or ""),
                             micro_lesson=str(data.get("micro_lesson") or ""),
@@ -409,7 +427,7 @@ class EchoEngine:
         elif self.llm and window:
             bp = self._heuristic_breakpoint(cur)
         elif not window:
-            bp = BreakPoint("", cur, "Echo 还没听到课堂内容",
+            bp = BreakPoint("", cur or "老师正在讲的内容", "Echo 还没听到课堂内容",
                             "请确认网课正在播放，且声音没有静音",
                             "Echo 会自动抓取电脑正在播放的声音。开始播放网课后，等老师讲一两分钟再点「我掉队了」。",
                             note="还没有内容", known="网课正在播放",
@@ -437,7 +455,7 @@ class EchoEngine:
         self._emit(sid, "status", "listening")
         self._emit(sid, "breakpoint", bp, shown)
 
-    def _heuristic_breakpoint(self, cur: str) -> BreakPoint:
+    def _heuristic_breakpoint(self, cur: str = "") -> BreakPoint:
         """规则兜底：取最近一个点过「有点懵」的知识点，否则取「现在」的前一个。"""
         with self._lock:
             entries = list(self.entries)
@@ -446,10 +464,11 @@ class EchoEngine:
         if idx is None:
             idx = max(0, len(entries) - 2)
         if not entries:
-            return BreakPoint("", cur, f"「{cur}」是怎么来的？", "这一段讲得比较快",
+            name = cur or "老师正在讲的内容"
+            return BreakPoint("", name, f"「{name}」是怎么来的？", "这一段讲得比较快",
                               "Echo 暂时连不上 AI，建议回看最近 1~2 分钟的课程内容。", note="讲得比较快",
                               known="前面讲过的定义", step="回看最近 1~2 分钟的课程内容",
-                              now=f"再接上老师现在讲的「{cur}」")
+                              now=f"再接上老师现在讲的「{name}」")
         c = entries[idx].concept
         pre = "、".join(c.prerequisites) or "前面的定义"
         lesson = (f"你可能在「{c.topic}」这里掉队了。\n"
@@ -466,7 +485,8 @@ class EchoEngine:
         with self._lock:
             entries = list(self.entries)
             if not entries:
-                c = Concept(bp.breakpoint_tc or fmt_tc(self.now()), bp.concept, [], [], bp.reason, "now")
+                c = Concept(bp.breakpoint_tc or fmt_tc(self.now()),
+                            bp.concept or "老师讲的内容", [], [], bp.reason, "now")
                 self.entries.append(_ConceptEntry(parse_tc(c.timecode) or 0, c))
                 bp.breakpoint_tc = c.timecode
                 return [c]
@@ -540,26 +560,79 @@ class EchoEngine:
         # 学生刚点过反馈 / 补过课，说明人在，不用打扰
         return now - self._last_interaction >= config.CHECKIN_IDLE
 
+    def _checkin_focus(self) -> str:
+        """学生此刻的状态，喂给出题 prompt：刚在哪儿掉过队、之前哪道抽问答错过。
+        调用方需持有 self._lock。"""
+        bits = []
+        bps = [b for b in self.breakpoints if b.concept]
+        if bps:
+            last = bps[-1]
+            bits.append(f"刚在「{last.concept}」点过掉队"
+                        + ("，已经补上了" if last.fixed else "，还没补上"))
+        weak = [c.get("topic") for c in self.checkins
+                if c.get("topic") and c.get("result") != quiz.RIGHT]
+        if weak:
+            bits.append("之前抽问答错过：" + "、".join(dict.fromkeys(weak[-3:])))
+        return "；".join(bits) + "。" if bits else ""
+
     def _ask_checkin(self, sid):
         """后台：拿最近讲过的知识点出一道题，抛 checkin 事件给 UI。"""
+        try:
+            with self._lock:
+                if not self._live(sid) or not self.active:
+                    return
+                concept = self.entries[-1].concept
+                timeline = self._timeline_text()
+                transcript = "\n".join(f"[{l.tc}] {l.text}" for l in self.lines[-12:])
+                focus = self._checkin_focus()
+                # 引擎没有 llm 表示「没配 key」或「已切离线」，两种都不该再新建连接
+                use_llm = self.llm is not None
+            q = quiz.make_checkin_sync(timeline=timeline, transcript=transcript,
+                                       current=concept.topic, tc=concept.timecode,
+                                       focus=focus, llm=self.llm, use_llm=use_llm)
+            with self._lock:
+                if not self._live(sid) or not self.active:   # 出题期间下课/重开
+                    return
+                q["id"] = len(self.checkins) + 1
+                self.pending_checkin = q
+                self._last_checkin_at = time.time()
+            self._emit(sid, "checkin", q)
+        finally:
+            with self._lock:
+                self._checkin_asking = False
+
+    def ask_checkin_now(self) -> bool:
+        """学生自己按「考考我」要一道课上小题。已经有一道没答完时不再出，返回 False。"""
         with self._lock:
-            if not self._live(sid) or not self.active:
-                return
-            concept = self.entries[-1].concept
-            timeline = self._timeline_text()
-            transcript = "\n".join(f"[{l.tc}] {l.text}" for l in self.lines[-12:])
-            # 引擎没有 llm 表示「没配 key」或「已切离线」，两种都不该再新建连接
-            use_llm = self.llm is not None
-        q = quiz.make_checkin_sync(timeline=timeline, transcript=transcript,
-                                   current=concept.topic, tc=concept.timecode,
-                                   llm=self.llm, use_llm=use_llm)
-        with self._lock:
-            if not self._live(sid) or not self.active:   # 出题期间下课/重开
-                return
-            q["id"] = len(self.checkins) + 1
-            self.pending_checkin = q
-            self._last_checkin_at = time.time()
-        self._emit(sid, "checkin", q)
+            if not self.active or self.pending_checkin is not None or self._checkin_asking:
+                return False
+            self._checkin_asking = True
+            sid = self.session
+        try:
+            self._pool.submit(self._safe, sid, self._ask_checkin, sid)
+        except RuntimeError:
+            with self._lock:
+                self._checkin_asking = False
+            return False
+        return True
+
+    def _mark_weak(self, topic: str, tc: str = ""):
+        """把一次「抽问没答上来」记成 warn 反馈，对应知识点在时间轴上标黄。
+
+        调用方需持有 self._lock。这样课后的回响、知识地图、错题本三处对得上：
+        学生课上被问住的点，就是复习时该先看的点。
+        """
+        if not topic:
+            return
+        t = parse_tc(tc)
+        self.feedbacks.append(Feedback(t if t is not None else self.now(), "warn", topic))
+        hit = next((e.concept for e in self.entries if _same_topic(e.concept.topic, topic)), None)
+        if hit is None and self.entries:
+            hit = self.entries[-1].concept
+        if hit is not None:
+            # 最后一个知识点状态是 now，但时间轴渲染时「当前在讲」本来就压过状态，
+            # 所以这里照标不误；等新知识点进来它就按 _status_of 重新结算。
+            hit.status = "warn"
 
     def answer_checkin(self, choice: int) -> Optional[dict]:
         """学生答了抽问题。返回作答结果（含对错和讲解）；当前没有待答的题则返回 None。
@@ -586,7 +659,11 @@ class EchoEngine:
                 "time": time.time(),
             }
             self.checkins.append(record)
-            mistake = quiz.to_mistake(q, result) if result in (quiz.WRONG, quiz.UNSURE) else None
+            if result in (quiz.WRONG, quiz.UNSURE):
+                self._mark_weak(record["topic"], record["tc"])
+                mistake = quiz.to_mistake(q, result)
+            else:
+                mistake = None
         if mistake:
             try:
                 store.add([mistake])
@@ -641,14 +718,18 @@ class EchoEngine:
                                      max_tokens=800)
                 skills = []
                 for s in data.get("skills") or []:
+                    name = str(s.get("name", "")).strip()
+                    if not name or mindmap.is_placeholder_topic(name):
+                        continue        # 「未知」这种名字不能当知识点
                     try:
                         m = max(0.0, min(1.0, float(s.get("mastery", 0.5))))
                     except (TypeError, ValueError):
                         m = 0.5
                     st = s.get("status")
                     st = st if st in ("ok", "fixed", "review") else _status_from_mastery(m)
-                    skills.append(EchoSkill(str(s.get("name", "")), m, st))
-                chain = [str(x) for x in (data.get("review_chain") or []) if x]
+                    skills.append(EchoSkill(name, m, st))
+                chain = [str(x) for x in (data.get("review_chain") or [])
+                         if x and not mindmap.is_placeholder_topic(x)]
                 summary = str(data.get("summary") or "")
                 highlights = [str(x) for x in (data.get("highlights") or []) if x][:5]
                 if skills:
@@ -678,13 +759,15 @@ class EchoEngine:
         nodes, edges, times = [], [], {}
         for e in entries:
             topic = (e.concept.topic or "").strip()
-            if not topic:
+            if not topic or mindmap.is_placeholder_topic(topic):
                 continue
             if not any(_same_topic(topic, n) for n in nodes):
                 nodes.append(topic)
                 times[topic] = e.concept.timecode
         for e in entries:
             topic = e.concept.topic
+            if mindmap.is_placeholder_topic(topic):
+                continue
             for pre in (e.concept.prerequisites or []):
                 hit = next((n for n in nodes if _same_topic(pre, n)), None)
                 if hit and not _same_topic(hit, topic):

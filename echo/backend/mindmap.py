@@ -27,6 +27,22 @@ def _norm(s: str) -> str:
     return re.sub(r"[\s，,。.：:、（）()\[\]「」『』!?！？\-—_]+", "", str(s or "")).lower()
 
 
+# 抽知识点时，AI 偶尔拿不准就填个占位名交差（「未知」「课堂内容」…）。
+# 这种名字一旦进了时间轴，就会变成一个叫「（未知）」的知识点节点，
+# 还会被当成课程标题存下来 —— 看着像课程里真有这么个知识点。
+_PLACEHOLDER_TOPICS = {"未知", "未知知识点", "未知概念", "未命名", "未命名课程", "课堂内容",
+                       "内容", "无", "暂无", "不详", "待定", "其他", "其它", "略"}
+_PLACEHOLDER_RE = re.compile(r"^(未知|未命名|不详|待定|未明确|没有|无法确定|暂无)")
+
+
+def is_placeholder_topic(name: str) -> bool:
+    """这个「知识点名」是不是 AI 填的占位名（空、未知、课堂内容…）。"""
+    n = _norm(name)
+    if not n:
+        return True
+    return n in _PLACEHOLDER_TOPICS or bool(_PLACEHOLDER_RE.match(n))
+
+
 def _same(a: str, b: str) -> bool:
     na, nb = _norm(a), _norm(b)
     if not na or not nb:
@@ -35,7 +51,8 @@ def _same(a: str, b: str) -> bool:
 
 
 def _skills(lesson: dict) -> list:
-    return [s for s in (lesson.get("skills_detail") or []) if s.get("name")]
+    return [s for s in (lesson.get("skills_detail") or [])
+            if s.get("name") and not is_placeholder_topic(s["name"])]
 
 
 def _skill_of(lesson: dict, topic: str) -> dict:
@@ -58,7 +75,7 @@ def _derive_graph(lesson: dict) -> dict:
     nodes = [s["name"] for s in _skills(lesson)]
     edges = []
 
-    chain = [c for c in (lesson.get("review_chain") or []) if c]
+    chain = [c for c in (lesson.get("review_chain") or []) if c and not is_placeholder_topic(c)]
     # review_chain 是「掉队点 → … → 最该先复习的根源概念」，反过来才是知识依赖方向
     ordered_chain = list(reversed(chain))
     for a, b in zip(ordered_chain, ordered_chain[1:]):
@@ -131,8 +148,10 @@ def build(lesson: dict, mistakes: list = None) -> dict:
     """
     lesson = lesson or {}
     raw = lesson.get("graph") if isinstance(lesson.get("graph"), dict) else None
-    nodes_src = [str(t) for t in (raw or {}).get("nodes") or [] if str(t).strip()]
-    edges_src = [(str(a), str(b)) for a, b in (raw or {}).get("edges") or []]
+    nodes_src = [str(t) for t in (raw or {}).get("nodes") or []
+                 if str(t).strip() and not is_placeholder_topic(t)]
+    edges_src = [(str(a), str(b)) for a, b in (raw or {}).get("edges") or []
+                 if not is_placeholder_topic(a) and not is_placeholder_topic(b)]
     if not nodes_src:
         derived = _derive_graph(lesson)
         nodes_src, edges_src = derived["nodes"], derived["edges"]
@@ -171,7 +190,8 @@ def build(lesson: dict, mistakes: list = None) -> dict:
         })
     # 复习链的最后一项是「最该先复习的根源概念」（回响 prompt 里就是这么排的），
     # 地图上把它标出来，学生一眼知道从哪开始补。
-    review_chain = [c for c in (lesson.get("review_chain") or []) if c]
+    review_chain = [c for c in (lesson.get("review_chain") or [])
+                    if c and not is_placeholder_topic(c)]
     review_first = ""
     for cand in reversed(review_chain):
         hit = next((n["topic"] for n in nodes if _same(cand, n["topic"])), "")
@@ -204,14 +224,15 @@ def from_report(report, title: str = "") -> dict:
             mastery = float(mastery or 0.0)
         except (TypeError, ValueError):
             mastery = 0.0
-        if name:
+        if name and not is_placeholder_topic(name):
             skills.append({"name": str(name), "mastery": mastery, "status": str(status)})
     graph = getattr(report, "graph", None) or {}
     return {
         "title": title or getattr(report, "summary", "")[:20] or "一节课",
         "summary": getattr(report, "summary", "") or "",
         "highlights": [str(h) for h in (getattr(report, "highlights", None) or [])],
-        "review_chain": [str(c) for c in (getattr(report, "review_chain", None) or [])],
+        "review_chain": [str(c) for c in (getattr(report, "review_chain", None) or [])
+                         if not is_placeholder_topic(c)],
         "skills_detail": skills,
         "graph": {"nodes": [str(n) for n in (graph.get("nodes") or [])],
                   "edges": [[str(a), str(b)] for a, b in (graph.get("edges") or [])]},

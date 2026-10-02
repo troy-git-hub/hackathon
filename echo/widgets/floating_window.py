@@ -156,8 +156,14 @@ class FloatingWindow(QWidget):
         self._prac_item = None       # 当前在练的错题
         self._prac_qs, self._prac_cards = [], []
         self._prac_submitted = False
+        # 练习页是从哪儿进来的。在里面点「✓ 这个我会了」或左上角返回时退回那里，
+        # 而不是一律弹回主页 —— 从知识地图点进来，练完就该回到地图上那个知识点。
+        self._prac_back = None
+        self._prac_back_label = ""
         self._last_report = None     # 最近一次回响（回响页「知识地图」用）
         self._detail_lesson = {}     # 当前正在看的这节历史课
+        self._detail_ts = 0
+        self._mindmap_lesson = {}    # 知识地图页正在看的那节课
         self._drag_pos = None
         self._page = LISTEN
 
@@ -377,8 +383,22 @@ class FloatingWindow(QWidget):
         self.btn_warn = _btn("?  有点懵", "Quiet", self._on_warn)
         row.addWidget(self.btn_ok)
         row.addWidget(self.btn_warn)
+        # 课上想自测一下：不用等 Echo 自己来找你，随时可以要一道
+        self.btn_ask = _btn("考考我", "Link", self._ask_checkin_now,
+                            "让 Echo 拿老师刚讲过的东西出一道小题，看看你跟没跟上")
+        row.addWidget(self.btn_ask)
         lay.addLayout(row)
         return page
+
+    def _ask_checkin_now(self):
+        """听课页「考考我」：学生主动要一道课上小题。"""
+        engine = getattr(getattr(self, "echo", None), "engine", None)
+        if not getattr(engine, "active", False):
+            self.status_lbl.setText("先开始上课，Echo 才知道该考你什么")
+            return
+        if not hasattr(self.echo, "ask_checkin_now") or not self.echo.ask_checkin_now():
+            return          # 已经有一道在等着答，或者正在出 —— 不打断
+        self.checkin_card.preparing()
 
     # ----- 1 折叠条 -----
     def _build_mini(self) -> QWidget:
@@ -1049,6 +1069,7 @@ class FloatingWindow(QWidget):
         原来这里直接 _show_home() 弹回主页，点下去什么也没发生 —— 用户会以为按钮坏了。
         """
         self._prac_item = {}
+        self._prac_back, self._prac_back_label = None, ""
         self._prac_qs, self._prac_cards = [], []
         self._prac_submitted = False
         self.prac_sub.setText("还没有可以出题的错题")
@@ -1056,9 +1077,13 @@ class FloatingWindow(QWidget):
         self._on_prac_err("听课时点「我掉队了」，Echo 找到的知识断点会收进错题本，"
                           "这里就能照着它出题了。")
 
-    def _practice_item(self, item):
-        """针对某一个错题让 AI 出题（后台线程，结果经信号回主线程）。"""
+    def _practice_item(self, item, back=None, back_label=""):
+        """针对某一个错题让 AI 出题（后台线程，结果经信号回主线程）。
+
+        back 是练完之后该回哪儿；不传就回主页。
+        """
         self._prac_item = item
+        self._prac_back, self._prac_back_label = back, back_label
         self._prac_qs, self._prac_cards = [], []
         self._prac_submitted = False
         self.prac_sub.setText(f"针对：{item.get('topic', '')}")
@@ -1258,10 +1283,16 @@ class FloatingWindow(QWidget):
         return "简答题 · 自行比对", f"你的答案：{yours}\n参考答案：{answer}", False
 
     def _prac_mastered(self):
+        """「✓ 这个我会了」：把错题标成已掌握，然后退回到进来的那一页。"""
         topic = (getattr(self, "_prac_item", None) or {}).get("topic", "")
         if topic:
             store.mark_reviewed(topic)
-        self._show_home()
+        back, self._prac_back = self._prac_back, None
+        self._prac_back_label = ""
+        if back:
+            back()
+        else:
+            self._show_home()
 
     def _make_detail_quiz(self):
         """按这节历史课的要点出课后练习题。"""
@@ -1269,6 +1300,9 @@ class FloatingWindow(QWidget):
         if not lesson or not hasattr(self.echo, "make_lesson_quiz"):
             return
         self._prac_item = {"topic": lesson.get("title") or "课后练习"}
+        ts = getattr(self, "_detail_ts", 0)
+        self._prac_back = (lambda: self._show_detail(ts)) if ts else None
+        self._prac_back_label = "← 课程回顾" if ts else ""
         self._prac_qs, self._prac_cards = [], []
         self._prac_submitted = False
         self.prac_loading_lbl.setText("正在按这节课的要点出题…")
@@ -1331,6 +1365,7 @@ class FloatingWindow(QWidget):
         except Exception:
             ls = {}
         self._detail_lesson = ls
+        self._detail_ts = ts
         self.det_title.setText(ls.get("title") or "这节课")
         self.det_sub.setText(
             f"{ls.get('date', '')}　✓ 跟上了 {ls.get('ok', 0)} · 待复习 {ls.get('review', 0)}".strip())
@@ -1370,8 +1405,21 @@ class FloatingWindow(QWidget):
         self._show_mindmap(lesson)
 
     def _show_mindmap(self, lesson):
+        self._mindmap_lesson = lesson or {}
         self.mindmap_page.show_lesson(lesson, store.load())
         self._show_page(MINDMAP)
+
+    def _back_to_mindmap(self, topic: str = ""):
+        """从练习页退回地图：重画一遍（刚点过「我会了」，节点状态可能变了），
+        并把学生刚才在练的那个知识点重新选中，视线不用自己找回去。"""
+        lesson = getattr(self, "_mindmap_lesson", None) or {}
+        if not lesson:
+            self._show_home()
+            return
+        self.mindmap_page.show_lesson(lesson, store.load())
+        self._show_page(MINDMAP)
+        if topic:
+            self.mindmap_page.select(topic)
 
     def _go_practice(self, topic):
         """思维导图里点「出题练一练」→ 针对这个知识点去练习页。"""
@@ -1382,7 +1430,8 @@ class FloatingWindow(QWidget):
         if item is None:
             item = {"topic": topic, "missing": "", "reason": "", "micro_lesson": "",
                     "known": "", "step": "", "now": "", "status": "review", "reviewed": False}
-        self._practice_item(item)
+        self._practice_item(item, back=lambda: self._back_to_mindmap(topic),
+                            back_label="← 知识地图")
 
     # ================= 页面切换 / 尺寸 =================
     def _show_page(self, idx):
@@ -1395,7 +1444,11 @@ class FloatingWindow(QWidget):
         mini = idx == MINI
         self.header.setVisible(not mini)
         self.back_btn.setVisible(idx in (BREAK, LESSON, REVIEW, PRACTICE, DETAIL, MINDMAP, COURSES))
-        self.back_btn.setText("← 主页" if idx in (REVIEW, PRACTICE, DETAIL, MINDMAP, COURSES) else "← 回到课堂")
+        back_label = "← 主页"
+        if idx == PRACTICE and self._prac_back_label:
+            back_label = self._prac_back_label     # 从地图/回顾进来的，返回到那儿
+        self.back_btn.setText(back_label if idx in (REVIEW, PRACTICE, DETAIL, MINDMAP, COURSES)
+                              else "← 回到课堂")
         self.home_btn.setVisible(idx in (LISTEN, ECHO))
         self.end_btn.setVisible(idx == LISTEN)
         self.fold_btn.setVisible(idx == LISTEN)
@@ -1486,7 +1539,15 @@ class FloatingWindow(QWidget):
         self._show_page(LISTEN)
 
     def _back(self):
-        """← 按钮：复习/练习/回顾/课程页回主页，断点/补课页回课堂。"""
+        """← 按钮：复习/练习/回顾/课程页回主页，断点/补课页回课堂。
+
+        练习页特殊：从知识地图/课程回顾进来的，退回到进来的那一页。
+        """
+        if self._page == PRACTICE and self._prac_back:
+            back, self._prac_back = self._prac_back, None
+            self._prac_back_label = ""
+            back()
+            return
         if self._page in (REVIEW, PRACTICE, DETAIL, MINDMAP, COURSES):
             self._show_home()
         else:
