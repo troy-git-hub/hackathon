@@ -278,6 +278,24 @@ assert window.checkin_card.question_lbl.text(), "抽问卡片上一个字都没�
 window.checkin_card.dismiss()
 window.echo.engine.active = False
 
+# 自评题的三个选项是后端给的固定文案，英文界面要翻过来；AI 出的选择题不能被改
+from echo import i18n as _i18n                      # noqa: E402
+from echo.backend import quiz as _quiz              # noqa: E402
+from echo.widgets.checkin import CheckinCard        # noqa: E402
+
+_i18n.lang = lambda: "en"
+card = CheckinCard()
+card.ask(_quiz._self_checkin("条件概率", "03:12"))
+labels = [b.text() for b in card._option_buttons]
+assert any("Completely lost" in t for t in labels), f"自评题选项没翻成英文：{labels}"
+card2 = CheckinCard()
+card2.ask({"topic": "x", "question": "q", "options": ["A. foo", "B. bar"], "answer": "B"})
+assert [b.text() for b in card2._option_buttons] == ["A. foo", "B. bar"], \
+    "AI 出的选项不该被翻译"
+card2._option_buttons[1].click()
+assert card2._option_buttons[1].isEnabled() is False, "作答后选项应锁住"
+_i18n.lang = lambda: "zh"           # 还原，别影响后面的中文断言
+
 # 课程管理：搜索过滤 + 重命名 + 批量删除（对话框在 offscreen 下会阻塞，这里只测非交互路径）
 # 课名是 AI 填的占位名时，列表上别把「（未知）」当课名摆出来
 assert ui.FloatingWindow._lesson_name({"title": "贝叶斯统计"}) == "贝叶斯统计"

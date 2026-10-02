@@ -19,6 +19,16 @@ from PyQt5.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton,
 from echo.i18n import tr
 from echo.theme import Colors, Radius, Spacing, font
 
+# 自评题（AI 没出成题时的兜底）三个选项是后端 quiz.SELF_OPTIONS 给的固定文案，
+# 在这里按当前语言换个说法。不让 backend 直接引 i18n —— 那会把 PyQt5 拖进
+# 后端核心的导入链，踩 main.py 里记着的 ctranslate2 加载顺序的坑。
+# 字母前缀保留：判分和标对错都是按 A/B/C 认的。
+_SELF_OPTIONS_EN = {
+    "A. 记得，能说个大概": "A. I remember it, roughly",
+    "B. 有点模糊": "B. A bit fuzzy",
+    "C. 完全没跟上": "C. Completely lost",
+}
+
 
 class CheckinCard(QFrame):
     """课堂抽查浮层。默认隐藏，ask() 时才出现。"""
@@ -172,7 +182,8 @@ class CheckinCard(QFrame):
 
         options = self._question.get("options") or []
         for i, text in enumerate(options):
-            btn = QPushButton(str(text))
+            # 认识的自评选项翻成英文，其它（AI 出的题）原样放过
+            btn = QPushButton(tr(str(text), _SELF_OPTIONS_EN.get(str(text), "")))
             btn.setObjectName("CheckinOption")
             btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect(lambda _, idx=i: self._on_answer(idx))
