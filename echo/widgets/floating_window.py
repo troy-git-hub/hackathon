@@ -14,6 +14,7 @@ Echo - 悬浮主窗口（学习工具风格）
 """
 import html
 import re
+import time
 import ctypes
 from ctypes import wintypes
 
@@ -164,6 +165,7 @@ class FloatingWindow(QWidget):
         self._prac_back_label = ""
         self._last_report = None     # 最近一次回响（回响页「知识地图」用）
         self._detail_lesson = {}     # 当前正在看的这节历史课
+        self._review_due_only = False   # 复习页是在过「今天到期的」还是整本错题
         self._detail_ts = 0
         self._mindmap_lesson = {}    # 知识地图页正在看的那节课
         self._drag_pos = None
@@ -667,7 +669,8 @@ class FloatingWindow(QWidget):
 
         head = QVBoxLayout()
         head.setSpacing(2)
-        head.addWidget(_label(tr("错题复习", "Review mistakes"), TITLE))
+        self.review_title = _label(tr("错题复习", "Review mistakes"), TITLE)
+        head.addWidget(self.review_title)
         self.review_sub = _label("", CAPTION)
         head.addWidget(self.review_sub)
         lay.addLayout(head)
@@ -690,6 +693,8 @@ class FloatingWindow(QWidget):
         return page
 
     def _show_review(self):
+        """整本错题（所有没过的），不限今天到期。"""
+        self._review_due_only = False
         self._render_review()
         self._show_page(REVIEW)
 
@@ -709,12 +714,20 @@ class FloatingWindow(QWidget):
             w = self.review_list_lay.takeAt(0).widget()
             if w:
                 w.deleteLater()
-        pending = [it for it in store.load() if not it.get("reviewed")]
-        self.review_sub.setText(
-            tr(f"还有 {len(pending)} 个知识点要回看", f"{len(pending)} knowledge points left to review")
-            if pending else tr("都复习过了，好样的 🎉", "All reviewed — nice work 🎉"))
-        self.review_empty.setVisible(not pending)
-        for it in pending:
+        if getattr(self, "_review_due_only", False):
+            items = store.due_items()
+            self.review_title.setText(tr("今天的回响", "Today's recall"))
+            self.review_sub.setText(
+                tr(f"今天要确认 {len(items)} 个知识点", f"{len(items)} points to confirm today")
+                if items else tr("今天的都过完了，好样的 🎉", "Done for today — nice work 🎉"))
+        else:
+            items = [it for it in store.load() if not it.get("reviewed")]
+            self.review_title.setText(tr("错题复习", "Review mistakes"))
+            self.review_sub.setText(
+                tr(f"还有 {len(items)} 个知识点要回看", f"{len(items)} knowledge points left to review")
+                if items else tr("都复习过了，好样的 🎉", "All reviewed — nice work 🎉"))
+        self.review_empty.setVisible(not items)
+        for it in items:
             self.review_list_lay.addWidget(self._review_card(it))
 
     def _review_card(self, item):
@@ -739,13 +752,48 @@ class FloatingWindow(QWidget):
             lb = _label(lesson, f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;")
             lb.setWordWrap(True)
             v.addWidget(lb)
+
+        topic_name = item.get("topic", "")
+        v.addWidget(_label(tr("想起来了吗？", "How well do you remember it?"),
+                           f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"))
+        # 三档自评决定下次什么时候再问。没有「永久掌握」这个终态：
+        # 答得越稳，Echo 把下次确认推得越远；答崩了明天就回来。
+        # 三个按钮一律用同一种样式 —— 把「记得很清楚」做得更醒目会诱导学生选它，
+        # 而这个功能的全部价值就建立在自评是诚实的之上。
+        grades = QHBoxLayout()
+        grades.setSpacing(Spacing.SM)
+        for result, zh, en in ((store.AGAIN, "还是没懂", "Still lost"),
+                               (store.FUZZY, "有点模糊", "A bit fuzzy"),
+                               (store.CLEAR, "记得很清楚", "I remember it")):
+            b = _btn(tr(zh, en), "Quiet",
+                     lambda t=topic_name, r=result: self._grade_review(t, r),
+                     self._next_due_tip(item, result))
+            grades.addWidget(b)
+        v.addLayout(grades)
+
         row = QHBoxLayout()
         row.addStretch()
-        topic_name = item.get("topic", "")
-        row.addWidget(_btn(tr("AI 出题", "Generate quiz"), "Quiet", lambda it=item: self._practice_item(it)))
-        row.addWidget(_btn(tr("✓ 掌握了", "✓  Mastered"), "Quiet", lambda t=topic_name: self._mark_reviewed(t)))
+        row.addWidget(_btn(tr("想不起来？出道题试试", "Not sure? Try a question"), "Link",
+                           lambda it=item: self._practice_item(it)))
         v.addLayout(row)
         return card
+
+    @staticmethod
+    def _next_due_tip(item, result) -> str:
+        """按钮上的悬停提示：选这一档的话，下次什么时候再问。"""
+        now = time.time()
+        _, due = store.next_due(item.get("level", 0), result, now)
+        days = max(1, round((due - now) / store.DAY))
+        return tr(f"选这个 → {days} 天后再确认一次", f"Pick this → next check in {days} days")
+
+    def _grade_review(self, topic, result):
+        """学生给一个知识点打了分：记下来，顺手算出下次复习时间。"""
+        try:
+            store.grade(topic, result)
+        except ValueError:
+            return
+        self._render_review()
+        self._fit()
 
     def _mark_reviewed(self, topic):
         store.mark_reviewed(topic)
@@ -773,6 +821,11 @@ class FloatingWindow(QWidget):
         self.home_sub.setWordWrap(True)
         head.addWidget(self.home_sub)
         lay.addLayout(head)
+
+        # 「今天该回响」：进门第一眼就该看到的东西。没有到期的知识点时整张卡隐藏，
+        # 别拿「今天没有待办」占着最显眼的位置。
+        self.home_recall_card = self._recall_card()
+        lay.addWidget(self.home_recall_card)
 
         # 开课前先给这节课起个名，下课后在历史里一眼能认出来
         lay.addWidget(_label(tr("这节课叫什么？", "What's this lesson called?"), CAPTION))
@@ -806,6 +859,39 @@ class FloatingWindow(QWidget):
             tr("管理", "Manage"), self._show_courses)
         lay.addWidget(self.home_courses_card)
         return page
+
+    def _recall_card(self):
+        """主页顶部的「今天该回响」卡：几个知识点要确认 + 当时在哪掉的队 + 预计几分钟。
+
+        用强调色描边，和下面三张普通功能卡拉开层次 —— 这是进来最该先做的事。
+        """
+        card = QFrame()
+        card.setObjectName("RecallCard")
+        card.setStyleSheet(
+            f"QFrame#RecallCard {{ background: {Colors.ACCENT_SOFT};"
+            f"border: 1px solid {Colors.ACCENT_BORDER}; border-radius: {Radius.LG}px; }}")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        v.setSpacing(4)
+
+        self.recall_title = _label("", f"color: {Colors.TEXT_PRIMARY}; font-size: 16px;"
+                                      "font-weight: 700;", wrap=True)
+        v.addWidget(self.recall_title)
+        self.recall_hint = _label("", f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;", wrap=True)
+        v.addWidget(self.recall_hint)
+        self.recall_time = _label("", f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;")
+        v.addWidget(self.recall_time)
+
+        row = QHBoxLayout()
+        row.addStretch()
+        self.btn_recall = _btn(tr("看看我还记不记得", "See what I still remember"), "Accent",
+                               self._show_recall,
+                               tr("只过今天到期的知识点，答完 Echo 会安排下次复习时间",
+                                  "Go through today's due points — Echo schedules the next check for you"))
+        self.btn_recall.setMinimumHeight(40)
+        row.addWidget(self.btn_recall)
+        v.addLayout(row)
+        return card
 
     def _home_card(self, title, desc, action, slot):
         """主页上的一张功能卡：标题 + 说明 + 右侧按钮；副标题文字后面会被动态更新。"""
@@ -1054,6 +1140,7 @@ class FloatingWindow(QWidget):
         bits.append(tr(f"还有 {pending} 个错题要复习", f"{pending} mistakes left to review")
                     if pending else tr("错题都复习完了 🎉", "All mistakes reviewed 🎉"))
         self.home_sub.setText(" · ".join(bits))
+        self._render_recall_card()
 
         self.home_review_card.sub_lbl.setText(
             tr(f"{pending} 个掉队过的知识点等你回看", f"{pending} knowledge points waiting for review")
@@ -1069,6 +1156,34 @@ class FloatingWindow(QWidget):
                f"{n_lesson} past lessons — search, rename, bulk delete")
             if n_lesson else tr("还没有历史课，开一节就有了",
                                 "No past lessons yet — start one and it'll appear here"))
+
+    def _render_recall_card(self):
+        """填「今天该回响」卡。没有到期的就整张收起来。"""
+        try:
+            s = store.due_summary()
+        except Exception:
+            s = {"count": 0, "topics": [], "minutes": 0, "hint": ""}
+        n = s.get("count", 0)
+        self.home_recall_card.setVisible(bool(n))
+        if not n:
+            return
+        self.recall_title.setText(
+            tr(f"今天有 {n} 个知识点需要确认", f"{n} knowledge points to confirm today"))
+        hint = (s.get("hint") or "").strip()
+        if not hint:
+            topics = s.get("topics") or []
+            shown = "、".join(topics[:3]) + ("…" if len(topics) > 3 else "")
+            hint = tr(f"包括：{shown}", f"Including: {shown}")
+        self.recall_hint.setText(hint)
+        self.recall_hint.setVisible(bool(hint))
+        self.recall_time.setText(
+            tr(f"预计 {s.get('minutes', n)} 分钟", f"About {s.get('minutes', n)} min"))
+
+    def _show_recall(self):
+        """「看看我还记不记得」：只过今天到期的那几个，不是整本错题。"""
+        self._review_due_only = True
+        self._render_review()
+        self._show_page(REVIEW)
 
     def _start_today(self):
         """给这节课命名并开课。"""

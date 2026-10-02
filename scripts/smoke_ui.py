@@ -351,5 +351,59 @@ assert seen and seen[0] == ["删除", "取消"], \
     f"确认框按钮应该是中文的「删除/取消」，实际 {seen[0] if seen else None}"
 assert seen and "知道了" in seen[1], f"提示框按钮不对：{seen[1] if len(seen) > 1 else None}"
 
+# 2.0「今天该回响」：首页卡片 → 只过今天到期的 → 三档自评改下次复习时间
+import time as _t                                   # noqa: E402
+
+store._write([])
+store.add([{"topic": "导数定义", "missing": "为什么是极限？", "time": _t.time() - 86400,
+            "review_chain": ["导数", "极限"]},
+           {"topic": "链式法则", "missing": "为什么连乘？", "time": _t.time() - 86400}])
+window._show_home()
+app.processEvents()
+assert window.home_recall_card.isVisible(), "有到期的知识点，首页却没弹「今天该回响」卡"
+assert "2" in window.recall_title.text(), f"卡片没数对：{window.recall_title.text()}"
+assert window.recall_hint.text().strip(), "卡片没给出掉队位置的提示"
+
+QTest.mouseClick(window.btn_recall, Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.REVIEW, "点「看看我还记不记得」没进复习页"
+assert window.review_title.text() == "今天的回响", \
+    f"回响模式标题应和整本错题区分开：{window.review_title.text()}"
+assert window.review_list_lay.count() == 2, f"今天该过 2 个，实际 {window.review_list_lay.count()}"
+
+grade_btns = [b for b in window.review_list.findChildren(QPushButton)
+              if b.text() in ("还是没懂", "有点模糊", "记得很清楚")]
+assert len(grade_btns) == 6, f"每张卡应有三档自评，实际共 {len(grade_btns)} 个按钮"
+# 三档必须等重：把「记得很清楚」做成强调色会诱导学生谎报，调度就失真了
+styles = {b.text(): b.objectName() for b in grade_btns}
+assert len(set(styles.values())) == 1, f"三档按钮样式不一致，会诱导选择：{styles}"
+
+clear_btn = next(b for b in grade_btns if b.text() == "记得很清楚")
+QTest.mouseClick(clear_btn, Qt.LeftButton)
+app.processEvents()
+assert window.review_list_lay.count() == 1, "答完「记得很清楚」后该从今天的列表里消失"
+
+rec = next(it for it in store.load() if it.get("level"))
+assert rec["level"] == 1 and rec["due"] > _t.time() + 6 * 86400, \
+    f"「记得很清楚」应推到 7 天后：level={rec.get('level')}"
+
+window._show_home()
+app.processEvents()
+assert "1" in window.recall_title.text(), f"首页计数没跟着减：{window.recall_title.text()}"
+
+window._grade_review("链式法则", store.AGAIN)
+window._show_home()
+app.processEvents()
+assert not window.home_recall_card.isVisible(), "今天的都过完了，卡片该收起来"
+again = next(it for it in store.load() if it["topic"] == "链式法则")
+assert again["level"] == 0 and again["due"] < _t.time() + 2 * 86400, \
+    "「还是没懂」应该明天就回来"
+
+# 整本错题入口不受影响，仍然看全部没过的
+window._show_review()
+app.processEvents()
+assert window.review_title.text() == "错题复习", window.review_title.text()
+store._write([])
+
 window.close()
 print("UI smoke passed: one window, avatar and primary flow work")
