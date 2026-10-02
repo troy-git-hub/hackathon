@@ -386,8 +386,9 @@ class FloatingWindow(QWidget):
         row.addWidget(self.btn_ok)
         row.addWidget(self.btn_warn)
         # 课上想自测一下：不用等 Echo 自己来找你，随时可以要一道
-        self.btn_ask = _btn("考考我", "Link", self._ask_checkin_now,
-                            "让 Echo 拿老师刚讲过的东西出一道小题，看看你跟没跟上")
+        self.btn_ask = _btn(tr("考考我", "Quiz me"), "Link", self._ask_checkin_now,
+                            tr("让 Echo 拿老师刚讲过的东西出一道小题，看看你跟没跟上",
+                               "Ask Echo for a quick question on what the teacher just covered"))
         row.addWidget(self.btn_ask)
         lay.addLayout(row)
         return page
@@ -396,7 +397,8 @@ class FloatingWindow(QWidget):
         """听课页「考考我」：学生主动要一道课上小题。"""
         engine = getattr(getattr(self, "echo", None), "engine", None)
         if not getattr(engine, "active", False):
-            self.status_lbl.setText("先开始上课，Echo 才知道该考你什么")
+            self.status_lbl.setText(tr("先开始上课，Echo 才知道该考你什么",
+                                       "Start the lesson first — then Echo knows what to quiz you on"))
             return
         if not hasattr(self.echo, "ask_checkin_now") or not self.echo.ask_checkin_now():
             return          # 已经有一道在等着答，或者正在出 —— 不打断
@@ -897,7 +899,7 @@ class FloatingWindow(QWidget):
         first = next((s.get("name") for s in (ls.get("skills_detail") or []) if s.get("name")), "")
         if first:
             return first
-        return (ls.get("date") or "").strip() or "一节课"
+        return (ls.get("date") or "").strip() or tr("一节课", "A lesson")
 
     def _courses_row(self, ls):
         """一节历史课一行：勾选框 + 名称/日期 + 重命名 + 看回顾。"""
@@ -1459,7 +1461,7 @@ class FloatingWindow(QWidget):
             item = {"topic": topic, "missing": "", "reason": "", "micro_lesson": "",
                     "known": "", "step": "", "now": "", "status": "review", "reviewed": False}
         self._practice_item(item, back=lambda: self._back_to_mindmap(topic),
-                            back_label="← 知识地图")
+                            back_label=tr("← 知识地图", "← Knowledge map"))
 
     # ================= 页面切换 / 尺寸 =================
     def _show_page(self, idx):

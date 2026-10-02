@@ -30,6 +30,11 @@ from echo.mock_data import SAMPLE_BREAKPOINT, SAMPLE_CONCEPTS
 from echo.theme import apply_theme
 from echo.widgets import floating_window as ui
 
+# 界面支持中/英双语，这套自检是按中文按钮找控件的。上机语言设成 English 时
+# 文案会变、断言全找不到按钮，所以在这里把语言钉死成中文（只影响本进程，不改用户设置）。
+from echo import i18n                    # noqa: E402
+i18n.lang = lambda: "zh"
+
 
 class FakeEngine:
     def __init__(self):
