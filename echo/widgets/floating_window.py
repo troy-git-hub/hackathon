@@ -10,12 +10,22 @@ Echo - 悬浮主窗口（学习工具风格）
 """
 import html
 import re
+import ctypes
+from ctypes import wintypes
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame, QSizePolicy, QStackedWidget,
                              QProgressBar, QApplication, QShortcut)
 from PyQt5.QtCore import Qt, QTimer, QRectF, QPoint
-from PyQt5.QtGui import QFont, QCursor, QPainter, QPainterPath, QColor, QBrush, QPen, QKeySequence
+from PyQt5.QtGui import QFont, QCursor, QPainter, QPainterPath, QColor, QBrush, QPen, QKeySequence, QPixmap
+
+# Win32 常量 — 无边框窗口边缘拖拽调整大小 + 最小化
+WM_NCHITTEST = 0x0084
+HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT = 10, 11, 12, 13, 14
+HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT = 15, 16, 17
+SC_MINIMIZE = 0xF020
+SW_MINIMIZE = 6
+user32 = ctypes.windll.user32
 
 from echo.theme import Colors, Radius, font, Spacing
 from echo.components.loading import PulseDots
@@ -25,6 +35,7 @@ from echo.mock_data import Concept
 from echo.backend import config
 from echo.backend.engine import parse_tc
 from echo.backend.qt_bridge import EchoBridge
+from echo.components.pet import EMOTION_FILES, ASSETS_DIR
 
 SHADOW = 14
 WAIT_HINT = "播放网课后，Echo 会自动开始听"
@@ -104,6 +115,7 @@ class FloatingWindow(QWidget):
         self.echo.breakpoint.connect(self._on_breakpoint)
         self.echo.echo.connect(self._on_echo)
         self.echo.status.connect(self._on_status)
+        self.echo.thinking.connect(self._on_thinking)
         self.echo.error.connect(self._on_error)
         self.echo.mode.connect(self._on_mode)
         self.echo.start()
@@ -165,7 +177,37 @@ class FloatingWindow(QWidget):
         self.fold_btn = _btn("–", "IconBtn", lambda: self._show_page(MINI), "折叠")
         self.fold_btn.setFixedSize(26, 26)
         lay.addWidget(self.fold_btn)
+
+        # 最小化按钮
+        self.min_btn = _btn("▾", "IconBtn", self._minimize, "最小化")
+        self.min_btn.setFixedSize(26, 26)
+        lay.addWidget(self.min_btn)
+
+        # 右上角表情包（与桌宠情绪同步，加载 assets/emojis/ 下的 PNG）
+        self.emoji_lbl = QLabel()
+        self.emoji_lbl.setFixedSize(32, 32)
+        self.emoji_lbl.setScaledContents(True)
+        self._emoji_pixmaps = {}
+        import os
+        for emo, fname in EMOTION_FILES.items():
+            path = os.path.join(ASSETS_DIR, fname)
+            if os.path.exists(path):
+                pm = QPixmap(path)
+                if not pm.isNull():
+                    self._emoji_pixmaps[emo] = pm
+        self._set_emoji("idle")
+        lay.addWidget(self.emoji_lbl)
+
         return bar
+
+    def _set_emoji(self, emotion: str):
+        """切换标题栏表情包图片"""
+        pm = self._emoji_pixmaps.get(emotion)
+        if pm is not None:
+            self.emoji_lbl.setPixmap(pm)
+            self.emoji_lbl.show()
+        else:
+            self.emoji_lbl.clear()
 
     # ----- 0 默认听课卡片 -----
     def _build_listen(self) -> QWidget:
@@ -411,7 +453,8 @@ class FloatingWindow(QWidget):
                     x = old.right() + 1 - W
                 x = max(scr.left() - SHADOW, min(x, scr.right() + SHADOW - W))
                 y = max(scr.top() - SHADOW, min(y, scr.bottom() + SHADOW - H))
-            self.setFixedSize(W, H)
+            self.setMinimumSize(W, H)
+            self.resize(W, H)
             if self.isVisible() and (x, y) != (old.x(), old.y()):
                 self.move(x, y)
         do()
@@ -473,6 +516,7 @@ class FloatingWindow(QWidget):
     def _cat(self, emotion, hold_ms=0):
         self.cat.set_emotion(emotion, hold_ms)
         self.mini_cat.set_emotion(emotion, hold_ms)
+        self._set_emoji(emotion)
 
     # ================= 按钮 =================
     def _on_ok(self):
@@ -652,6 +696,17 @@ class FloatingWindow(QWidget):
             if self._page == LISTEN:
                 self._fit()
 
+    def _on_thinking(self, active: bool, text: str):
+        """AI 实时思考状态：active=True 时显示思考文本+脉冲点，False 时恢复"""
+        if active:
+            self.status_lbl.setText(text)
+            self.status_dot.hide()
+            self.status_dots.start()
+            self._set_emoji("thinking")
+        else:
+            self.status_dot.show()
+            self.status_dots.stop()
+
     def _on_mode(self, kind, offline):
         tags = (["示例课"] if kind == "demo" else []) + (["离线"] if offline else [])
         text = " · ".join(tags)
@@ -685,6 +740,42 @@ class FloatingWindow(QWidget):
         if self._page == ECHO and self.echo_loading.isVisible():
             self.echo_dots.stop()
             self.echo_loading_lbl.setText("回响生成失败，请检查网络后重试")
+
+    def _minimize(self):
+        hwnd = int(self.winId())
+        user32.ShowWindow(hwnd, SW_MINIMIZE)
+
+    def nativeEvent(self, eventType, message):
+        """Win32 WM_NCHITTEST → 无边框窗口边缘拖拽调整大小"""
+        try:
+            msg = wintypes.MSG.from_address(int(message))
+        except Exception:
+            return super().nativeEvent(eventType, message)
+        if msg.message == WM_NCHITTEST:
+            x = ctypes.c_short(msg.lParam & 0xFFFF).value
+            y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
+            geo = self.frameGeometry()
+            x -= geo.x()
+            y -= geo.y()
+            bw = 6
+            w, h = geo.width(), geo.height()
+            if x < bw and y < bw:
+                return True, HTTOPLEFT
+            if x > w - bw and y < bw:
+                return True, HTTOPRIGHT
+            if x < bw and y > h - bw:
+                return True, HTBOTTOMLEFT
+            if x > w - bw and y > h - bw:
+                return True, HTBOTTOMRIGHT
+            if x < bw:
+                return True, HTLEFT
+            if x > w - bw:
+                return True, HTRIGHT
+            if y < bw:
+                return True, HTTOP
+            if y > h - bw:
+                return True, HTBOTTOM
+        return super().nativeEvent(eventType, message)
 
     def closeEvent(self, e):
         self.echo.shutdown()

@@ -87,6 +87,7 @@ class EchoEngine:
                  on_echo: Callable[[EchoReport], None] = None,
                  on_status: Callable[[str], None] = None,
                  on_error: Callable[[str], None] = None,
+                 on_thinking: Callable[[bool, str], None] = None,
                  concept_interval: float = None,
                  use_llm: bool = True,
                  on_event: Callable = None):
@@ -96,6 +97,7 @@ class EchoEngine:
         self.on_echo = on_echo or (lambda r: None)
         self.on_status = on_status or (lambda s: None)
         self.on_error = on_error or (lambda e: None)
+        self.on_thinking = on_thinking or (lambda active, text: None)
         # 可选：统一事件出口 on_event(session, name, *args)，给 Qt 桥接在主线程再核对一次 session
         self.on_event = on_event
         self.concept_interval = concept_interval or config.CONCEPT_INTERVAL
@@ -240,6 +242,8 @@ class EchoEngine:
                 timeline = self._timeline_text()
                 prev = self.entries[-1] if self.entries else None
             chunk = "\n".join(f"[{l.tc}] {l.text}" for l in pending)
+            preview = (chunk[:30] + "…") if len(chunk) > 30 else chunk
+            self._emit(sid, "thinking", True, f"正在理解：{preview}")
 
             if self.llm:
                 data = self.llm.json(prompts.CONCEPT_SYSTEM,
@@ -289,6 +293,7 @@ class EchoEngine:
                 self._emit(sid, "concept", c)
         finally:
             concept_lock.release()
+            self._emit(sid, "thinking", False, "")
 
     def _mock_concept(self, chunk):
         for c in SAMPLE_CONCEPTS:

@@ -25,6 +25,7 @@ class EchoBridge(QObject):
     echo = pyqtSignal(object)                # EchoReport
     status = pyqtSignal(str)                 # listening / analyzing / summarizing / loading_asr / done
     error = pyqtSignal(str)
+    thinking = pyqtSignal(bool, str)         # active, preview_text — AI 实时思考状态
     mode = pyqtSignal(str, bool)             # 音频来源 system/mic/demo, 是否离线
 
     _event = pyqtSignal(int, str, object)    # 内部：session, 事件名, 参数元组

@@ -6,6 +6,8 @@ import os
 
 # 国内默认走 HF 镜像下载 Whisper 模型
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+# 禁用 xet 后端，避免 401 Unauthorized 下载失败
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
 try:
     from dotenv import load_dotenv
