@@ -3,6 +3,7 @@ Echo - 设置
 
 一个简单的设置窗口：填 API key（DeepSeek / 百炼 Qwen-VL 视觉）、音频来源、Whisper 模型、
 界面语言、桌宠皮肤。保存后写回项目根目录的 .env（保留原有注释和其它配置项）。
+「用户：」一栏写到用户资料 profile.json（见 echo.backend.profile），下次开机问候就用新名字。
 改完需要重启 Echo 生效（语言和皮肤除外，皮肤即时生效）。
 """
 import os
@@ -11,7 +12,7 @@ from PyQt5.QtCore import Qt, QSettings
 from PyQt5.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel,
                              QLineEdit, QVBoxLayout, QWidget, QApplication)
 
-from echo.backend import paths
+from echo.backend import paths, profile
 from echo.theme import Colors, font
 from echo.i18n import tr, lang, set_lang
 
@@ -73,6 +74,29 @@ def _write_env(updates: dict):
         f.write("\n".join(lines) + "\n")
 
 
+def dialog_qss() -> str:
+    """设置窗口和首次登录窗口共用的样式。"""
+    return f"""
+        QDialog {{ background:{Colors.WINDOW_BG}; }}
+        QLabel {{ color:{Colors.TEXT_PRIMARY}; }}
+        QLineEdit, QComboBox, QSpinBox {{
+            background:{Colors.SURFACE}; color:{Colors.TEXT_PRIMARY};
+            border:1px solid {Colors.BORDER}; border-radius:6px; padding:6px 8px;
+        }}
+        QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color:{Colors.ACCENT}; }}
+        QComboBox::drop-down {{ border:none; width:22px; }}
+        QPushButton {{
+            background:{Colors.SURFACE}; color:{Colors.TEXT_PRIMARY};
+            border:1px solid {Colors.BORDER}; border-radius:6px; padding:6px 18px;
+        }}
+        QPushButton:hover {{ border-color:{Colors.BORDER_STRONG}; }}
+        QDialogButtonBox QPushButton:first-child {{
+            background:{Colors.ACCENT}; color:{Colors.ON_ACCENT}; border:none; font-weight:600;
+        }}
+        QDialogButtonBox QPushButton:first-child:hover {{ background:{Colors.ACCENT_HOVER}; }}
+    """
+
+
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -99,6 +123,13 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
         form.setSpacing(10)
         form.setLabelAlignment(Qt.AlignRight)
+
+        # 用户名：开机问候「你好 + 用户名」用的就是它，存在 profile.json
+        self._profile = profile.load()
+        self.user_edit = QLineEdit(profile.display_name(self._profile))
+        self.user_edit.setPlaceholderText(tr("开机问候时怎么称呼你", "What Echo calls you when it starts"))
+        self.user_edit.setFont(font(12))
+        form.addRow(tr("用户：", "User:"), self.user_edit)
 
         self.inputs = {}
         for key, label, tip in FIELDS:
@@ -146,25 +177,7 @@ class SettingsDialog(QDialog):
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
 
-        self.setStyleSheet(f"""
-            QDialog {{ background:{Colors.WINDOW_BG}; }}
-            QLabel {{ color:{Colors.TEXT_PRIMARY}; }}
-            QLineEdit, QComboBox {{
-                background:{Colors.SURFACE}; color:{Colors.TEXT_PRIMARY};
-                border:1px solid {Colors.BORDER}; border-radius:6px; padding:6px 8px;
-            }}
-            QLineEdit:focus, QComboBox:focus {{ border-color:{Colors.ACCENT}; }}
-            QComboBox::drop-down {{ border:none; width:22px; }}
-            QPushButton {{
-                background:{Colors.SURFACE}; color:{Colors.TEXT_PRIMARY};
-                border:1px solid {Colors.BORDER}; border-radius:6px; padding:6px 18px;
-            }}
-            QPushButton:hover {{ border-color:{Colors.BORDER_STRONG}; }}
-            QDialogButtonBox QPushButton:first-child {{
-                background:{Colors.ACCENT}; color:{Colors.ON_ACCENT}; border:none; font-weight:600;
-            }}
-            QDialogButtonBox QPushButton:first-child:hover {{ background:{Colors.ACCENT_HOVER}; }}
-        """)
+        self.setStyleSheet(dialog_qss())
         self.resize(480, 360)
 
     def _save(self):
@@ -178,6 +191,15 @@ class SettingsDialog(QDialog):
             dialogs.warn(self, tr("保存失败", "Save failed"),
                          f"{tr('写 .env 失败：', 'Failed to write .env: ')}{e}")
             return
+        username = self.user_edit.text().strip()
+        if username != str(self._profile.get("username") or ""):
+            try:
+                profile.save({"username": username})
+            except OSError as e:
+                from echo.widgets import dialogs
+                dialogs.warn(self, tr("保存失败", "Save failed"),
+                             f"{tr('写用户资料失败：', 'Failed to save profile: ')}{e}")
+                return
         set_lang(self.lang_combo.currentData())
         # 界面文案要重启才换，但 AI 用哪种语言回答可以立刻生效
         from echo.backend import config as backend_config

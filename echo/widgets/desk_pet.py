@@ -21,6 +21,7 @@ from PyQt5.QtCore import Qt, QPointF, QRectF, QSettings, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QCursor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
 from PyQt5.QtWidgets import QApplication, QMenu, QWidget
 
+from echo.backend import profile
 from echo.theme import Colors, font, style_menu
 from echo.components.study import CatAvatar
 from echo.widgets.dock_chat import DockChat
@@ -206,7 +207,9 @@ class DeskPet(QWidget):
             e.error.connect(lambda m: self.say(tr("出了点小问题，我还在", "Small hiccup, but I'm still here"), 3000, "warn"))
             if hasattr(e, "level"):
                 e.level.connect(self._on_level)
-        self.say(tr("我是 Echo，陪你听课～", "I'm Echo, your study buddy."), 4000, "ok")
+        who = profile.display_name()
+        self.say(tr(f"我是Echo，伴你学习，你好{who}！", f"I'm Echo, here to study with you. Hi {who}!")
+                 if who else tr("我是Echo，伴你学习！", "I'm Echo, here to study with you!"), 5000, "ok")
 
     # ================= 对外 =================
     def say(self, text, ms=4000, mood=None, hold_ms=None):

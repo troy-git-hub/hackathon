@@ -38,6 +38,7 @@ from echo.theme import apply_theme
 from echo.widgets.floating_window import FloatingWindow
 from echo.widgets.tray import EchoTray
 from echo.widgets.desk_pet import DeskPet
+from echo.widgets.profile_setup import ensure_profile
 
 
 def main():
@@ -57,6 +58,10 @@ def main():
     from echo import i18n
     from echo.backend import config as backend_config
     backend_config.set_ui_lang(i18n.lang())
+
+    # 第一次打开先填资料（存成 profile.json，以后启动直接读）；关掉不填就不启动
+    if not ensure_profile():
+        sys.exit(0)
 
     win = FloatingWindow()
     # 定位到屏幕中央
