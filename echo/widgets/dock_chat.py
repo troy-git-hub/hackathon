@@ -72,6 +72,7 @@ class DockChat(QWidget):
     _delta = pyqtSignal(str)
     _done = pyqtSignal(str)
     _error = pyqtSignal(str)
+    left = pyqtSignal()          # 鼠标移出小窗（让桌宠判断要不要收起）
 
     def __init__(self, engine=None, parent=None):
         super().__init__(parent, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -159,10 +160,11 @@ class DockChat(QWidget):
     def set_emotion(self, emotion):
         self.cat.set_emotion(emotion)
 
-    def show_near(self, pet):
-        """贴着挂边小球弹出来：球在左就弹右边，在右就弹左边。"""
+    def show_near(self, pet, side=None):
+        """贴着挂边小球弹出来：球在左就弹右边，在右就弹左边。side 不给就用 pet.dock_side。"""
+        side = side or getattr(pet, "dock_side", "")
         g = QApplication.primaryScreen().availableGeometry()
-        if getattr(pet, "dock_side", "") == "left":
+        if side == "left":
             x = pet.x() + pet.width() + 8
         else:
             x = pet.x() - self.width() - 8
@@ -171,6 +173,10 @@ class DockChat(QWidget):
         self.show()
         self.raise_()
         self.input.setFocus()
+
+    def leaveEvent(self, e):
+        super().leaveEvent(e)
+        self.left.emit()
 
     # ================= 聊天 =================
     def _add_msg(self, text, mine):
