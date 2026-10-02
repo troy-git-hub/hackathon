@@ -123,6 +123,8 @@ class DeskPet(QWidget):
         self._vbar = [0.05] * self.VN
         self.docked = False          # True = 收起成侧边加速球
         self.dock_side = ""          # "left" / "right"
+        self._hover_expanded = False # 悬停临时展开：鼠标移开就收回
+        self._hover_side = ""
         self.skin = QSettings("Echo", "Echo").value("desktop_pet_skin", "cartoon")
         if self.skin not in ("cartoon", "line"):
             self.skin = "cartoon"
@@ -359,6 +361,7 @@ class DeskPet(QWidget):
         if self._press and e.buttons() & Qt.LeftButton:
             d = e.globalPos() - self._press[0]
             if d.manhattanLength() > 5:
+                self._hover_expanded = False   # 开始拖拽就退出「悬停展开」状态
                 if self.docked and not self._dragged:
                     self._set_docked(False, "")   # 开始拖动：先把收起的小球展开
                 self._dragged = True
@@ -390,10 +393,8 @@ class DeskPet(QWidget):
             self.circle_ask.emit()
 
     def _single_click(self):
-        if self.docked:
-            self._toggle_chat()
-        else:
-            self._toggle_panel()
+        # 用户要求：挂边态单击和不磁吸时一样，弹出主窗口（首页），不要弹「声纹+聊天」小窗
+        self._toggle_panel()
 
     def _toggle_chat(self):
         """挂边态单击：弹 / 收「声纹 + 聊天」小窗。"""
@@ -404,9 +405,22 @@ class DeskPet(QWidget):
 
     def enterEvent(self, e):
         self._pet_x, self._pet_dist = None, 0.0
+        if self.docked:                       # 悬停即展开（不用拖），像 GPT 那样
+            self._hover_side = self.dock_side
+            self._hover_expanded = True
+            self._set_docked(False, "")
+            g = QApplication.primaryScreen().availableGeometry()
+            x = g.left() if self._hover_side == "left" else g.right() - self.width()
+            y = max(g.top(), min(self.y(), g.bottom() - self.height()))
+            self.move(x, y)
 
     def leaveEvent(self, e):
         self._pet_x = None
+        if self._hover_expanded:              # 鼠标移开就收回侧边球
+            self._hover_expanded = False
+            side = self._hover_side or "left"
+            self._set_docked(True, side)
+            self._snap_dock()
 
     # ================= 动画 =================
     def _tick(self):
