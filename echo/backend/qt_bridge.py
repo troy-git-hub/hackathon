@@ -11,11 +11,16 @@ Echo - 后端 ↔ PyQt 桥接
     self.echo.start()
     self.echo.feedback("lost")
 """
+import logging
+import threading
+
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 
-from echo.backend import config
+from echo.backend import config, quiz
 from echo.backend.engine import EchoEngine
 from echo.backend.sources import make_source
+
+log = logging.getLogger("echo.bridge")
 
 
 class EchoBridge(QObject):
@@ -28,6 +33,9 @@ class EchoBridge(QObject):
     thinking = pyqtSignal(bool, str)         # active, preview_text — AI 实时思考状态
     level = pyqtSignal(float)                # 真实音频响度 0..1（声纹反馈）
     mode = pyqtSignal(str, bool)             # 音频来源 system/mic, 是否离线
+    checkin = pyqtSignal(object)             # 课堂抽问题 dict：topic/question/options/tc
+    checkin_result = pyqtSignal(object)      # 作答结果 dict：result/choice_text/answer_text/explain
+    quiz_ready = pyqtSignal(object)          # 课后练习题 list[dict]（与 practice.py 的形状一致）
 
     _event = pyqtSignal(int, str, object)    # 内部：session, 事件名, 参数元组
 
@@ -97,6 +105,33 @@ class EchoBridge(QObject):
     def mark_self(self):
         """学生点了「我自己看看」。"""
         self.engine.mark_self()
+
+    def answer_checkin(self, choice: int):
+        """学生答了课堂抽问题（choice 为选项下标）。返回作答结果，当前没有待答题返回 None。"""
+        return self.engine.answer_checkin(choice)
+
+    def skip_checkin(self):
+        """学生把抽问关掉了。"""
+        self.engine.skip_checkin()
+
+    def make_lesson_quiz(self, lesson: dict, n: int = 4):
+        """按一节课的要点出课后练习题，出好后发 quiz_ready(list)。
+
+        和「照错题出题」是两回事：这里覆盖整节课的知识点，给课后巩固用。
+        出题可能要十几秒，所以放后台线程；期间重开课程就丢弃结果。
+        """
+        sid = self.engine.session
+
+        def _run():
+            try:
+                questions = quiz.lesson_quiz_sync(lesson, n)
+            except Exception as e:
+                log.warning("课后练习出题失败: %s", e)
+                return
+            if questions and sid == self.engine.session:
+                self.quiz_ready.emit(questions)
+
+        threading.Thread(target=_run, daemon=True, name="echo-lessonquiz").start()
 
     def end_lesson(self):
         if self.source:

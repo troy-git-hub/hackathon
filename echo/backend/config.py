@@ -51,6 +51,18 @@ BREAKPOINT_TIMEOUT = _int("ECHO_BREAKPOINT_TIMEOUT", 12)
 # 断点结果出来后，最多再等多久让未处理转写并入时间轴（秒）
 FLUSH_GRACE = float(os.getenv("ECHO_FLUSH_GRACE", "2"))
 
+# ---------- 课堂抽问（摸鱼探测） ----------
+# 关掉就不抽问：ECHO_CHECKIN=0
+CHECKIN = os.getenv("ECHO_CHECKIN", "1") != "0"
+# 开课多久之后才允许第一次抽问（秒）—— 太早抽问会打断学生进入状态
+CHECKIN_WARMUP = _int("ECHO_CHECKIN_WARMUP", 240)
+# 两次抽问之间至少间隔多少秒
+CHECKIN_INTERVAL = _int("ECHO_CHECKIN_INTERVAL", 420)
+# 学生多久没有任何互动（反馈 / 补课 / 答题）就认为可能在摸鱼（秒）
+CHECKIN_IDLE = _int("ECHO_CHECKIN_IDLE", 180)
+# 抽问的 LLM 超时，超时就用规则题兜底，不影响听课
+CHECKIN_TIMEOUT = _int("ECHO_CHECKIN_TIMEOUT", 10)
+
 # ---------- 音频来源（真实采集） ----------
 # system: 抓电脑正在播放的声音（网课/会议）+ Whisper   mic: 麦克风
 SOURCE = os.getenv("ECHO_SOURCE", "system")

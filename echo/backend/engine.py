@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
-from echo.backend import config, prompts
+from echo.backend import config, prompts, quiz, store
 from echo.backend.llm import LLM, LLMError
 from echo.mock_data import (BreakPoint, Concept, EchoSkill, SAMPLE_BREAKPOINT,
                             SAMPLE_CONCEPTS)
@@ -103,6 +103,9 @@ class EchoEngine:
         self.on_status = on_status or (lambda s: None)
         self.on_error = on_error or (lambda e: None)
         self.on_thinking = on_thinking or (lambda active, text: None)
+        # 课堂抽问：出一题 / 判分结果
+        self.on_checkin = lambda q: None
+        self.on_checkin_result = lambda r: None
         # 真实声纹响度（0..1），由音频来源喂入，驱动 UI 的声纹反馈
         self.on_level = lambda level: None
         # 可选：统一事件出口 on_event(session, name, *args)，给 Qt 桥接在主线程再核对一次 session
@@ -140,6 +143,11 @@ class EchoEngine:
             self.breakpoints: List[BreakPoint] = []
             self._pending_from = 0          # lines[_pending_from:] 还没抽过 concept
             self._last_extract = time.time()
+            # 课堂抽问：学生久不互动就主动问一道，答错进错题本
+            self.checkins: List[dict] = []      # 历次抽问（含作答结果）
+            self.pending_checkin: Optional[dict] = None   # 当前等着回答的那道题
+            self._last_interaction = time.time()    # 学生最近一次动手（反馈/补课/答题）
+            self._last_checkin_at = 0.0             # 上一次抽问的墙钟时间
 
     def start(self):
         self._stop.set()                 # 先停掉上一节课的 ticker
@@ -241,10 +249,16 @@ class EchoEngine:
                 pending = self.lines[self._pending_from:]
                 chars = sum(len(l.text) for l in pending)
                 due = time.time() - self._last_extract >= self.concept_interval
+                checkin = self._checkin_due()
             if pending and (chars >= config.CONCEPT_MIN_CHARS and due or chars >= 400):
                 try:
                     self._pool.submit(self._safe, sid, self._extract_concept, False, sid)
                 except RuntimeError:      # 程序退出时线程池已关闭
+                    return
+            if checkin:
+                try:
+                    self._pool.submit(self._safe, sid, self._ask_checkin, sid)
+                except RuntimeError:
                     return
 
     # ================= Concept Timeline =================
@@ -343,6 +357,7 @@ class EchoEngine:
         with self._lock:
             cur = self.entries[-1] if self.entries else None
             self.feedbacks.append(Feedback(self.now(), kind, cur.concept.topic if cur else ""))
+            self._last_interaction = time.time()   # 学生动手了，说明人在
             sid = self.session
         if kind == "lost":
             self._emit(sid, "status", "analyzing")
@@ -489,6 +504,7 @@ class EchoEngine:
     def mark_fixed(self):
         """学生点了「✓ 补上了」：把最近一个断点标记为已补上。"""
         with self._lock:
+            self._last_interaction = time.time()
             if not self.breakpoints:
                 return
             bp = self.breakpoints[-1]
@@ -501,14 +517,95 @@ class EchoEngine:
     def mark_self(self):
         """学生点了「我自己看看」：最近一个断点记为自己回看，回响里仍算待复习。"""
         with self._lock:
+            self._last_interaction = time.time()
             if self.breakpoints:
                 self.breakpoints[-1].self_review = True
+
+    # ================= 课堂抽问（摸鱼探测） =================
+    def _checkin_due(self) -> bool:
+        """该抽问了吗？只在开课中、有可考的知识点、学生久没动手、且距上次抽问够久时为真。
+        调用方需持有 self._lock。"""
+        if not config.CHECKIN or not self.active:
+            return False
+        if self.pending_checkin is not None:      # 上一道还没答，别追着问
+            return False
+        if not self.entries:                      # 还没听到能出题的内容
+            return False
+        now = time.time()
+        if now - self.start_ts < config.CHECKIN_WARMUP:
+            return False
+        if now - self._last_checkin_at < config.CHECKIN_INTERVAL:
+            return False
+        # 学生刚点过反馈 / 补过课，说明人在，不用打扰
+        return now - self._last_interaction >= config.CHECKIN_IDLE
+
+    def _ask_checkin(self, sid):
+        """后台：拿最近讲过的知识点出一道题，抛 checkin 事件给 UI。"""
+        with self._lock:
+            if not self._live(sid) or not self.active:
+                return
+            concept = self.entries[-1].concept
+            timeline = self._timeline_text()
+            transcript = "\n".join(f"[{l.tc}] {l.text}" for l in self.lines[-12:])
+            # 引擎没有 llm 表示「没配 key」或「已切离线」，两种都不该再新建连接
+            use_llm = self.llm is not None
+        q = quiz.make_checkin_sync(timeline=timeline, transcript=transcript,
+                                   current=concept.topic, tc=concept.timecode,
+                                   llm=self.llm, use_llm=use_llm)
+        with self._lock:
+            if not self._live(sid) or not self.active:   # 出题期间下课/重开
+                return
+            q["id"] = len(self.checkins) + 1
+            self.pending_checkin = q
+            self._last_checkin_at = time.time()
+        self._emit(sid, "checkin", q)
+
+    def answer_checkin(self, choice: int) -> Optional[dict]:
+        """学生答了抽问题。返回作答结果（含对错和讲解）；当前没有待答的题则返回 None。
+        答错 / 答「有点模糊」的记进错题本，课后「错题复习」会带上它。"""
+        with self._lock:
+            q = self.pending_checkin
+            if q is None:
+                return None
+            sid = self.session
+            self.pending_checkin = None
+            self._last_interaction = time.time()
+            result = quiz.grade(q, choice)
+            options = q.get("options") or []
+            record = {
+                "id": q.get("id"),
+                "topic": q.get("topic") or "",
+                "question": q.get("question") or "",
+                "choice": choice,
+                "choice_text": options[choice] if 0 <= choice < len(options) else "",
+                "answer_text": quiz.correct_text(q),
+                "result": result,
+                "explain": q.get("explain") or "",
+                "tc": q.get("tc") or "",
+                "time": time.time(),
+            }
+            self.checkins.append(record)
+            mistake = quiz.to_mistake(q, result) if result in (quiz.WRONG, quiz.UNSURE) else None
+        if mistake:
+            try:
+                store.add([mistake])
+            except Exception as e:      # 错题本写失败不该影响上课
+                log.warning("抽问结果写入错题本失败: %s", e)
+        self._emit(sid, "checkin_result", record)
+        return record
+
+    def skip_checkin(self):
+        """学生把抽问关掉了：算一次互动，不再追问这道题。"""
+        with self._lock:
+            self.pending_checkin = None
+            self._last_interaction = time.time()
 
     # ================= 回响 =================
     def end_lesson(self):
         """课程结束：异步生成回响页数据。"""
         self.stop()
         self.active = False              # 下课了：拍题/反馈不再记入这节课
+        self.pending_checkin = None      # 下课后不该再留着没答完的抽问
         sid = self.session
         self._emit(sid, "status", "summarizing")
         self._pool.submit(self._safe, sid, self._make_echo, sid)
