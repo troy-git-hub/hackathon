@@ -11,7 +11,11 @@ os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
 try:
     from dotenv import load_dotenv
-    load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+
+    from echo.backend import paths
+
+    # 打包后 .env 在 %APPDATA%\Echo（安装目录不可写），首次运行按 .env.example 生成
+    load_dotenv(paths.ensure_env())
 except ImportError:
     pass
 

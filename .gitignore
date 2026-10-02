@@ -20,6 +20,11 @@ Thumbs.db
 
 debug.log
 
+# PyInstaller 产物（几百 MB，不进仓库）
+build/
+dist/
+*.spec
+
 # secrets
 .env
 

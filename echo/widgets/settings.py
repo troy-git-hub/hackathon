@@ -10,11 +10,13 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel,
                              QLineEdit, QVBoxLayout, QWidget)
 
+from echo.backend import paths
 from echo.theme import Colors, font
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-ENV_PATH = os.path.join(ROOT, ".env")
-ENV_EXAMPLE = os.path.join(ROOT, ".env.example")
+# 打包后写到 %APPDATA%\Echo\.env（安装目录在 C:\Program Files 下不可写），开发时写到项目根目录
+ROOT = paths.app_dir()
+ENV_PATH = paths.ensure_env()
+ENV_EXAMPLE = paths.example_env()
 
 FIELDS = [
     ("DEEPSEEK_API_KEY", "DeepSeek API Key", "课堂理解 / 掉队分析（deepseek-chat）"),

@@ -11,6 +11,7 @@ from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
 from PyQt5.QtGui import (QPainter, QPainterPath, QColor, QBrush, QPen,
                          QRadialGradient, QLinearGradient, QFont, QPixmap)
 
+from echo.backend import paths
 from echo.theme import Colors
 
 # 情绪 -> 表情包文件名（对应 split_emojis.py 切出的 8 张）
@@ -23,7 +24,7 @@ EMOTION_FILES = {
     "fixed": "happy.png",
 }
 
-ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", "emojis")
+ASSETS_DIR = paths.asset("assets", "emojis")
 
 
 class PetWidget(QWidget):
