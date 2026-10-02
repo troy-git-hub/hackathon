@@ -330,5 +330,26 @@ assert store.get_lesson(ts)["title"] == "贝叶斯统计（改名）", "重命�
 assert store.delete_lessons([ts]) == 1, "批量删除失败"
 assert not store.get_lesson(ts), "删除后仍能查到这节课"
 
+# 系统弹窗（QMessageBox / QInputDialog）必须跟随深色主题，按钮还得是中文。
+# 全局 QSS 里那条 `* { color: TEXT_PRIMARY }` 会把弹窗文字染成浅色，
+# 而弹窗背景仍是系统浅色 —— 白字贴白底，几乎看不见。这条断言守住那段样式。
+from echo.theme import GLOBAL_QSS                    # noqa: E402
+assert "QMessageBox" in GLOBAL_QSS, "弹窗深色样式从全局 QSS 里丢了"
+assert "QInputDialog QLineEdit" in GLOBAL_QSS, "输入弹窗的输入框样式丢了"
+
+from echo.widgets import dialogs                     # noqa: E402
+
+seen = []
+_orig_exec = dialogs.QMessageBox.exec_
+dialogs.QMessageBox.exec_ = lambda self: (seen.append([b.text() for b in self.buttons()]), 1)[1]
+try:
+    dialogs.confirm(None, "批量删除", "确定删除吗？", ok_text="删除")
+    dialogs.info(None, "批量删除", "先勾选要删除的课程。")
+finally:
+    dialogs.QMessageBox.exec_ = _orig_exec
+assert seen and seen[0] == ["删除", "取消"], \
+    f"确认框按钮应该是中文的「删除/取消」，实际 {seen[0] if seen else None}"
+assert seen and "知道了" in seen[1], f"提示框按钮不对：{seen[1] if len(seen) > 1 else None}"
+
 window.close()
 print("UI smoke passed: one window, avatar and primary flow work")

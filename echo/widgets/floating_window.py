@@ -21,7 +21,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame, QSizePolicy, QStackedWidget,
                              QProgressBar, QApplication, QShortcut, QScrollArea,
                              QLineEdit, QTextBrowser, QRadioButton, QButtonGroup,
-                             QCheckBox, QInputDialog, QMessageBox)
+                             QCheckBox)
 from PyQt5.QtCore import Qt, QTimer, QRectF, QPoint, pyqtSignal
 from PyQt5.QtGui import QFont, QCursor, QPainter, QPainterPath, QColor, QBrush, QPen, QKeySequence, QPixmap
 
@@ -33,6 +33,7 @@ SC_MINIMIZE = 0xF020
 SW_MINIMIZE = 6
 user32 = ctypes.windll.user32
 
+from echo.widgets import dialogs
 from echo.theme import Colors, Radius, font, Spacing
 from echo.components.loading import PulseDots
 from echo.components.wave_orb import WaveOrb
@@ -993,15 +994,14 @@ class FloatingWindow(QWidget):
     def _courses_delete_selected(self):
         ts_list = self._courses_selected()
         if not ts_list:
-            QMessageBox.information(self, tr("批量删除", "Delete selected"),
-                                    tr("先勾选要删除的课程。", "Check the lessons you want to delete first."))
+            dialogs.info(self, tr("批量删除", "Delete selected"),
+                         tr("先勾选要删除的课程。", "Check the lessons you want to delete first."))
             return
         n = len(ts_list)
-        ret = QMessageBox.question(self, tr("批量删除", "Delete selected"),
-                                   tr(f"确定删除选中的 {n} 节课吗？删除后不可恢复。",
-                                      f"Delete the {n} selected lessons? This cannot be undone."),
-                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if ret != QMessageBox.Yes:
+        if not dialogs.confirm(self, tr("批量删除", "Delete selected"),
+                               tr(f"确定删除选中的 {n} 节课吗？删除后不可恢复。",
+                                  f"Delete the {n} selected lessons? This cannot be undone."),
+                               ok_text=tr("删除", "Delete")):
             return
         store.delete_lessons(ts_list)
         self._render_courses()
@@ -1009,13 +1009,12 @@ class FloatingWindow(QWidget):
     def _courses_rename_selected(self):
         ts_list = self._courses_selected()
         if not ts_list:
-            QMessageBox.information(self, tr("批量重命名", "Rename selected"),
-                                    tr("先勾选要重命名的课程。", "Check the lessons you want to rename first."))
+            dialogs.info(self, tr("批量重命名", "Rename selected"),
+                         tr("先勾选要重命名的课程。", "Check the lessons you want to rename first."))
             return
         default = store.get_lesson(ts_list[0]).get("title", "") if len(ts_list) == 1 else ""
-        name, ok = QInputDialog.getText(self, tr("重命名", "Rename"),
-                                        tr("新的课程名：", "New lesson name:"),
-                                        QLineEdit.Normal, default)
+        name, ok = dialogs.ask_text(self, tr("重命名", "Rename"),
+                                    tr("新的课程名：", "New lesson name:"), default)
         name = (name or "").strip()
         if not ok or not name:
             return
@@ -1029,9 +1028,8 @@ class FloatingWindow(QWidget):
     def _course_rename(self, ts):
         """单节课程重命名。"""
         cur = store.get_lesson(ts).get("title", "")
-        name, ok = QInputDialog.getText(self, tr("重命名", "Rename"),
-                                        tr("新的课程名：", "New lesson name:"),
-                                        QLineEdit.Normal, cur)
+        name, ok = dialogs.ask_text(self, tr("重命名", "Rename"),
+                                    tr("新的课程名：", "New lesson name:"), cur)
         name = (name or "").strip()
         if ok and name:
             store.rename_lesson(ts, name)

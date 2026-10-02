@@ -128,6 +128,57 @@ GLOBAL_QSS = f"""
     outline: none;
 }}
 
+/* 系统弹窗（QMessageBox / QInputDialog）必须显式给底色：
+   上面那条 `* {{ color }}` 会把弹窗里的文字染成浅色，而弹窗背景还是系统浅色，
+   结果就是白字贴白底，几乎看不见（和右键菜单当年同一个坑）。 */
+QMessageBox, QInputDialog {{
+    background-color: {Colors.WINDOW_BG};
+    border: 1px solid {Colors.BORDER_STRONG};
+    border-radius: {Radius.LG}px;
+}}
+QMessageBox QLabel, QInputDialog QLabel {{
+    color: {Colors.TEXT_PRIMARY};
+    background: transparent;
+}}
+QMessageBox QPushButton, QInputDialog QPushButton {{
+    background: {Colors.SURFACE_HOVER};
+    color: {Colors.TEXT_PRIMARY};
+    border: 1px solid {Colors.BORDER_STRONG};
+    border-radius: {Radius.MD}px;
+    padding: 6px 20px;
+    min-width: 62px;
+    font-size: 12px;
+}}
+QMessageBox QPushButton:hover, QInputDialog QPushButton:hover {{
+    border-color: {Colors.ACCENT};
+}}
+QMessageBox QPushButton:default, QInputDialog QPushButton:default {{
+    background: {Colors.ACCENT};
+    color: {Colors.ON_ACCENT};
+    border-color: {Colors.ACCENT};
+}}
+QMessageBox QPushButton:default:hover, QInputDialog QPushButton:default:hover {{
+    background: {Colors.ACCENT_HOVER};
+}}
+/* 输入框：全局 QSS 里没有通用 QLineEdit 规则（各处的输入框都是自己单独调的样式），
+   不补这条的话 QInputDialog 的输入框会回落成系统白底。 */
+QInputDialog QLineEdit {{
+    background: {Colors.SURFACE};
+    color: {Colors.TEXT_PRIMARY};
+    border: 1px solid {Colors.BORDER_STRONG};
+    border-radius: {Radius.SM}px;
+    padding: 6px 10px;
+    selection-background-color: {Colors.ACCENT};
+    selection-color: {Colors.ON_ACCENT};
+}}
+QInputDialog QComboBox {{
+    background: {Colors.SURFACE};
+    color: {Colors.TEXT_PRIMARY};
+    border: 1px solid {Colors.BORDER_STRONG};
+    border-radius: {Radius.SM}px;
+    padding: 5px 8px;
+}}
+
 QWidget#EchoRoot {{
     background-color: {Colors.MICA_LIGHT};
     border-radius: {Radius.LG}px;

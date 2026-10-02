@@ -174,8 +174,9 @@ class SettingsDialog(QDialog):
         try:
             _write_env(updates)
         except OSError as e:
-            from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.warning(self, tr("保存失败", "Save failed"), f"{tr('写 .env 失败：', 'Failed to write .env: ')}{e}")
+            from echo.widgets import dialogs
+            dialogs.warn(self, tr("保存失败", "Save failed"),
+                         f"{tr('写 .env 失败：', 'Failed to write .env: ')}{e}")
             return
         set_lang(self.lang_combo.currentData())
         skin = self.pet_skin.currentData()
