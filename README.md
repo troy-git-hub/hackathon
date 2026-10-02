@@ -47,6 +47,7 @@ DEEPSEEK_API_KEY=sk-…          # 课堂理解 / 掉队分析 / 追问（deepse
 DASHSCOPE_API_KEY=sk-…         # 圈一下问 AI 的视觉模型（Qwen-VL，选填，不填退回 DeepSeek 视觉）
 ECHO_SOURCE=system             # system 系统声音 / mic 麦克风
 ECHO_WHISPER_MODEL=small       # small（快）/ medium（更准更慢）
+ECHO_WHISPER_THREADS=4         # Whisper CPU 线程数；内存紧张报 mkl_malloc 时降到 2 或 1
 ```
 
 ## 快捷键

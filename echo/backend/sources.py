@@ -92,7 +92,7 @@ class _WhisperWorker:
                 if on_status:
                     on_status("loading_asr")
                 kw = dict(device=config.WHISPER_DEVICE, compute_type=config.WHISPER_COMPUTE,
-                          cpu_threads=min(8, os.cpu_count() or 4))
+                          cpu_threads=min(config.WHISPER_THREADS, os.cpu_count() or 1))
                 # 先只用本地缓存：模型下过一次就不再联网（现场网络/SSL 抽风时联网会卡很久）
                 try:
                     cls._model = WhisperModel(config.WHISPER_MODEL, local_files_only=True, **kw)

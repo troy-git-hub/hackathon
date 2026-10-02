@@ -74,4 +74,13 @@ AUDIO_DEVICE = os.getenv("ECHO_AUDIO_DEVICE", "")  # 空=默认输入；可填�
 WHISPER_MODEL = os.getenv("ECHO_WHISPER_MODEL", "small")
 WHISPER_DEVICE = os.getenv("ECHO_WHISPER_DEVICE", "cpu")
 WHISPER_COMPUTE = os.getenv("ECHO_WHISPER_COMPUTE", "int8")
+# Whisper 的 CPU 线程数。线程越多转写越快，但每个线程都会向 MKL 申请一块工作内存，
+# 机器内存吃紧（可用内存不足）时会报 mkl_malloc: failed to allocate memory。
+# 默认 4；还报错就降到 2，甚至 1。
+WHISPER_THREADS = max(1, _int("ECHO_WHISPER_THREADS", 4))
+# 让 MKL/OpenMP/oneDNN 的线程数与 ctranslate2 保持一致，避免它们另起线程把内存吃爆。
+# 必须在 ctranslate2 初始化前设好（本模块在 faster_whisper 之前 import）。
+os.environ["OMP_NUM_THREADS"] = str(WHISPER_THREADS)
+os.environ["MKL_NUM_THREADS"] = str(WHISPER_THREADS)
+os.environ["DNNL_NUM_THREADS"] = str(WHISPER_THREADS)
 ASR_CHUNK_SECONDS = float(os.getenv("ECHO_ASR_CHUNK", "6"))
