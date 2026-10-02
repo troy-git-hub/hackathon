@@ -426,5 +426,50 @@ assert abs(window.height() - h_before) <= 2,     f"叉掉抽问卡片后窗口�
 assert abs(window.stack.height() - window.stack.currentWidget().layout()
            .totalHeightForWidth(ui.PAGE_WIDTH[ui.LISTEN])) <= 2,     "stack 的固定高度还留着抽问卡在时的高度"
 
+
+# 头像 + 答题：右上角是头像，点进去是资料页；听课页能随时问 Echo
+assert hasattr(window, "avatar_view"), "标题栏没有头像控件"
+assert window.avatar_view.isVisible(), "头像不可见"
+QTest.mouseClick(window.avatar_view, Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.PROFILE, "点头像没进资料页"
+assert window.profile_page.name_lbl.text(), "资料页没渲染出名字"
+
+window._show_page(ui.LISTEN)
+app.processEvents()
+QTest.mouseClick(window.btn_qa, Qt.LeftButton)
+for _ in range(20):
+    app.processEvents()
+assert window._page == ui.ASK, "点「答题」没进问答页"
+assert window.qa_box_lay.count() >= 1, "问答页没有开场白"
+
+# 提问 → 学生的话和 Echo 的回应都出现在对话里（离线时是"连不上"的说明）
+n0 = window.qa_box_lay.count()
+window.qa_input.setText("老师刚说的「虚拟语气」是什么意思？")
+QTest.mouseClick(window.qa_send, Qt.LeftButton)
+for _ in range(40):
+    app.processEvents()
+    QTest.qWait(10)
+    if not window._qa_busy and window.qa_box_lay.count() > n0:
+        break
+assert window.qa_box_lay.count() > n0, "提问后对话里没有新内容"
+assert window._qa_busy is False, "提问后一直卡在忙碌状态"
+assert window.qa_input.isEnabled(), "回答结束后输入框没恢复"
+# 别把 API key 这类内部信息甩到界面上
+_bubble_txt = " ".join(l.text() for l in window.qa_box.findChildren(QLabel))
+assert "DEEPSEEK_API_KEY" not in _bubble_txt, f"把内部错误信息露给学生了：{_bubble_txt[:80]}"
+
+# 对话实例要留着：课后回来接着问，上下文还在
+_chat = window._qa_chat
+window._show_page(ui.LISTEN)
+window._show_qa()
+app.processEvents()
+assert window._qa_chat is _chat, "回到问答页时换了对话实例，之前的上下文丢了"
+assert window._qa_started is True
+
+window._show_page(ui.LISTEN)
+app.processEvents()
+assert window.btn_qa.isVisible() and window.btn_lost.isVisible(), "听课页的两个主按钮有一个不见了"
+
 window.close()
 print("UI smoke passed: one window, avatar and primary flow work")

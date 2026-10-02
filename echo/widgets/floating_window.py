@@ -47,16 +47,19 @@ from echo.backend import store
 from echo.components.pet import EMOTION_FILES, ASSETS_DIR
 from echo.i18n import tr
 from echo.widgets.checkin import CheckinCard
+from echo.components.avatar import AvatarView
 from echo.widgets.mindmap import MindMapPage
-from echo.backend import mindmap, recall
+from echo.widgets.profile_page import ProfilePage
+from echo.backend import mindmap, profile, recall
 
 SHADOW = 14
 WAIT_HINT = tr("播放网课后，Echo 会自动开始听", "Play your course and Echo will start listening automatically")
-LISTEN, MINI, BREAK, LESSON, ECHO, REVIEW, HOME, PRACTICE, DETAIL, MINDMAP, COURSES, RECALL = range(12)
+LISTEN, MINI, BREAK, LESSON, ECHO, REVIEW, HOME, PRACTICE, DETAIL, MINDMAP, COURSES, RECALL, \
+    PROFILE, ASK = range(14)
 # 各页内容区宽度（不含阴影与内边距）
 PAGE_WIDTH = {LISTEN: 340, MINI: 300, BREAK: 380, LESSON: 400, ECHO: 380,
               REVIEW: 380, HOME: 360, PRACTICE: 400, DETAIL: 380, MINDMAP: 480,
-              COURSES: 420, RECALL: 400}
+              COURSES: 420, RECALL: 400, PROFILE: 380, ASK: 400}
 
 
 def _label(text="", style="", wrap=False):
@@ -144,6 +147,10 @@ class FloatingWindow(QWidget):
     # 掌握验证：出题和判断都走 AI（后台线程），结果经信号回主线程
     _recall_planned = pyqtSignal(object)
     _recall_judged = pyqtSignal(object)
+    # 随时问：回答是流式的，回调在后台线程，经信号回主线程追加文字
+    _qa_delta = pyqtSignal(str)
+    _qa_done = pyqtSignal(str)
+    _qa_err = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -176,6 +183,11 @@ class FloatingWindow(QWidget):
         self._recall_results = []    # AI 的判断
         self._recall_step = 0
         self._recall_busy = False
+        # 「答题（随时问）」的状态：对话实例留着，课后回来接着问
+        self._qa_chat = None
+        self._qa_busy = False
+        self._qa_reply = None
+        self._qa_started = False
         self._detail_ts = 0
         self._mindmap_lesson = {}    # 知识地图页正在看的那节课
         self._drag_pos = None
@@ -187,6 +199,9 @@ class FloatingWindow(QWidget):
         self._prac_done.connect(self._on_prac_done)
         self._recall_planned.connect(self._on_recall_planned)
         self._recall_judged.connect(self._on_recall_judged)
+        self._qa_delta.connect(self._on_qa_delta)
+        self._qa_done.connect(self._on_qa_done)
+        self._qa_err.connect(self._on_qa_err)
         self._prac_err.connect(self._on_prac_err)
         self._show_home()
 
@@ -245,6 +260,8 @@ class FloatingWindow(QWidget):
         self.stack.addWidget(self.mindmap_page)      # 9
         self.stack.addWidget(self._build_courses())  # 10
         self.stack.addWidget(self._build_recall())   # 11
+        self.stack.addWidget(self._build_profile())  # 12
+        self.stack.addWidget(self._build_ask())      # 13
         self.body_scroll = QScrollArea()
         self.body_scroll.setWidgetResizable(True)
         self.body_scroll.setFrameShape(QFrame.NoFrame)
@@ -312,11 +329,14 @@ class FloatingWindow(QWidget):
         close_btn.setFixedSize(26, 26)
         lay.addWidget(close_btn)
 
-        # 右上角表情包（与桌宠情绪同步，加载 assets/emojis/ 下的 PNG）
-        self.emoji_lbl = QLabel(bar)
-        self.emoji_lbl.setFixedSize(32, 32)
-        self.emoji_lbl.setScaledContents(True)
+        # 右上角就是学生自己的头像：设过就显示他的图，没设过就显示 Echo 的喵喵
+        # （跟着课堂情绪变）。点一下进资料页。
+        self.avatar_view = AvatarView(32, bar)
+        self.avatar_view.setCursor(Qt.PointingHandCursor)
+        self.avatar_view.setToolTip(tr("我的资料", "My profile"))
+        self.avatar_view.clicked.connect(self._show_profile)
         self._emoji_pixmaps = {}
+        self._has_avatar = bool(profile.avatar_path())
         import os
         for emo, fname in EMOTION_FILES.items():
             path = os.path.join(ASSETS_DIR, fname)
@@ -324,7 +344,7 @@ class FloatingWindow(QWidget):
                 pm = QPixmap(path)
                 if not pm.isNull():
                     self._emoji_pixmaps[emo] = pm
-        lay.addWidget(self.emoji_lbl)
+        lay.addWidget(self.avatar_view)
         self._set_emoji("idle")
 
         header = QWidget()
@@ -340,13 +360,21 @@ class FloatingWindow(QWidget):
         return header
 
     def _set_emoji(self, emotion: str):
-        """切换标题栏表情包图片"""
+        """标题栏头像：学生设过自己的头像就显示他的，否则显示 Echo 的喵喵（跟着情绪变）。"""
+        if self._has_avatar:
+            self.avatar_view.refresh()
+            return
         pm = self._emoji_pixmaps.get(emotion)
         if pm is not None:
-            self.emoji_lbl.setPixmap(pm)
-            self.emoji_lbl.show()
+            self.avatar_view.set_pixmap(pm)
+
+    def _refresh_avatar(self):
+        """换了头像之后重读一次（资料页里改的、或首次登录时选的）。"""
+        self._has_avatar = bool(profile.avatar_path())
+        if self._has_avatar:
+            self.avatar_view.refresh()
         else:
-            self.emoji_lbl.clear()
+            self.avatar_view.set_pixmap(self._emoji_pixmaps.get("idle"))
 
     # ----- 0 默认听课卡片 -----
     def _build_listen(self) -> QWidget:
@@ -396,10 +424,21 @@ class FloatingWindow(QWidget):
         lay.addWidget(self.caption_lbl)
 
         lay.addSpacing(Spacing.SM)
+        # 「我掉队了」和「答题」并排：一个是"我没跟上"，一个是"我有问题要问" ——
+        # 上课时最常见的两种动作，都放在最好点的地方。
+        main_row = QHBoxLayout()
+        main_row.setSpacing(Spacing.SM)
         self.btn_lost = _btn(tr("我掉队了", "I fell behind"), "Accent", self._on_lost,
                              tr("Echo 回看最近几分钟，找到你从哪一步开始没听懂", "Echo reviews the last few minutes to find where you lost track"))
         self.btn_lost.setMinimumHeight(46)
-        lay.addWidget(self.btn_lost)
+        main_row.addWidget(self.btn_lost, 1)
+        self.btn_qa = _btn(tr("答题", "Ask"), "Quiet", self._show_qa,
+                           tr("随时问 Echo，它带着这节课听到的内容回答；课后回来还能接着问",
+                              "Ask Echo anything — answered with this lesson's context, "
+                              "and you can pick it up again after class"))
+        self.btn_qa.setMinimumHeight(46)
+        main_row.addWidget(self.btn_qa)
+        lay.addLayout(main_row)
 
         row = QHBoxLayout()
         row.setSpacing(Spacing.SM)
@@ -1643,8 +1682,11 @@ class FloatingWindow(QWidget):
         lay.addLayout(row)
         return page
 
-    def _recall_bubble(self, text: str, who: str, tone: str = ""):
-        """一条对话气泡。who: echo / me / note。"""
+    def _bubble(self, box_lay: QVBoxLayout, box: QWidget, text: str, who: str, tone: str = ""):
+        """往对话区放一条气泡，返回正文那个 QLabel（流式回答要往上追加文字）。
+
+        who: echo / me / note。两个对话页（掌握验证、随时问）共用这套样式。
+        """
         f = QFrame()
         f.setObjectName("RecallBubble")
         if who == "me":
@@ -1669,13 +1711,19 @@ class FloatingWindow(QWidget):
         body = _label(text, f"color: {Colors.TEXT_PRIMARY}; font-size: 13px; line-height: 150%;",
                       wrap=True)
         v.addWidget(body)
-        self.recall_box_lay.addWidget(f)
+        box_lay.addWidget(f)
         # 气泡是运行时加进来的，页面布局还按老内容算着尺寸：
         # 不主动重排一次，换行标签的高度会是 0，界面上只剩几条空条。
-        self.recall_box_lay.activate()
-        self.recall_box.adjustSize()
+        box_lay.activate()
+        box.adjustSize()
         self._fit()
-        return f
+        return body
+
+    def _recall_bubble(self, text: str, who: str, tone: str = ""):
+        return self._bubble(self.recall_box_lay, self.recall_box, text, who, tone)
+
+    def _qa_bubble(self, text: str, who: str, tone: str = ""):
+        return self._bubble(self.qa_box_lay, self.qa_box, text, who, tone)
 
     def _recall_clear(self):
         while self.recall_box_lay.count():
@@ -1863,6 +1911,140 @@ class FloatingWindow(QWidget):
         self.recall_send.setEnabled(not busy)
         self._fit()
 
+    # ----- 12 我的资料 -----
+    def _build_profile(self) -> QWidget:
+        self.profile_page = ProfilePage()
+        self.profile_page.back_requested.connect(self._show_home)
+        self.profile_page.avatar_changed.connect(self._on_avatar_changed)
+        return self.profile_page
+
+    def _show_profile(self):
+        # 切进来要 refresh：统计和头像都可能变了，不刷新显示的是上次的
+        self.profile_page.refresh()
+        self._show_page(PROFILE)
+
+    def _on_avatar_changed(self, _path=""):
+        self._refresh_avatar()
+
+    # ----- 13 答题（随时问 Echo）-----
+    def _build_ask(self) -> QWidget:
+        """上课时随时能问的问答框。
+
+        和「讲给 Echo 听」复用同一套气泡样式，但这里不是验证掌握，
+        是学生真的有问题要问 —— Echo 带着这节课听到的时间轴和字幕回答。
+        """
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(Spacing.SM)
+
+        head = QVBoxLayout()
+        head.setSpacing(2)
+        head.addWidget(_label(tr("问 Echo", "Ask Echo"), TITLE))
+        self.qa_sub = _label("", CAPTION, wrap=True)
+        head.addWidget(self.qa_sub)
+        lay.addLayout(head)
+
+        self.qa_box = QWidget()
+        self.qa_box_lay = QVBoxLayout(self.qa_box)
+        self.qa_box_lay.setContentsMargins(0, 0, 0, 0)
+        self.qa_box_lay.setSpacing(Spacing.SM)
+        lay.addWidget(self.qa_box)
+
+        self.qa_loading = QFrame()
+        al = QHBoxLayout(self.qa_loading)
+        al.setContentsMargins(0, 0, 0, 0)
+        al.setSpacing(Spacing.SM)
+        self.qa_dots = PulseDots(Colors.ACCENT)
+        al.addWidget(self.qa_dots, 0, Qt.AlignVCenter)
+        self.qa_loading_lbl = _label(tr("Echo 在想…", "Echo is thinking…"),
+                                      f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;")
+        al.addWidget(self.qa_loading_lbl, 1)
+        self.qa_loading.hide()
+        lay.addWidget(self.qa_loading)
+
+        row = QHBoxLayout()
+        row.setSpacing(Spacing.SM)
+        self.qa_input = QLineEdit()
+        self.qa_input.setPlaceholderText(tr("比如：老师刚说的「虚拟语气」是什么意思？",
+                                             "e.g. what does \"subjunctive\" mean here?"))
+        self.qa_input.setStyleSheet(
+            f"QLineEdit {{ background: {Colors.SURFACE}; color: {Colors.TEXT_PRIMARY};"
+            f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.SM}px; padding: 7px 10px;"
+            "font-size: 13px; }"
+            f"QLineEdit:focus {{ border-color: {Colors.ACCENT}; }}")
+        self.qa_input.returnPressed.connect(self._send_qa)
+        row.addWidget(self.qa_input, 1)
+        self.qa_send = _btn(tr("发送", "Send"), "Accent", self._send_qa)
+        row.addWidget(self.qa_send)
+        lay.addLayout(row)
+        return page
+
+    def _show_qa(self):
+        """从听课页点「答题」进来。对话本身是留着的 —— 课后回来接着问，上下文还在。"""
+        if getattr(self, "_qa_chat", None) is None:
+            from echo.backend.vision import LessonAsk
+            engine = getattr(getattr(self, "echo", None), "engine", None)
+            self._qa_chat = LessonAsk(engine)
+        if not getattr(self, "_qa_started", False):
+            self._qa_started = True
+            self._qa_bubble(tr("想问什么就问，我带着这节课听到的内容回答你。"
+                                "这节课上完回来，我们还能接着聊。",
+                                "Ask me anything — I'll answer using what I've heard in this lesson. "
+                                "Come back after class and we can pick this up again."), "echo")
+        self.qa_sub.setText(tr("带着这节课的上下文回答；课后回来还能接着问",
+                                "Answered with this lesson's context — resumable after class"))
+        self._show_page(ASK)
+        self.qa_input.setFocus()
+
+    def _send_qa(self):
+        q = self.qa_input.text().strip()
+        if not q or getattr(self, "_qa_busy", False):
+            return
+        if getattr(self, "_qa_chat", None) is None:
+            self._show_qa()
+            return
+        self.qa_input.clear()
+        self._qa_bubble(q, "me")
+        self._qa_busy = True
+        self.qa_send.setEnabled(False)
+        self.qa_dots.start()
+        self.qa_loading.show()
+        self._qa_reply = None
+        self._qa_chat.ask(q, self._qa_delta.emit, self._qa_done.emit, self._qa_err.emit)
+
+    def _on_qa_delta(self, piece: str):
+        if self._qa_reply is None:
+            self._qa_reply = self._qa_bubble("", "echo")
+        self._qa_reply.setText((self._qa_reply.text() or "") + (piece or ""))
+        self.qa_box_lay.activate()
+        self._fit()
+
+    def _on_qa_done(self, _full: str = ""):
+        self._qa_busy = False
+        self.qa_dots.stop()
+        self.qa_loading.hide()
+        self.qa_send.setEnabled(True)
+        if self._qa_reply is not None and not (self._qa_reply.text() or "").strip():
+            self._qa_reply.setText(tr("这次没答上来，再问一次试试。",
+                                       "Couldn't answer that one — try asking again."))
+        self._fit()
+
+    def _on_qa_err(self, msg: str):
+        self._qa_busy = False
+        self.qa_dots.stop()
+        self.qa_loading.hide()
+        self.qa_send.setEnabled(True)
+        # 别把 DEEPSEEK_API_KEY 这种内部信息甩给学生看
+        low = (msg or "").lower()
+        if "api_key" in low or "offline" in low or "缺少" in (msg or ""):
+            text = tr("现在连不上 AI（可能没网或没配 key），等会儿再问我吧。",
+                      "Can't reach the AI right now (offline or no key) — try me again later.")
+        else:
+            text = tr("回答不了，等会儿再问我吧。", "Couldn't answer — try me again later.")
+        self._qa_bubble(text, "note")
+        self._fit()
+
     def _on_quiz_ready(self, questions):
         lesson = getattr(self, "_detail_lesson", {}) or {}
         self._prac_item = {"topic": self._lesson_name(lesson)}
@@ -1994,14 +2176,16 @@ class FloatingWindow(QWidget):
         mini = idx == MINI
         self.header.setVisible(not mini)
         self.back_btn.setVisible(idx in (BREAK, LESSON, REVIEW, PRACTICE, DETAIL, MINDMAP,
-                                         COURSES, RECALL))
+                                         COURSES, RECALL, PROFILE, ASK))
         back_label = tr("← 主页", "← Home")
         if idx == PRACTICE and self._prac_back_label:
             back_label = self._prac_back_label     # 从地图/回顾进来的，返回到那儿
         elif idx == RECALL:
             back_label = tr("← 错题复习", "← Review")
+        elif idx in (PROFILE, ASK):
+            back_label = tr("← 回到课堂", "← Back to class")
         self.back_btn.setText(back_label if idx in (REVIEW, PRACTICE, DETAIL, MINDMAP,
-                                                    COURSES, RECALL)
+                                                    COURSES, RECALL, PROFILE, ASK)
                               else tr("← 回到课堂", "← Back to class"))
         self.home_btn.setVisible(idx in (LISTEN, ECHO))
         self.end_btn.setVisible(idx == LISTEN)
@@ -2109,6 +2293,9 @@ class FloatingWindow(QWidget):
             return
         if self._page == RECALL:
             self._show_review()          # 讲完回错题复习，进度一眼能看见
+            return
+        if self._page in (PROFILE, ASK):
+            self._show_page(LISTEN)      # 从听课页点进来的，退回去接着上课
             return
         if self._page in (REVIEW, PRACTICE, DETAIL, MINDMAP, COURSES):
             self._show_home()
