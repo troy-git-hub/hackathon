@@ -151,7 +151,7 @@ class DockChat(QWidget):
         row.addWidget(self.btn_send)
         lay.addLayout(row)
 
-        self._add_msg("有不懂的就问我，我带着这节课的上下文回答你～", False)
+        self._add_msg("有不懂的就问我，我给你讲讲～", False)
 
     # ================= 对外 =================
     def set_level(self, level):
