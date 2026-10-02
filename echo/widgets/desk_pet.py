@@ -23,6 +23,7 @@ from PyQt5.QtWidgets import QApplication, QMenu, QWidget
 
 from echo.theme import Colors, font, style_menu
 from echo.components.study import CatAvatar
+from echo.widgets.dock_chat import DockChat
 
 ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                       "assets", "emojis")
@@ -137,6 +138,10 @@ class DeskPet(QWidget):
         self.cat.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._layout_cat()
 
+        # 挂边小球点开的小窗：声纹 + 文字追问
+        engine = self.win.echo.engine if (self.win is not None and hasattr(self.win, "echo")) else None
+        self.chat = DockChat(engine)
+
         self._press = None
         self._dragged = False
         self._pet_x = None
@@ -182,7 +187,10 @@ class DeskPet(QWidget):
         self.update()
 
     def _sync_cat_emotion(self):
-        self.cat.set_emotion(self._MOOD_EMO.get(self.mood, "idle"))
+        emo = self._MOOD_EMO.get(self.mood, "idle")
+        self.cat.set_emotion(emo)
+        if hasattr(self, "chat"):
+            self.chat.set_emotion(emo)
 
     def set_skin(self, skin):
         if skin not in ("cartoon", "line"):
@@ -221,6 +229,8 @@ class DeskPet(QWidget):
         self.setFixedSize(self.ORB if docked else self.W,
                           self.DOCK_H if docked else self.H)
         self._layout_cat()
+        if not docked and hasattr(self, "chat"):
+            self.chat.hide()   # 展开回桌宠时，把声纹/聊天小窗一并收掉
         self.update()
 
     def _snap_dock(self):
@@ -257,6 +267,8 @@ class DeskPet(QWidget):
 
     def _on_level(self, level):
         self._level = max(0.0, min(1.0, float(level)))
+        if hasattr(self, "chat") and self.chat.isVisible():
+            self.chat.set_level(self._level)
 
     def _on_concept(self, c):
         cur = self.win.echo.engine.current_concept() if self.win is not None else c
@@ -378,7 +390,17 @@ class DeskPet(QWidget):
             self.circle_ask.emit()
 
     def _single_click(self):
-        self._toggle_panel()
+        if self.docked:
+            self._toggle_chat()
+        else:
+            self._toggle_panel()
+
+    def _toggle_chat(self):
+        """挂边态单击：弹 / 收「声纹 + 聊天」小窗。"""
+        if self.chat.isVisible():
+            self.chat.hide()
+        else:
+            self.chat.show_near(self)
 
     def enterEvent(self, e):
         self._pet_x, self._pet_dist = None, 0.0
