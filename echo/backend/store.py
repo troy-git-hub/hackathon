@@ -96,18 +96,26 @@ def _write(items):
     _write_json(_path(), items)
 
 
-def add(items):
-    """追加/合并一批错题：同一 topic 覆盖更新内容，但保留复习进度（不复活老错题）。"""
+def add(items, relapse: bool = False):
+    """追加/合并一批错题：同一 topic 覆盖更新内容，但保留复习进度（不复活老错题）。
+
+    relapse=True 表示「学生在新一节课上又在同一个知识点掉队了」。这是「其实没掌握」
+    的强信号，不能沿用之前连对几次攒下来的长间隔 —— 那样一个早就该重新学的知识点
+    会被排到一个月后。所以这种情况下把 level 清零、立刻到期重来。
+
+    默认 False：其它调用点（抽问答错、拍题）只是把新内容补进来，不该动已有的进度。
+    """
     if not items:
         return
     cur = load()
     by_topic = {it.get("topic"): it for it in cur}
+    now = time.time()
     for it in items:
         topic = (it.get("topic") or "").strip()
         if not topic:
             continue
         it["topic"] = topic
-        it.setdefault("time", time.time())
+        it.setdefault("time", now)
         prev = by_topic.get(topic)
         if prev:
             it["reviewed"] = prev.get("reviewed", False)
@@ -118,6 +126,11 @@ def add(items):
             for k in ("level", "due", "last_result", "review_count"):
                 if k in prev:
                     it[k] = prev[k]
+            if relapse:
+                it["level"] = 0
+                it["due"] = now          # 立刻回到今天的复习清单里
+                it["last_result"] = AGAIN
+                it["reviewed"] = False
         by_topic[topic] = it
     _write(list(by_topic.values()))
 

@@ -172,6 +172,32 @@ check("复习进度没被清零", after.get("level") == before["level"] == 2,
 check("下次复习时间没被重置", after.get("due") == before["due"])
 check("内容更新成最新的", after.get("missing") == "新一节课的描述", after.get("missing"))
 
+section("F2. 又掉队了 = 其实没掌握，进度该清零")
+store._write([])
+store.add([{"topic": "贝叶斯公式", "missing": "原始描述"}])
+store.grade("贝叶斯公式", store.CLEAR, now=T0)      # 连对两次 → 推到 14 天后
+store.grade("贝叶斯公式", store.CLEAR, now=T0)
+before = store.load()[0]
+check("先攒到 level 2", before["level"] == 2, str(before.get("level")))
+
+store.add([{"topic": "贝叶斯公式", "missing": "新一节课又卡在这"}], relapse=True)
+after = store.load()[0]
+check("又掉队 → level 清零", after["level"] == 0, str(after.get("level")))
+# add() 用的是真实当前时间（不是测试里的 T0），所以这里也按真实时间比
+check("又掉队 → 立刻回到今天的复习清单", after.get("due", 0) <= time.time() + 1,
+      f"due={after.get('due')}")
+check("又掉队 → 不该再显示成已复习", after.get("reviewed") is False)
+check("又掉队 → 立刻出现在待复习里",
+      "贝叶斯公式" in [i["topic"] for i in store.due_items()])
+
+store._write([])
+store.add([{"topic": "甲", "missing": "a"}])
+store.grade("甲", store.CLEAR, now=T0)
+store.grade("甲", store.CLEAR, now=T0)
+store.add([{"topic": "甲", "missing": "只是又记了一次"}])      # 不传 relapse
+check("不传 relapse 时进度照旧保留", store.load()[0]["level"] == 2,
+      str(store.load()[0].get("level")))
+
 section("G. 接口健壮性")
 try:
     store.grade("贝叶斯公式", "whatever")
