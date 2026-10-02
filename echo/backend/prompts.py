@@ -1,6 +1,42 @@
 """
 Echo - Prompt 模板
+
+英文界面下不维护整份英文提示词副本，而是在 system prompt 末尾追加 ENGLISH_OUTPUT
+（见下）。两份 200 行的提示词会各自漂移 —— 掌握度阈值、JSON schema、「禁止输出
+『未知』占位名」这些规则只要改一边，另一种语言下就会出 bug。取提示词统一走 system()。
 """
+
+# 追加到 system prompt 末尾：保留上面全部规则，只把输出语言换成英文。
+# 注意不要在这段里写 { }：它是在 .format() 之后拼接的，大括号不会被转义。
+ENGLISH_OUTPUT = """
+
+## Output language
+This student's interface is in English. Write every human-readable string in your JSON
+output in natural English — topic names, summaries, questions, options, explanations,
+suggestions and notes. Keep the JSON keys exactly as specified above, and keep the enum
+values "ok" / "fixed" / "review" verbatim in English.
+Where a rule above counts Chinese characters (e.g. "2~8 个字"), use the English
+equivalent instead: a topic name is 1~5 words, and a limit of N 字 means roughly N/2
+English words.
+The lecture audio may be in Chinese. Translate the concepts into idiomatic English
+technical terms rather than transliterating or copying the Chinese words.
+"""
+
+
+def system(name: str, **fmt) -> str:
+    """取一条 system 提示词；英文界面下追加输出语言指令。
+
+    name 是本模块里的常量名，如 "CONCEPT_SYSTEM"。先 format 再拼接 —— 反过来会把
+    ENGLISH_OUTPUT 里的内容也当成格式串。
+    """
+    from echo.backend import config
+    text = globals()[name]
+    if fmt:
+        text = text.format(**fmt)
+    if config.UI_LANG == "en":
+        text += ENGLISH_OUTPUT
+    return text
+
 
 CONCEPT_SYSTEM = """你是 Echo，一个陪学生听网课的 AI 学习副驾驶。
 你会持续收到课堂语音转写。转写来自语音识别，常有同音错字和公式读法（如「备叶思」=贝叶斯、「至头子」=掷骰子、「p,ab」=P(A|B)），请按语义理解并在输出里用正确的术语和符号。
@@ -151,15 +187,15 @@ CHECKIN_SYSTEM = """你是 Echo，一个陪学生听网课的 AI 学习副驾驶
 - explain 是答错时给学生看的一句话，扣住他混淆的那个点，不超过 60 字
 
 只输出 JSON，格式：
-{{
+{
   "topic": "考的知识点名称，2~8 字，必须是时间轴上出现过的名字",
   "question": "题干",
   "options": ["A. ...", "B. ...", "C. ..."],
   "answer": "正确选项的字母，如 \\"B\\"",
   "explain": "答错时的一句话解释"
-}}
+}
 
-如果最近的内容还不适合出题（比如老师只是在闲聊、还没讲出可考的知识点），输出 {{"question": ""}}。
+如果最近的内容还不适合出题（比如老师只是在闲聊、还没讲出可考的知识点），输出 {"question": ""}。
 公式写成 P(A|B)、x^2、a/b 这种纯文本，不要 LaTeX、不要 Markdown。"""
 
 CHECKIN_USER = """老师刚讲过的时间轴（旧 → 新）：

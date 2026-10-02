@@ -100,3 +100,15 @@ os.environ["OMP_NUM_THREADS"] = str(WHISPER_THREADS)
 os.environ["MKL_NUM_THREADS"] = str(WHISPER_THREADS)
 os.environ["DNNL_NUM_THREADS"] = str(WHISPER_THREADS)
 ASR_CHUNK_SECONDS = float(os.getenv("ECHO_ASR_CHUNK", "6"))
+
+# ---------- 界面语言（决定 AI 用哪种语言回答） ----------
+# 后端不能 import echo.i18n —— 它依赖 QSettings，会把 PyQt5 拖进后端的导入链，
+# 踩 main.py 里记的 ctranslate2/PyQt5 加载顺序坑（先 import PyQt5 再建 WhisperModel 会访问违例）。
+# 所以语言由 UI 启动时调 set_ui_lang() 写进来一次，后端只读这个模块级变量。
+UI_LANG = os.getenv("ECHO_UI_LANG", "zh")
+
+
+def set_ui_lang(value: str):
+    """UI 层告诉后端当前界面语言（"zh" / "en"），AI 的回答跟着走。"""
+    global UI_LANG
+    UI_LANG = "en" if str(value) == "en" else "zh"

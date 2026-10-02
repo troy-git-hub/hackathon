@@ -294,7 +294,7 @@ class EchoEngine:
             self._emit(sid, "thinking", True, f"正在理解：{preview}")
 
             if self.llm:
-                data = self.llm.json(prompts.CONCEPT_SYSTEM,
+                data = self.llm.json(prompts.system("CONCEPT_SYSTEM"),
                                      prompts.CONCEPT_USER.format(timeline=timeline or "（暂无）",
                                                                  chunk=chunk),
                                      max_tokens=700)
@@ -398,7 +398,7 @@ class EchoEngine:
         if self.llm and window:
             try:
                 data = self.llm.json(
-                prompts.BREAKPOINT_SYSTEM,
+                prompts.system("BREAKPOINT_SYSTEM"),
                 prompts.BREAKPOINT_USER.format(
                     timeline=timeline or "（暂无）",
                     feedback=feedback or "（无）",
@@ -711,7 +711,7 @@ class EchoEngine:
                     duration = time.time() - self.start_ts
                     line_count = len(self.lines)
                     char_count = sum(len(l.text) for l in self.lines)
-                data = self.llm.json(prompts.ECHO_SYSTEM,
+                data = self.llm.json(prompts.system("ECHO_SYSTEM"),
                                      prompts.ECHO_USER.format(timeline=timeline,
                                                               feedback=feedback or "（无）",
                                                               breakpoints=bps or "（无）"),

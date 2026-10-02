@@ -74,7 +74,7 @@ def generate_sync(item: dict, n: int = 3) -> list:
     if config.OFFLINE or not config.DEEPSEEK_API_KEY:
         return _fallback(item)
     try:
-        system = prompts.PRACTICE_SYSTEM.format(n=n)
+        system = prompts.system("PRACTICE_SYSTEM", n=n)
         user = prompts.PRACTICE_USER.format(
             topic=item.get("topic") or "",
             missing=item.get("missing") or "",

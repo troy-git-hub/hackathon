@@ -179,6 +179,9 @@ class SettingsDialog(QDialog):
                          f"{tr('写 .env 失败：', 'Failed to write .env: ')}{e}")
             return
         set_lang(self.lang_combo.currentData())
+        # 界面文案要重启才换，但 AI 用哪种语言回答可以立刻生效
+        from echo.backend import config as backend_config
+        backend_config.set_ui_lang(self.lang_combo.currentData())
         skin = self.pet_skin.currentData()
         QSettings("Echo", "Echo").setValue("desktop_pet_skin", skin)
         from echo.widgets.desk_pet import DeskPet

@@ -89,7 +89,7 @@ def make_checkin_sync(timeline: str, transcript: str, current: str,
     if llm is not None:
         try:
             data = llm.json(
-                prompts.CHECKIN_SYSTEM,
+                prompts.system("CHECKIN_SYSTEM"),
                 prompts.CHECKIN_USER.format(
                     timeline=timeline or "（暂无）",
                     transcript=transcript or "（暂无）",
@@ -174,7 +174,7 @@ def lesson_quiz_sync(lesson: dict, n: int = 4, llm=None) -> list:
     highlights = lesson.get("highlights") or []
     try:
         data = llm.json(
-            prompts.LESSON_QUIZ_SYSTEM.format(n=n),
+            prompts.system("LESSON_QUIZ_SYSTEM", n=n),
             prompts.LESSON_QUIZ_USER.format(
                 summary=lesson.get("summary") or "（无）",
                 highlights="\n".join(f"- {h}" for h in highlights) or "（无）",

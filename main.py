@@ -51,6 +51,13 @@ def main():
     app = QApplication(sys.argv)
     apply_theme(app)
 
+    # 把界面语言告诉后端：AI 的回答跟着界面语言走。
+    # 后端自己不能 import echo.i18n（它依赖 QSettings，会把 PyQt5 拖进后端导入链，
+    # 踩上面那条 ctranslate2/PyQt5 加载顺序的坑），所以在这里单向写一次。
+    from echo import i18n
+    from echo.backend import config as backend_config
+    backend_config.set_ui_lang(i18n.lang())
+
     win = FloatingWindow()
     # 定位到屏幕中央
     screen = app.primaryScreen().availableGeometry()

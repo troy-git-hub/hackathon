@@ -137,6 +137,8 @@ class DeskPet(QWidget):
         self.status = "listening"
         self.topic = ""
         self.badge = False
+        self.due_count = 0           # 今天该回响的知识点数（挂边小球上显示）
+        self._due_announced = False  # 每次运行只主动提醒一次，别反复念
 
         self.bubble = ""
         self._bubble_until = 0.0
@@ -188,6 +190,12 @@ class DeskPet(QWidget):
         self._anim.start()
         self._idle = QTimer(self, interval=75_000, timeout=self._idle_tip)
         self._idle.start()
+
+        # 「今天该回响」：间隔重复到期的知识点数。
+        # 不在 __init__ 里直接查 —— 读 review.json 是磁盘 I/O，冷启动路径上同步读会拖慢桌宠出现。
+        self._due_timer = QTimer(self, interval=600_000, timeout=self._check_due)
+        self._due_timer.start()
+        QTimer.singleShot(2500, lambda: self._check_due(announce=True))
 
         if win is not None and hasattr(win, "echo"):
             e = win.echo
@@ -376,6 +384,27 @@ class DeskPet(QWidget):
     def _on_echo(self, report):
         self.badge = self.win is not None and not self.win.isVisible()
         self.say(tr("这节课的回响好了，点我看", "This lesson's review is ready — click to see"), 9000, "done", 4000)
+        # 刚下课会新增掉队点，到期数跟着变；只更新数字，不抢这条气泡
+        QTimer.singleShot(1200, self._check_due)
+
+    def _check_due(self, announce=False):
+        """查今天该回响（间隔重复到期）的知识点数，更新挂边小球上的角标。
+
+        announce=True 时额外提醒一句 —— 只在启动后那一次用，之后只静默刷新数字，
+        不然每 10 分钟念一遍会很烦。
+        """
+        try:
+            from echo.backend import store
+            count = int(store.due_summary().get("count") or 0)
+        except Exception:
+            return                       # 没有记录 / 文件坏了：桌宠照常用，不报错
+        self.due_count = max(0, count)
+        if announce and self.due_count and not self._due_announced:
+            self._due_announced = True
+            n = self.due_count
+            self.say(tr(f"今天有 {n} 个知识点要确认，点我",
+                        f"{n} concept{'s' if n > 1 else ''} to review today — click me"),
+                     7000, "alert", 3000)
 
     def _idle_tip(self):
         if time.time() - self._last_interact < 60 or self.status != "listening" or time.time() < self._bubble_until:
@@ -386,10 +415,18 @@ class DeskPet(QWidget):
     # ================= 动作 =================
     def _toggle_panel(self):
         self.badge = False
+        # 先判断这一下是「打开」还是「收起」：toggle 之后就看不出来了
+        opening = self.win is not None and not self.win.isVisible()
         if self.tray is not None:
             self.tray.toggle_window()
         elif self.win is not None:
             self.win.setVisible(not self.win.isVisible())
+        # 打开面板、且今天有该回响的 → 直接落在主页（顶部就是「今天该回响」卡片）
+        if opening and self.due_count and self.win is not None:
+            show_home = getattr(self.win, "_show_home", None)
+            if callable(show_home):
+                show_home()
+        self._check_due()
 
     def _feedback(self, kind):
         self._last_interact = time.time()
@@ -560,7 +597,18 @@ class DeskPet(QWidget):
             pm = self.faces.get(self.mood) or self.faces.get("idle")
             if pm is not None:
                 p.drawPixmap(QRectF(7, 74, 34, 34), pm, QRectF(pm.rect()))
-        if self.badge:
+        if self.due_count:
+            # 今天有该回响的：角标带数字，比一个红点更能说明"有几个在等你"
+            label = str(self.due_count) if self.due_count < 10 else "9+"
+            d = 16.0
+            br = QRectF(r.right() - d + 3, r.top() - 1, d, d)
+            p.setBrush(QColor(Colors.ACCENT))
+            p.setPen(QPen(QColor(Colors.SURFACE), 1.5))
+            p.drawEllipse(br)
+            p.setPen(QColor(Colors.ON_ACCENT))
+            p.setFont(font(9, QFont.Bold))
+            p.drawText(br, Qt.AlignCenter, label)
+        elif self.badge:
             br = QRectF(r.right() - 7, r.top() + 1, 8, 8)
             p.setBrush(QColor(Colors.ACCENT))
             p.setPen(Qt.NoPen)
@@ -586,13 +634,21 @@ class DeskPet(QWidget):
         text_x = 99 if self.dock_side == "left" else 12
         p.setPen(QColor(Colors.TEXT_SECONDARY))
         p.setFont(font(10, QFont.DemiBold))
-        p.drawText(QRectF(text_x, 16, 119, 20), Qt.AlignVCenter,
-                   tr("ECHO · 课堂动态", "ECHO · Lesson update"))
+        head = (tr("ECHO · 今天该回响", "ECHO · Review today") if self.due_count and not self.topic
+                else tr("ECHO · 课堂动态", "ECHO · Lesson update"))
+        p.drawText(QRectF(text_x, 16, 119, 20), Qt.AlignVCenter, head)
         p.setPen(QColor(Colors.TEXT_PRIMARY))
         p.setFont(font(11, QFont.DemiBold))
-        message = (self.bubble if now < self._bubble_until else
-                   (tr("老师在讲：", "Now teaching: ") + self.topic if self.topic else
-                    tr("我在听，随时问我", "I'm listening — ask anytime")))
+        if now < self._bubble_until:
+            message = self.bubble
+        elif self.topic:
+            message = tr("老师在讲：", "Now teaching: ") + self.topic
+        elif self.due_count:
+            n = self.due_count
+            message = tr(f"{n} 个知识点要确认，点我",
+                         f"{n} concept{'s' if n > 1 else ''} to confirm — click me")
+        else:
+            message = tr("我在听，随时问我", "I'm listening — ask anytime")
         p.drawText(QRectF(text_x, 39, 119, 61), Qt.TextWordWrap | Qt.AlignVCenter,
                    message[:55] + ("…" if len(message) > 55 else ""))
 
@@ -617,14 +673,16 @@ class DeskPet(QWidget):
             self._draw_classic(p, cat, breathe, dy, dx)
         self._draw_voice(p, self._voice_rect())
 
-        if self.badge:
+        if self.badge or self.due_count:
             r = QRectF(cat.right() - 16, cat.top() + 6, 20, 20)
             p.setBrush(QColor(Colors.ACCENT))
             p.setPen(QPen(QColor("#FFFFFF"), 2))
             p.drawEllipse(r)
             p.setPen(QColor("#FFFFFF"))
             p.setFont(font(12, QFont.Bold))
-            p.drawText(r, Qt.AlignCenter, "!")
+            # 有待回响的就显示个数；只是「有新结果没看」还是显示 !
+            label = "!" if self.badge else (str(self.due_count) if self.due_count < 10 else "9+")
+            p.drawText(r, Qt.AlignCenter, label)
 
         # 思考中：头顶三个点
         if self.status in ("analyzing", "summarizing", "loading_asr") and now > self._bubble_until:
