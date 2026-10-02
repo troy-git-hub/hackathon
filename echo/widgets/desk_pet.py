@@ -1,8 +1,8 @@
 """
-Echo - 桌面宠物（经典表情包猫）
+Echo - 桌面宠物（经典表情包猫 + 真实声纹条）
 
 assets/emojis 里的表情包猫，跟着课堂状态变表情，
-头顶气泡报「老师在讲 X」，找到断点时提醒你点它。
+旁边声纹条跟着老师声音真实起伏；头顶气泡报「老师在讲 X」，找到断点时提醒你点它。
 
 交互：
     单击        打开 / 收起 Echo 面板
@@ -100,9 +100,15 @@ class DeskPet(QWidget):
         self._t0 = time.time()
         self._blink_t = time.time() + random.uniform(2, 5)
         self._blinking = False
+        self._phase = 0.0
+        self._level = 0.0          # 真实音频响度（0..1）
+        self._level_env = 0.0      # 平滑后的响度包络
 
-        # 尺寸 / 布局：经典表情包猫（比原来再小一点）
-        self.CAT, self.W, self.H = 88, 168, 172
+        # 尺寸 / 布局：经典表情包猫（左边）+ 真实声纹条（右边）
+        self.CAT, self.W, self.H = 88, 176, 172
+        self.GAP, self.VBAR_W = 10, 70
+        self.VN = 9
+        self._vbar = [0.05] * self.VN
         self.faces = {}
         for k, f in FACES.items():
             pm = _load_face(os.path.join(ASSETS, f))
@@ -129,6 +135,8 @@ class DeskPet(QWidget):
             e.breakpoint.connect(self._on_breakpoint)
             e.echo.connect(self._on_echo)
             e.error.connect(lambda m: self.say("出了点小问题，我还在", 3000, "warn"))
+            if hasattr(e, "level"):
+                e.level.connect(self._on_level)
         self.say("我是 Echo，陪你听课～", 4000, "ok")
 
     # ================= 对外 =================
@@ -170,6 +178,9 @@ class DeskPet(QWidget):
             self.say("在整理这节课的回响…", 15000)
         elif st == "loading_asr":
             self.say("正在加载耳朵（语音识别）…", 8000)
+
+    def _on_level(self, level):
+        self._level = max(0.0, min(1.0, float(level)))
 
     def _on_concept(self, c):
         cur = self.win.echo.engine.current_concept() if self.win is not None else c
@@ -237,8 +248,11 @@ class DeskPet(QWidget):
 
     # ================= 鼠标 =================
     def _cat_rect(self) -> QRectF:
-        x = (self.W - self.CAT) / 2
-        return QRectF(x, self.H - self.CAT - 6, self.CAT, self.CAT)
+        return QRectF(4, self.H - self.CAT - 6, self.CAT, self.CAT)
+
+    def _voice_rect(self) -> QRectF:
+        x = 4 + self.CAT + self.GAP
+        return QRectF(x, self.H - self.CAT - 6, self.VBAR_W, self.CAT)
 
     def mousePressEvent(self, e):
         self._last_interact = time.time()
@@ -298,6 +312,17 @@ class DeskPet(QWidget):
                 self._blinking = False
                 self._blink_t = now + random.uniform(2.5, 6)
         self._hearts = [h for h in self._hearts if now - h[2] < 1.4]
+        # 真实声纹条：跟随音频响度，说话时快起、停顿时慢落
+        if self._level > self._level_env:
+            self._level_env += (self._level - self._level_env) * 0.6
+        else:
+            self._level_env += (self._level - self._level_env) * 0.18
+        self._phase += 0.5
+        for i in range(self.VN):
+            x = i / (self.VN - 1)
+            w = 1.0 - abs(x - 0.5) * 2.0          # 中间最高
+            v = self._level_env * (0.45 + 0.55 * w) * (0.85 + 0.15 * math.sin(self._phase + x * 5.0))
+            self._vbar[i] = max(0.05, min(1.0, v))
         self.update()
 
     # ================= 绘制 =================
@@ -323,6 +348,7 @@ class DeskPet(QWidget):
             dx = 4 * math.sin(st * 60) * (1 - st / 0.45)
 
         self._draw_classic(p, cat, breathe, dy, dx)
+        self._draw_voice(p, self._voice_rect())
 
         if self.badge:
             r = QRectF(cat.right() - 16, cat.top() + 6, 20, 20)
@@ -363,6 +389,22 @@ class DeskPet(QWidget):
                 p.setBrush(QColor(242, 169, 59, int(255 * a)))
                 p.drawEllipse(QPointF(cat.center().x() - 14 + i * 14, cat.top() + 2), 4, 4)
 
+    def _draw_voice(self, p: QPainter, area: QRectF):
+        """真实声纹条：柱高随真实音频响度起伏，中间高两边低。"""
+        n = self.VN
+        gap = 2.5
+        bw = (area.width() - gap * (n - 1)) / n
+        for i in range(n):
+            h = area.height() * self._vbar[i]
+            x = area.x() + i * (bw + gap)
+            center = 1.0 - abs(i / (n - 1) - 0.5) * 2.0
+            col = QColor(Colors.ACCENT)
+            col.setAlpha(int(90 + 140 * center))
+            p.setPen(Qt.NoPen)
+            p.setBrush(col)
+            r = QRectF(x, area.center().y() - h / 2, bw, max(3.0, h))
+            p.drawRoundedRect(r, bw / 2, bw / 2)
+
     def _heart(self, p, c: QPointF, s):
         path = QPainterPath()
         path.moveTo(c.x(), c.y() + s * 0.35)
@@ -381,7 +423,7 @@ class DeskPet(QWidget):
         path = QPainterPath()
         path.addRoundedRect(box, 12, 12)
         tail = QPainterPath()
-        cx = cat.center().x()
+        cx = self.W / 2
         tail.moveTo(cx - 7, box.bottom() - 1)
         tail.lineTo(cx, box.bottom() + 8)
         tail.lineTo(cx + 7, box.bottom() - 1)

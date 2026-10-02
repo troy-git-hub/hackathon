@@ -28,5 +28,8 @@ dist/
 # secrets
 .env
 
+# 错题本 / 复习记录（用户数据，不进仓库）
+review.json
+
 # 大纲含明文密钥
 大纲.txt

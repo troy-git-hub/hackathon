@@ -199,7 +199,15 @@ class _LiveSource:
             self.engine.emit_error(self.session, f"音频采集失败：{e}")
 
     def _feed(self, mono, sr):
-        self.seg.feed(_resample(mono, sr), self.engine.elapsed())
+        mono = _resample(mono, sr)
+        # 真实声纹：把这一块音频的响度发给 UI（0..1），驱动声纹球，不再用随机假动画
+        try:
+            import numpy as np
+            rms = float(np.sqrt(np.mean(np.square(mono))))
+            self.engine.emit_level(self.session, min(1.0, rms * 6.0))
+        except Exception:
+            pass
+        self.seg.feed(mono, self.engine.elapsed())
 
 
 class SystemAudioSource(_LiveSource):

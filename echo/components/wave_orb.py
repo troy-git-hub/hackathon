@@ -1,9 +1,8 @@
 """
 Echo - 声纹球组件
 - 不在听：7 个小圆点（横排）
-- 开始听：6 条垂线随机变化高度（不超过球径），两端最短，中间最长
+- 开始听：6 条垂线跟随真实音频响度起伏（两端最短，中间最长），说话时起伏、停顿时落下
 """
-import random
 import math
 
 from PyQt5.QtWidgets import QWidget
@@ -34,6 +33,8 @@ class WaveOrb(QWidget):
         self._listening = False
         self._phase = 0.0
         self._bars = [0.0] * 6   # 6 条垂线高度 (0..1)
+        self._level = 0.0        # 最新真实响度（0..1）
+        self._env = 0.0          # 平滑后的响度包络
         # 垂线权重：两端最短、中间最长（正弦曲线）
         self._weights = [math.sin((i + 0.5) * math.pi / 6) for i in range(6)]
         self._timer = QTimer(self)
@@ -56,18 +57,26 @@ class WaveOrb(QWidget):
         """停止听：恢复 7 点静态"""
         self._listening = False
         self._timer.stop()
+        self._level = 0.0
+        self._env = 0.0
         self._bars = [0.0] * 6
         self.update()
 
+    def set_level(self, level: float):
+        """真实音频响度（0..1），由采集线程实时喂入。"""
+        self._level = max(0.0, min(1.0, float(level)))
+
     def _tick(self):
-        self._phase += 0.18
-        # 每条垂线在自身权重附近随机抖动
+        # 包络：说话时快起、停顿时慢落，柱高跟随真实响度起伏（不再是随机假动画）
+        if self._level > self._env:
+            self._env += (self._level - self._env) * 0.6     # 快攻击
+        else:
+            self._env += (self._level - self._env) * 0.18    # 慢衰减
+        self._phase += 0.35
         for i in range(6):
             w = self._weights[i]
-            # 在 [w*0.4, w*1.0] 范围内随机变化
-            base = w * (0.55 + 0.45 * math.sin(self._phase + i * 0.9))
-            jitter = random.uniform(-0.08, 0.08)
-            self._bars[i] = max(0.08, min(1.0, base + jitter))
+            v = self._env * w * (0.82 + 0.18 * math.sin(self._phase + i * 0.9))
+            self._bars[i] = max(0.05, min(1.0, v))
         self.update()
 
     def paintEvent(self, e):

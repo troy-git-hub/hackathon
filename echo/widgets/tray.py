@@ -190,6 +190,7 @@ class EchoTray(QObject):
         self.act_lost = m.addAction(f"我掉队了    {self.keys[1]}".rstrip(), self.lost)
         m.addAction(f"圈一下问 AI    {self.keys[3]}".rstrip(), self.circle_ask)
         self.act_end = m.addAction("下课，生成回响", self.end_lesson)
+        m.addAction("错题复习", self.review)
         m.addAction("开始新的一节课", self.restart)
         m.addSeparator()
         self.act_offline = QAction("离线模式（不调 AI）", m, checkable=True)
@@ -276,6 +277,11 @@ class EchoTray(QObject):
     def restart(self):
         self.show_window()
         self.win._restart()
+
+    def review(self):
+        self.show_window()
+        if hasattr(self.win, "_show_review"):
+            self.win._show_review()
 
     def toggle_offline(self, checked):
         echo = self.win.echo

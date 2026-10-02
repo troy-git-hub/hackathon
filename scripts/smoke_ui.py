@@ -42,6 +42,7 @@ class FakeBridge(QObject):
     thinking = pyqtSignal(bool, str)
     error = pyqtSignal(str)
     mode = pyqtSignal(str, bool)
+    level = pyqtSignal(float)
 
     def __init__(self, parent=None):
         super().__init__(parent)

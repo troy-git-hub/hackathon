@@ -36,13 +36,14 @@ from echo.components.study import (CatAvatar, BreakPath, LessonStep, SkillRow,
 from echo.mock_data import Concept
 from echo.backend.engine import parse_tc
 from echo.backend.qt_bridge import EchoBridge
+from echo.backend import store
 from echo.components.pet import EMOTION_FILES, ASSETS_DIR
 
 SHADOW = 14
 WAIT_HINT = "播放网课后，Echo 会自动开始听"
-LISTEN, MINI, BREAK, LESSON, ECHO = range(5)
+LISTEN, MINI, BREAK, LESSON, ECHO, REVIEW = range(6)
 # 各页内容区宽度（不含阴影与内边距）
-PAGE_WIDTH = {LISTEN: 340, MINI: 300, BREAK: 380, LESSON: 400, ECHO: 380}
+PAGE_WIDTH = {LISTEN: 340, MINI: 300, BREAK: 380, LESSON: 400, ECHO: 380, REVIEW: 380}
 
 
 def _label(text="", style="", wrap=False):
@@ -152,6 +153,7 @@ class FloatingWindow(QWidget):
         self.echo.thinking.connect(self._on_thinking)
         self.echo.error.connect(self._on_error)
         self.echo.mode.connect(self._on_mode)
+        self.echo.level.connect(self._on_level)
         self.echo.start()
 
         # 现场兜底快捷键（Echo 窗口在前台时有效）
@@ -173,6 +175,7 @@ class FloatingWindow(QWidget):
         self.stack.addWidget(self._build_break())    # 2
         self.stack.addWidget(self._build_lesson())   # 3
         self.stack.addWidget(self._build_echo())     # 4
+        self.stack.addWidget(self._build_review())   # 5
         self.body_scroll = QScrollArea()
         self.body_scroll.setWidgetResizable(True)
         self.body_scroll.setFrameShape(QFrame.NoFrame)
@@ -510,10 +513,94 @@ class FloatingWindow(QWidget):
         lay.addWidget(self.review_card)
 
         row = QHBoxLayout()
+        row.addWidget(_btn("错题复习", "Quiet", self._show_review))
         row.addStretch()
         row.addWidget(_btn("开始新的一节课", "Link", self._restart))
         lay.addLayout(row)
         return page
+
+    # ----- 5 错题复习（主页）-----
+    def _build_review(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(Spacing.MD)
+
+        head = QVBoxLayout()
+        head.setSpacing(2)
+        head.addWidget(_label("错题复习", TITLE))
+        self.review_sub = _label("", CAPTION)
+        head.addWidget(self.review_sub)
+        lay.addLayout(head)
+
+        self.review_list = QWidget()
+        self.review_list_lay = QVBoxLayout(self.review_list)
+        self.review_list_lay.setContentsMargins(0, 0, 0, 0)
+        self.review_list_lay.setSpacing(Spacing.SM)
+        lay.addWidget(self.review_list)
+
+        self.review_empty = _label("还没有错题。听完一节课、点「我掉队了」之后，这里会收集你没跟上的地方。",
+                                   f"color: {Colors.TEXT_SECONDARY}; font-size: 13px;", wrap=True)
+        lay.addWidget(self.review_empty)
+
+        row = QHBoxLayout()
+        row.addStretch()
+        row.addWidget(_btn("开始新的一节课", "Link", self._restart))
+        lay.addLayout(row)
+        return page
+
+    def _show_review(self):
+        self._render_review()
+        self._show_page(REVIEW)
+
+    def _render_review(self):
+        while self.review_list_lay.count():
+            w = self.review_list_lay.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        pending = [it for it in store.load() if not it.get("reviewed")]
+        self.review_sub.setText(f"还有 {len(pending)} 个知识点要回看" if pending else "都复习过了，好样的 🎉")
+        self.review_empty.setVisible(not pending)
+        for it in pending:
+            self.review_list_lay.addWidget(self._review_card(it))
+
+    def _review_card(self, item):
+        card = QFrame()
+        card.setStyleSheet(f"QFrame {{ background: {Colors.SURFACE}; border: 1px solid {Colors.BORDER};"
+                           f"border-radius: {Radius.MD}px; }}")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        v.setSpacing(6)
+        topic = _label(f"✦ {item.get('topic', '知识点')}",
+                       f"color: {Colors.TEXT_PRIMARY}; font-size: 15px; font-weight: 600;")
+        topic.setWordWrap(True)
+        v.addWidget(topic)
+        miss = item.get("missing") or item.get("reason") or "这里没跟上"
+        ml = _label(f"没跟上：{miss}", f"color: {Colors.ACCENT}; font-size: 13px;")
+        ml.setWordWrap(True)
+        v.addWidget(ml)
+        lesson = (item.get("micro_lesson") or "").strip()
+        if lesson:
+            lb = _label(lesson, f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;")
+            lb.setWordWrap(True)
+            v.addWidget(lb)
+        row = QHBoxLayout()
+        row.addStretch()
+        topic_name = item.get("topic", "")
+        row.addWidget(_btn("✓ 掌握了", "Quiet", lambda t=topic_name: self._mark_reviewed(t)))
+        v.addLayout(row)
+        return card
+
+    def _mark_reviewed(self, topic):
+        store.mark_reviewed(topic)
+        self._render_review()
+        self._fit()
+
+    def _save_review(self):
+        try:
+            store.add(store.from_breakpoints(self.echo.engine))
+        except Exception:
+            pass
 
     # ================= 页面切换 / 尺寸 =================
     def _show_page(self, idx):
@@ -525,7 +612,7 @@ class FloatingWindow(QWidget):
 
         mini = idx == MINI
         self.header.setVisible(not mini)
-        self.back_btn.setVisible(idx in (BREAK, LESSON))
+        self.back_btn.setVisible(idx in (BREAK, LESSON, REVIEW))
         self.end_btn.setVisible(idx == LISTEN)
         self.fold_btn.setVisible(idx == LISTEN)
         m = Spacing.MD if mini else Spacing.LG
@@ -846,6 +933,7 @@ class FloatingWindow(QWidget):
         self.echo_sub.setText(f"✓ 跟上了 {cnt['ok']} · ? 有点懵 {cnt['unsure']} · ! 掉队了 {cnt['lost']}")
         self.review_card.setVisible(self.review_card.set_chain(report.review_chain, report.suggestion))
         cnt["review"] = cnt["unsure"] + cnt["lost"]
+        self._save_review()
         self._cat("ok" if not cnt["review"] else "idle")
         self._fit()
 
@@ -894,6 +982,10 @@ class FloatingWindow(QWidget):
         else:
             self.status_dot.show()
             self.status_dots.stop()
+
+    def _on_level(self, level):
+        self.wave_orb.set_level(level)
+        self.mini_wave_orb.set_level(level)
 
     def _on_mode(self, kind, offline):
         tags = ["离线"] if offline else []

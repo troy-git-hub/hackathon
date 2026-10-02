@@ -98,6 +98,8 @@ class EchoEngine:
         self.on_status = on_status or (lambda s: None)
         self.on_error = on_error or (lambda e: None)
         self.on_thinking = on_thinking or (lambda active, text: None)
+        # 真实声纹响度（0..1），由音频来源喂入，驱动 UI 的声纹反馈
+        self.on_level = lambda level: None
         # 可选：统一事件出口 on_event(session, name, *args)，给 Qt 桥接在主线程再核对一次 session
         self.on_event = on_event
         self.concept_interval = concept_interval or config.CONCEPT_INTERVAL
@@ -166,6 +168,10 @@ class EchoEngine:
 
     def emit_error(self, sid, msg):
         self._emit(sid, "error", msg)
+
+    def emit_level(self, sid, level):
+        """给音频来源用：把当前响度（0..1）发给 UI 做真实声纹反馈。"""
+        self._emit(sid, "level", float(level))
 
     def shutdown(self):
         self.stop()
