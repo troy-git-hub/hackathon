@@ -1,8 +1,9 @@
 """
 Echo - 设置
 
-一个简单的设置窗口：填 API key（DeepSeek / 百炼 Qwen-VL 视觉）、音频来源、Whisper 模型。
-保存后写回项目根目录的 .env（保留原有注释和其它配置项）。改完需要重启 Echo 生效。
+一个简单的设置窗口：填 API key（DeepSeek / 百炼 Qwen-VL 视觉）、音频来源、Whisper 模型、
+界面语言、桌宠皮肤。保存后写回项目根目录的 .env（保留原有注释和其它配置项）。
+改完需要重启 Echo 生效（语言和皮肤除外，皮肤即时生效）。
 """
 import os
 
@@ -12,6 +13,7 @@ from PyQt5.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFormLayout, 
 
 from echo.backend import paths
 from echo.theme import Colors, font
+from echo.i18n import tr, lang, set_lang
 
 # 打包后写到 %APPDATA%\Echo\.env（安装目录在 C:\Program Files 下不可写），开发时写到项目根目录
 ROOT = paths.app_dir()
@@ -19,14 +21,17 @@ ENV_PATH = paths.ensure_env()
 ENV_EXAMPLE = paths.example_env()
 
 FIELDS = [
-    ("DEEPSEEK_API_KEY", "DeepSeek API Key", "课堂理解 / 掉队分析（deepseek-chat）"),
-    ("DASHSCOPE_API_KEY", "百炼 API Key", "圈一下问 AI 的视觉模型（Qwen-VL，选填）"),
+    ("DEEPSEEK_API_KEY", "DeepSeek API Key",
+     tr("课堂理解 / 掉队分析（deepseek-chat）", "Lesson understanding / breakpoint analysis (deepseek-chat)")),
+    ("DASHSCOPE_API_KEY", tr("百炼 API Key", "DashScope API Key"),
+     tr("圈一下问 AI 的视觉模型（Qwen-VL，选填）", "Vision model for circle-to-ask AI (Qwen-VL, optional)")),
 ]
 COMBOS = [
-    ("ECHO_SOURCE", "音频来源", ["system", "mic"],
-     ["系统声音（网课/会议）", "麦克风"]),
-    ("ECHO_WHISPER_MODEL", "语音识别模型", ["small", "medium"],
-     ["small（快，CPU 实时）", "medium（更准，更慢）"]),
+    ("ECHO_SOURCE", tr("音频来源", "Audio source"), ["system", "mic"],
+     [tr("系统声音（网课/会议）", "System audio (courses / meetings)"), tr("麦克风", "Microphone")]),
+    ("ECHO_WHISPER_MODEL", tr("语音识别模型", "Speech recognition model"), ["small", "medium"],
+     [tr("small（快，CPU 实时）", "small (fast, real-time on CPU)"),
+      tr("medium（更准，更慢）", "medium (more accurate, slower)")]),
 ]
 
 
@@ -71,7 +76,7 @@ def _write_env(updates: dict):
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Echo 设置")
+        self.setWindowTitle(tr("Echo 设置", "Echo Settings"))
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self._kv = _read_env()
         self._build()
@@ -81,10 +86,12 @@ class SettingsDialog(QDialog):
         root.setContentsMargins(20, 18, 20, 14)
         root.setSpacing(10)
 
-        title = QLabel("Echo 设置")
+        title = QLabel(tr("Echo 设置", "Echo Settings"))
         title.setFont(font(16, 600))
         root.addWidget(title)
-        sub = QLabel("API key 保存在本地 .env 文件，不会上传。改完重启 Echo 生效。")
+        sub = QLabel(tr("API key 保存在本地 .env 文件，不会上传。改完重启 Echo 生效。",
+                        "API keys are stored in a local .env file and never uploaded. "
+                        "Changes take effect after restarting Echo."))
         sub.setStyleSheet(f"color:{Colors.TEXT_SECONDARY}; font-size:12px;")
         sub.setWordWrap(True)
         root.addWidget(sub)
@@ -97,7 +104,7 @@ class SettingsDialog(QDialog):
         for key, label, tip in FIELDS:
             ed = QLineEdit(self._kv.get(key, ""))
             ed.setEchoMode(QLineEdit.Password)
-            ed.setPlaceholderText("sk-…（留空则离线/退回另一家）")
+            ed.setPlaceholderText(tr("sk-…（留空则离线/退回另一家）", "sk-… (leave blank for offline / fallback)"))
             ed.setToolTip(tip)
             ed.setFont(font(12))
             form.addRow(f"{label}：", ed)
@@ -116,18 +123,25 @@ class SettingsDialog(QDialog):
             form.addRow(f"{label}：", cb)
             self.combos[key] = cb
 
+        # 界面语言：改完重启 Echo 生效
+        self.lang_combo = QComboBox()
+        self.lang_combo.addItem("中文", "zh")
+        self.lang_combo.addItem("English", "en")
+        self.lang_combo.setCurrentIndex(1 if lang() == "en" else 0)
+        form.addRow(tr("语言：", "Language:"), self.lang_combo)
+
         self.pet_skin = QComboBox()
-        self.pet_skin.addItem("原版圆脸卡通猫（桌面＋磁吸）", "cartoon")
-        self.pet_skin.addItem("线稿猫（桌面＋磁吸）", "line")
+        self.pet_skin.addItem(tr("原版圆脸卡通猫（桌面＋磁吸）", "Original cartoon cat (desktop + docked)"), "cartoon")
+        self.pet_skin.addItem(tr("线稿猫（桌面＋磁吸）", "Line-art cat (desktop + docked)"), "line")
         current_skin = QSettings("Echo", "Echo").value("desktop_pet_skin", "cartoon")
         self.pet_skin.setCurrentIndex(1 if current_skin == "line" else 0)
-        form.addRow("桌宠皮肤：", self.pet_skin)
+        form.addRow(tr("桌宠皮肤：", "Pet skin:"), self.pet_skin)
 
         root.addLayout(form)
 
         btns = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        btns.button(QDialogButtonBox.Save).setText("保存")
-        btns.button(QDialogButtonBox.Cancel).setText("取消")
+        btns.button(QDialogButtonBox.Save).setText(tr("保存", "Save"))
+        btns.button(QDialogButtonBox.Cancel).setText(tr("取消", "Cancel"))
         btns.accepted.connect(self._save)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
@@ -151,7 +165,7 @@ class SettingsDialog(QDialog):
             }}
             QDialogButtonBox QPushButton:first-child:hover {{ background:{Colors.ACCENT_HOVER}; }}
         """)
-        self.resize(460, 320)
+        self.resize(480, 360)
 
     def _save(self):
         updates = {k: ed.text().strip() for k, ed in self.inputs.items()}
@@ -161,8 +175,9 @@ class SettingsDialog(QDialog):
             _write_env(updates)
         except OSError as e:
             from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "保存失败", f"写 .env 失败：{e}")
+            QMessageBox.warning(self, tr("保存失败", "Save failed"), f"{tr('写 .env 失败：', 'Failed to write .env: ')}{e}")
             return
+        set_lang(self.lang_combo.currentData())
         skin = self.pet_skin.currentData()
         QSettings("Echo", "Echo").setValue("desktop_pet_skin", skin)
         from echo.widgets.desk_pet import DeskPet

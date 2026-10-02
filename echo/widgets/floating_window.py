@@ -43,12 +43,13 @@ from echo.backend.engine import parse_tc
 from echo.backend.qt_bridge import EchoBridge
 from echo.backend import store
 from echo.components.pet import EMOTION_FILES, ASSETS_DIR
+from echo.i18n import tr
 from echo.widgets.checkin import CheckinCard
 from echo.widgets.mindmap import MindMapPage
 from echo.backend import mindmap
 
 SHADOW = 14
-WAIT_HINT = "播放网课后，Echo 会自动开始听"
+WAIT_HINT = tr("播放网课后，Echo 会自动开始听", "Play your course and Echo will start listening automatically")
 LISTEN, MINI, BREAK, LESSON, ECHO, REVIEW, HOME, PRACTICE, DETAIL, MINDMAP, COURSES = range(11)
 # 各页内容区宽度（不含阴影与内边距）
 PAGE_WIDTH = {LISTEN: 340, MINI: 300, BREAK: 380, LESSON: 400, ECHO: 380,
@@ -263,7 +264,7 @@ class FloatingWindow(QWidget):
         self.status_dots = PulseDots(Colors.ACCENT)
         self.status_dots.hide()
         self._had_lesson = False        # 有没有上过课，决定状态栏写「还没开始上课」还是「已下课」
-        self.status_lbl = _label("还没开始上课", CAPTION)
+        self.status_lbl = _label(tr("还没开始上课", "Lesson not started"), CAPTION)
         # 小字标记当前模式：示例课 / 离线
         self.mode_lbl = _label("", f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"
                                    f"border: 1px solid {Colors.BORDER_STRONG}; border-radius: 8px;"
@@ -271,11 +272,11 @@ class FloatingWindow(QWidget):
         self.mode_lbl.hide()
         lay.addStretch()
 
-        self.back_btn = _btn("← 回到课堂", "Link", self._back)
+        self.back_btn = _btn(tr("← 回到课堂", "← Back to class"), "Link", self._back)
         lay.addWidget(self.back_btn)
-        self.home_btn = _btn("⌂ 主页", "Link", self._show_home, "回到主页")
+        self.home_btn = _btn(tr("⌂ 主页", "⌂ Home"), "Link", self._show_home, tr("回到主页", "Back to home"))
         lay.addWidget(self.home_btn)
-        self.end_btn = _btn("下课", "Link", self._go_echo, "结束这节课，生成回响")
+        self.end_btn = _btn(tr("下课", "End class"), "Link", self._go_echo, tr("结束这节课，生成回响", "End this lesson and generate the review"))
         lay.addWidget(self.end_btn)
         self.fold_btn = _btn("–", "IconBtn", lambda: self._show_page(MINI), "折叠")
         self.fold_btn.setFixedSize(26, 26)
@@ -348,7 +349,7 @@ class FloatingWindow(QWidget):
         self.checkin_card = CheckinCard(page)
         lay.addWidget(self.checkin_card)
 
-        self.topic_lbl = _label("等待老师开讲…", f"color: {Colors.TEXT_PRIMARY}; font-size: 21px;"
+        self.topic_lbl = _label(tr("等待老师开讲…", "Waiting for the teacher to start…"), f"color: {Colors.TEXT_PRIMARY}; font-size: 21px;"
                                               "font-weight: 700;", wrap=True)
         lay.addWidget(self.topic_lbl)
         self.summary_lbl = _label(WAIT_HINT, f"color: {Colors.TEXT_SECONDARY}; font-size: 13px;",
@@ -373,14 +374,15 @@ class FloatingWindow(QWidget):
         lay.addWidget(self.caption_lbl)
 
         lay.addSpacing(Spacing.SM)
-        self.btn_lost = _btn("我掉队了", "Accent", self._on_lost, "Echo 回看最近几分钟，找到你从哪一步开始没听懂")
+        self.btn_lost = _btn(tr("我掉队了", "I fell behind"), "Accent", self._on_lost,
+                             tr("Echo 回看最近几分钟，找到你从哪一步开始没听懂", "Echo reviews the last few minutes to find where you lost track"))
         self.btn_lost.setMinimumHeight(46)
         lay.addWidget(self.btn_lost)
 
         row = QHBoxLayout()
         row.setSpacing(Spacing.SM)
         self.btn_ok = _btn("✓  跟上了", "Quiet", self._on_ok)
-        self.btn_warn = _btn("?  有点懵", "Quiet", self._on_warn)
+        self.btn_warn = _btn(tr("?  有点懵", "?  A bit lost"), "Quiet", self._on_warn)
         row.addWidget(self.btn_ok)
         row.addWidget(self.btn_warn)
         # 课上想自测一下：不用等 Echo 自己来找你，随时可以要一道
@@ -413,13 +415,13 @@ class FloatingWindow(QWidget):
         col = QVBoxLayout()
         col.setSpacing(0)
         col.addWidget(_label("老师正在讲", f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"))
-        self.mini_topic = _label("等待老师开讲…", f"color: {Colors.TEXT_PRIMARY}; font-size: 14px;"
+        self.mini_topic = _label(tr("等待老师开讲…", "Waiting for the teacher to start…"), f"color: {Colors.TEXT_PRIMARY}; font-size: 14px;"
                                                 "font-weight: 600;")
         self.mini_topic.setMinimumWidth(10)
         self.mini_topic.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         col.addWidget(self.mini_topic)
         lay.addLayout(col, 1)
-        b = _btn("掉队了", "Accent", self._on_lost)
+        b = _btn(tr("掉队了", "Fell behind"), "Accent", self._on_lost)
         b.setStyleSheet("font-size: 13px; padding: 6px 12px;")
         lay.addWidget(b)
         ex = _btn("⌃", "IconBtn", lambda: self._show_page(LISTEN), "展开")
@@ -506,10 +508,11 @@ class FloatingWindow(QWidget):
 
         row = QHBoxLayout()
         row.setSpacing(Spacing.SM)
-        self.btn_fill = _btn("30 秒补上这一步", "Accent", self._go_lesson)
+        self.btn_fill = _btn(tr("30 秒补上这一步", "Catch up in 30 seconds"), "Accent", self._go_lesson)
         self.btn_fill.setMinimumHeight(44)
         row.addWidget(self.btn_fill, 3)
-        self.btn_self = _btn("我自己看看", "Quiet", self._on_self_look, "不用 AI 讲，收起来回到课堂")
+        self.btn_self = _btn(tr("我自己看看", "I'll figure it out"), "Quiet", self._on_self_look,
+                             tr("不用 AI 讲，收起来回到课堂", "Skip the AI explanation and go back to class"))
         self.btn_self.setMinimumHeight(44)
         row.addWidget(self.btn_self, 2)
         lay.addLayout(row)
@@ -539,7 +542,7 @@ class FloatingWindow(QWidget):
         lay.addLayout(steps)
 
         lay.addSpacing(Spacing.XS)
-        self.btn_gotit = _btn("✓  补上了，回到课堂", "Solid", self._on_fixed)
+        self.btn_gotit = _btn(tr("✓  补上了，回到课堂", "✓  Got it, back to class"), "Solid", self._on_fixed)
         self.btn_gotit.setMinimumHeight(42)
         lay.addWidget(self.btn_gotit)
         return page
@@ -553,7 +556,7 @@ class FloatingWindow(QWidget):
 
         head = QVBoxLayout()
         head.setSpacing(2)
-        self.echo_title = _label("今天的课", TITLE)
+        self.echo_title = _label(tr("今天的课", "Today's lesson"), TITLE)
         self.echo_title.setWordWrap(True)
         head.addWidget(self.echo_title)
         self.echo_sub = _label("", CAPTION)
@@ -570,7 +573,7 @@ class FloatingWindow(QWidget):
         el.setContentsMargins(Spacing.LG, Spacing.LG, Spacing.LG, Spacing.LG)
         self.echo_dots = PulseDots(Colors.TEXT_SECONDARY)
         el.addWidget(self.echo_dots, 0, Qt.AlignVCenter)
-        self.echo_loading_lbl = _label("正在整理这节课…", f"color: {Colors.TEXT_PRIMARY}; font-size: 14px;")
+        self.echo_loading_lbl = _label(tr("正在整理这节课…", "Summarizing this lesson…"), f"color: {Colors.TEXT_PRIMARY}; font-size: 14px;")
         el.addWidget(self.echo_loading_lbl, 1)
         lay.addWidget(self.echo_loading)
 
@@ -589,10 +592,10 @@ class FloatingWindow(QWidget):
         lay.addWidget(self.review_card)
 
         row = QHBoxLayout()
-        row.addWidget(_btn("知识地图", "Accent", self._show_mindmap_report))
+        row.addWidget(_btn(tr("知识地图", "Knowledge map"), "Accent", self._show_mindmap_report))
         row.addStretch()
-        row.addWidget(_btn("错题复习", "Quiet", self._show_review))
-        row.addWidget(_btn("回到主页", "Link", self._show_home))
+        row.addWidget(_btn(tr("错题复习", "Review mistakes"), "Quiet", self._show_review))
+        row.addWidget(_btn(tr("回到主页", "Back to home"), "Link", self._show_home))
         lay.addLayout(row)
         return page
 
@@ -605,7 +608,7 @@ class FloatingWindow(QWidget):
         v = QVBoxLayout(card)
         v.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
         v.setSpacing(6)
-        v.addWidget(_label("这节课讲了什么",
+        v.addWidget(_label(tr("这节课讲了什么", "What this lesson covered"),
                            f"color: {Colors.ACCENT}; font-size: 12px; font-weight: 600;"))
         text = _label("", f"color: {Colors.TEXT_PRIMARY}; font-size: 13px; line-height: 165%;", wrap=True)
         v.addWidget(text)
@@ -643,7 +646,7 @@ class FloatingWindow(QWidget):
 
         head = QVBoxLayout()
         head.setSpacing(2)
-        head.addWidget(_label("错题复习", TITLE))
+        head.addWidget(_label(tr("错题复习", "Review mistakes"), TITLE))
         self.review_sub = _label("", CAPTION)
         head.addWidget(self.review_sub)
         lay.addLayout(head)
@@ -654,7 +657,8 @@ class FloatingWindow(QWidget):
         self.review_list_lay.setSpacing(Spacing.SM)
         lay.addWidget(self.review_list)
 
-        self.review_empty = _label("还没有错题。听完一节课、点「我掉队了」之后，这里会收集你没跟上的地方。",
+        self.review_empty = _label(tr("还没有错题。听完一节课、点「我掉队了」之后，这里会收集你没跟上的地方。",
+                                      "No mistakes yet. After a lesson, tap \"I fell behind\" and this will collect what you missed."),
                                    f"color: {Colors.TEXT_SECONDARY}; font-size: 13px;", wrap=True)
         lay.addWidget(self.review_empty)
 
@@ -715,7 +719,7 @@ class FloatingWindow(QWidget):
         row.addStretch()
         topic_name = item.get("topic", "")
         row.addWidget(_btn("AI 出题", "Quiet", lambda it=item: self._practice_item(it)))
-        row.addWidget(_btn("✓ 掌握了", "Quiet", lambda t=topic_name: self._mark_reviewed(t)))
+        row.addWidget(_btn(tr("✓ 掌握了", "✓  Mastered"), "Quiet", lambda t=topic_name: self._mark_reviewed(t)))
         v.addLayout(row)
         return card
 
@@ -739,7 +743,7 @@ class FloatingWindow(QWidget):
 
         head = QVBoxLayout()
         head.setSpacing(2)
-        self.home_hello = _label("今天也来听课", TITLE)
+        self.home_hello = _label(tr("今天也来听课", "Ready for another lesson?"), TITLE)
         head.addWidget(self.home_hello)
         self.home_sub = _label("", CAPTION)
         self.home_sub.setWordWrap(True)
@@ -747,7 +751,7 @@ class FloatingWindow(QWidget):
         lay.addLayout(head)
 
         # 开课前先给这节课起个名，下课后在历史里一眼能认出来
-        lay.addWidget(_label("这节课叫什么？", CAPTION))
+        lay.addWidget(_label(tr("这节课叫什么？", "What's this lesson called?"), CAPTION))
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText("例如：初二数学 · 正比例函数（留空默认用开课时间命名）")
         self.title_edit.setStyleSheet(
@@ -758,19 +762,22 @@ class FloatingWindow(QWidget):
         self.title_edit.returnPressed.connect(self._start_today)
         lay.addWidget(self.title_edit)
 
-        self.btn_today = _btn("开始今天的学习", "Accent", self._start_today,
-                              "开一节新课，Echo 开始听你的网课")
+        self.btn_today = _btn(tr("开始今天的学习", "Start today's learning"), "Accent", self._start_today,
+                              tr("开一节新课，Echo 开始听你的网课", "Start a new lesson and Echo will begin listening"))
         self.btn_today.setMinimumHeight(46)
         lay.addWidget(self.btn_today)
 
         self.home_review_card = self._home_card(
-            "错题复习", "把掉队过的知识点再过一遍", "去复习", self._show_review)
+            tr("错题复习", "Review mistakes"), tr("把掉队过的知识点再过一遍", "Go over the points you missed"),
+            tr("去复习", "Review"), self._show_review)
         lay.addWidget(self.home_review_card)
         self.home_practice_card = self._home_card(
-            "AI 出题练习", "让 AI 按你的错题出题，真的练一下", "开始练", self._start_practice)
+            tr("AI 出题练习", "AI practice quiz"), tr("让 AI 按你的错题出题，真的练一下", "Let AI turn your mistakes into practice questions"),
+            tr("开始练", "Practice"), self._start_practice)
         lay.addWidget(self.home_practice_card)
         self.home_courses_card = self._home_card(
-            "课程管理", "回看、搜索、重命名、批量管理历史课程", "管理", self._show_courses)
+            tr("课程管理", "Course manager"), tr("回看、搜索、重命名、批量管理历史课程", "Review, search, rename, and manage past lessons"),
+            tr("管理", "Manage"), self._show_courses)
         lay.addWidget(self.home_courses_card)
         return page
 
@@ -1033,7 +1040,7 @@ class FloatingWindow(QWidget):
 
         head = QVBoxLayout()
         head.setSpacing(2)
-        head.addWidget(_label("AI 出题练习", TITLE))
+        head.addWidget(_label(tr("AI 出题练习", "AI practice quiz"), TITLE))
         self.prac_sub = _label("", CAPTION)
         head.addWidget(self.prac_sub)
         lay.addLayout(head)
@@ -1046,7 +1053,7 @@ class FloatingWindow(QWidget):
         pl.setContentsMargins(Spacing.LG, Spacing.LG, Spacing.LG, Spacing.LG)
         self.prac_dots = PulseDots(Colors.TEXT_SECONDARY)
         pl.addWidget(self.prac_dots, 0, Qt.AlignVCenter)
-        self.prac_loading_lbl = _label("AI 正在照着你的错题出题…",
+        self.prac_loading_lbl = _label(tr("AI 正在照着你的错题出题…", "AI is writing questions from your mistakes…"),
                                        f"color: {Colors.TEXT_PRIMARY}; font-size: 14px;")
         pl.addWidget(self.prac_loading_lbl, 1)
         lay.addWidget(self.prac_loading)
@@ -1057,8 +1064,8 @@ class FloatingWindow(QWidget):
         self.prac_body_lay.setSpacing(Spacing.SM)
         lay.addWidget(self.prac_body, 1)
 
-        self.btn_prac_submit = _btn("交卷", "Accent", self._prac_submit,
-                                    "全部作答后交卷，看答案比对和订正")
+        self.btn_prac_submit = _btn(tr("交卷", "Submit"), "Accent", self._prac_submit,
+                                    tr("全部作答后交卷，看答案比对和订正", "Submit when done to compare answers and review corrections"))
         self.btn_prac_submit.setMinimumHeight(42)
         lay.addWidget(self.btn_prac_submit)
 
@@ -1067,9 +1074,9 @@ class FloatingWindow(QWidget):
         lay.addWidget(self.prac_score)
 
         row2 = QHBoxLayout()
-        row2.addWidget(_btn("✓ 这个我会了", "Link", self._prac_mastered))
+        row2.addWidget(_btn(tr("✓ 这个我会了", "✓  I got this"), "Link", self._prac_mastered))
         row2.addStretch()
-        row2.addWidget(_btn("换一题练", "Link", self._start_practice))
+        row2.addWidget(_btn(tr("换一题练", "Practice another"), "Link", self._start_practice))
         lay.addLayout(row2)
         return page
 
@@ -1169,7 +1176,7 @@ class FloatingWindow(QWidget):
         v.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
         v.setSpacing(8)
 
-        v.addWidget(_label(f"第 {idx + 1} 题",
+        v.addWidget(_label(tr(f"第 {idx + 1} 题", f"Question {idx + 1}"),
                            f"color: {Colors.ACCENT}; font-size: 11px; font-weight: 700;"))
         v.addWidget(_label(str(q.get("question", "")),
                            f"color: {Colors.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;"
@@ -1191,7 +1198,7 @@ class FloatingWindow(QWidget):
         else:
             # 简答题：没有选项，让学生把答案写出来，交卷后与参考答案比对
             edit = QLineEdit()
-            edit.setPlaceholderText("把你的答案写在这里…")
+            edit.setPlaceholderText(tr("把你的答案写在这里…", "Type your answer here…"))
             edit.setStyleSheet(
                 f"QLineEdit {{ background: {Colors.SURFACE}; color: {Colors.TEXT_PRIMARY};"
                 f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.SM}px; padding: 7px 10px;"
@@ -1242,7 +1249,7 @@ class FloatingWindow(QWidget):
         mc_total = 0
         has_free = False
         for card, q in zip(self._prac_cards, self._prac_qs):
-            verdict, compare, ok = self._grade(card, q)
+            verdict, compare, ok, kind = self._grade(card, q)
             is_mc = bool(card._radios)
             if is_mc:
                 mc_total += 1
@@ -1250,14 +1257,8 @@ class FloatingWindow(QWidget):
                     correct += 1
             else:
                 has_free = True
-            if ok:
-                color = Colors.OK_FG
-            elif verdict.startswith("简答"):
-                color = Colors.ACCENT
-            elif verdict == "未作答":
-                color = Colors.TEXT_DISABLED
-            else:
-                color = Colors.DANGER
+            color = {"ok": Colors.OK_FG, "free": Colors.ACCENT,
+                     "unanswered": Colors.TEXT_DISABLED}.get(kind, Colors.DANGER)
             card._verdict.setText(verdict)
             card._verdict.setStyleSheet(
                 f"color: {color}; font-size: 13px; font-weight: 700; background: transparent;")
@@ -1272,33 +1273,42 @@ class FloatingWindow(QWidget):
                 card._edit.setEnabled(False)
 
         if has_free:
-            self.prac_score.setText(f"选择题答对 {correct} / {mc_total} 题，简答题对照参考答案订正")
+            self.prac_score.setText(tr(f"选择题答对 {correct} / {mc_total} 题，简答题对照参考答案订正",
+                                       f"Multiple choice: {correct} / {mc_total} correct — compare the rest with the reference answers"))
         else:
-            self.prac_score.setText(f"答对 {correct} / {mc_total} 题" +
-                                    ("，全对 👍" if correct == mc_total else "，错的看下面订正"))
+            self.prac_score.setText(tr(f"答对 {correct} / {mc_total} 题", f"{correct} / {mc_total} correct") +
+                                    (tr("，全对 👍", " — all correct 👍") if correct == mc_total
+                                     else tr("，错的看下面订正", " — see corrections below")))
         self.prac_score.show()
         self.btn_prac_submit.setEnabled(False)
         self._fit()
 
     def _grade(self, card, q):
-        """给一道题判分：返回 (verdict 文案, 比对文案, 是否答对)。"""
+        """给一道题判分：返回 (verdict, compare, ok, kind)。kind ∈ ok/wrong/free/unanswered。"""
         answer = str(q.get("answer") or "").strip()
         radios = card._radios
         if radios:
             chosen = next((r.text() for r in radios if r.isChecked()), "")
             if not chosen:
-                return "未作答", f"正确答案：{answer}", False
+                return (tr("未作答", "No answer"), tr("正确答案：", "Correct answer: ") + answer,
+                        False, "unanswered")
             if self._opt_letter(chosen) and self._opt_letter(answer):
                 ok = self._opt_letter(chosen) == self._opt_letter(answer)
             else:
                 ok = chosen == answer
             if ok:
-                return "✓ 答对了", f"你的答案：{chosen}", True
-            return "✗ 答错了", f"你的答案：{chosen}\n正确答案：{answer}", False
+                return (tr("✓ 答对了", "✓ Correct"), tr("你的答案：", "Your answer: ") + chosen,
+                        True, "ok")
+            return (tr("✗ 答错了", "✗ Wrong"),
+                    tr("你的答案：", "Your answer: ") + chosen + "\n" + tr("正确答案：", "Correct answer: ") + answer,
+                    False, "wrong")
         yours = (card._edit.text().strip() if card._edit else "")
         if not yours:
-            return "未作答", f"参考答案：{answer}", False
-        return "简答题 · 自行比对", f"你的答案：{yours}\n参考答案：{answer}", False
+            return (tr("未作答", "No answer"), tr("参考答案：", "Reference answer: ") + answer,
+                    False, "unanswered")
+        return (tr("简答题 · 自行比对", "Short answer · self-check"),
+                tr("你的答案：", "Your answer: ") + yours + "\n" + tr("参考答案：", "Reference answer: ") + answer,
+                False, "free")
 
     def _prac_mastered(self):
         """「✓ 这个我会了」：把错题标成已掌握，然后退回到进来的那一页。"""
@@ -1320,7 +1330,7 @@ class FloatingWindow(QWidget):
         self._prac_item = {"topic": self._lesson_name(lesson)}
         ts = getattr(self, "_detail_ts", 0)
         self._prac_back = (lambda: self._show_detail(ts)) if ts else None
-        self._prac_back_label = "← 课程回顾" if ts else ""
+        self._prac_back_label = tr("← 课程回顾", "← Lesson review") if ts else ""
         self._prac_qs, self._prac_cards = [], []
         self._prac_submitted = False
         self.prac_loading_lbl.setText("正在按这节课的要点出题…")
@@ -1462,11 +1472,11 @@ class FloatingWindow(QWidget):
         mini = idx == MINI
         self.header.setVisible(not mini)
         self.back_btn.setVisible(idx in (BREAK, LESSON, REVIEW, PRACTICE, DETAIL, MINDMAP, COURSES))
-        back_label = "← 主页"
+        back_label = tr("← 主页", "← Home")
         if idx == PRACTICE and self._prac_back_label:
             back_label = self._prac_back_label     # 从地图/回顾进来的，返回到那儿
         self.back_btn.setText(back_label if idx in (REVIEW, PRACTICE, DETAIL, MINDMAP, COURSES)
-                              else "← 回到课堂")
+                              else tr("← 回到课堂", "← Back to class"))
         self.home_btn.setVisible(idx in (LISTEN, ECHO))
         self.end_btn.setVisible(idx == LISTEN)
         self.fold_btn.setVisible(idx == LISTEN)
@@ -1486,7 +1496,8 @@ class FloatingWindow(QWidget):
         engine = getattr(getattr(self, "echo", None), "engine", None)
         if getattr(engine, "active", False):
             return                      # 在上课：交给引擎的状态事件去更新
-        self.status_lbl.setText("已下课" if getattr(self, "_had_lesson", False) else "还没开始上课")
+        self.status_lbl.setText(tr("已下课", "Class ended") if getattr(self, "_had_lesson", False)
+                                else tr("还没开始上课", "Lesson not started"))
         self.status_lbl.setToolTip("")
         self.status_dot.setVisible(False)
         self.status_dots.stop()
@@ -1589,7 +1600,7 @@ class FloatingWindow(QWidget):
         self._cat("thinking")
 
     def _go_echo(self):
-        self.echo_loading_lbl.setText("正在整理这节课…")
+        self.echo_loading_lbl.setText(tr("正在整理这节课…", "Summarizing this lesson…"))
         self.echo_dots.start()
         self.echo_loading.show()
         self.echo_path.hide()
@@ -1597,7 +1608,7 @@ class FloatingWindow(QWidget):
         self.review_card.hide()
         self.echo_sub.setText("")
         self.echo_stat.setText("")
-        self.echo_title.setText((getattr(self.echo, "title", "") or "").strip() or "今天的课")
+        self.echo_title.setText((getattr(self.echo, "title", "") or "").strip() or tr("今天的课", "Today's lesson"))
         self.echo.end_lesson()
         self._show_page(ECHO)
 
@@ -1820,9 +1831,9 @@ class FloatingWindow(QWidget):
         self.echo_path.setVisible(bool(rows))
 
         cnt = {k: sum(1 for r in rows if r[2] == k) for k in ("ok", "unsure", "lost")}
-        self.echo_sub.setText(f"✓ 跟上了 {cnt['ok']} · ? 有点懵 {cnt['unsure']} · ! 掉队了 {cnt['lost']}")
+        self.echo_sub.setText(f"✓ {tr('跟上了', 'kept up')} {cnt['ok']} · ? {tr('有点懵', 'a bit lost')} {cnt['unsure']} · ! {tr('掉队了', 'fell behind')} {cnt['lost']}")
         title = (getattr(self.echo, "title", "") or "").strip()
-        self.echo_title.setText(title or "今天的课")
+        self.echo_title.setText(title or tr("今天的课", "Today's lesson"))
         self.echo_stat.setText(self._stat_line(report))
         self._fill_summary(self.echo_sum_card, self.echo_sum_lbl, self.echo_hl_lay,
                            getattr(report, "summary", ""), getattr(report, "highlights", []))
@@ -1864,11 +1875,11 @@ class FloatingWindow(QWidget):
             pass
 
     STATUS = {
-        "listening":   ("正在听课", False),
-        "analyzing":   ("正在分析", True),
-        "summarizing": ("正在整理", True),
-        "loading_asr": ("正在加载语音识别", True),
-        "done":        ("已下课", False),
+        "listening":   (tr("正在听课", "Listening"), False),
+        "analyzing":   (tr("正在分析", "Analyzing"), True),
+        "summarizing": (tr("正在整理", "Summarizing"), True),
+        "loading_asr": (tr("正在加载语音识别", "Loading speech recognition"), True),
+        "done":        (tr("已下课", "Class ended"), False),
     }
 
     def _on_status(self, st):

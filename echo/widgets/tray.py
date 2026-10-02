@@ -23,6 +23,7 @@ from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction, QApplication
 
 from echo import theme
 from echo.theme import Colors
+from echo.i18n import tr
 
 log = logging.getLogger("echo.tray")
 
@@ -129,7 +130,8 @@ class EchoTray(QObject):
             except TypeError:
                 pass
             win.min_btn.clicked.connect(self.hide_window)
-            win.min_btn.setToolTip(f"收进托盘（{self.keys[2] or '点托盘里的猫'} 唤回）")
+            win.min_btn.setToolTip(tr(f"收进托盘（{self.keys[2] or '点托盘里的猫'} 唤回）",
+                                      f"Minimize to tray (recall with {self.keys[2] or 'the tray cat'})"))
 
         # 跟随后端状态
         echo = win.echo
@@ -144,33 +146,34 @@ class EchoTray(QObject):
     # ---------------- 菜单 ----------------
     def _build_menu(self):
         m = theme.style_menu(QMenu())
-        self.act_toggle = m.addAction("显示 / 隐藏 Echo", self.toggle_window)
+        self.act_toggle = m.addAction(tr("显示 / 隐藏 Echo", "Show / hide Echo"), self.toggle_window)
         m.addSeparator()
-        m.addAction("⌂  主页", self.home)
-        self.act_lost = m.addAction(f"我掉队了    {self.keys[1]}".rstrip(), self.lost)
-        m.addAction(f"圈一下问 AI    {self.keys[3]}".rstrip(), self.circle_ask)
-        self.act_end = m.addAction("下课，生成回响", self.end_lesson)
-        m.addAction("错题复习", self.review)
-        m.addAction("开始新的一节课…", self.restart)
+        m.addAction(tr("⌂  主页", "⌂  Home"), self.home)
+        self.act_lost = m.addAction(f"{tr('我掉队了', 'I fell behind')}    {self.keys[1]}".rstrip(), self.lost)
+        m.addAction(f"{tr('圈一下问 AI', 'Circle to ask AI')}    {self.keys[3]}".rstrip(), self.circle_ask)
+        self.act_end = m.addAction(tr("下课，生成回响", "End class & generate review"), self.end_lesson)
+        m.addAction(tr("错题复习", "Review mistakes"), self.review)
+        m.addAction(tr("开始新的一节课…", "Start a new lesson…"), self.restart)
         m.addSeparator()
-        self.act_offline = QAction("离线模式（不调 AI）", m, checkable=True)
+        self.act_offline = QAction(tr("离线模式（不调 AI）", "Offline mode (no AI)"), m, checkable=True)
         self.act_offline.triggered.connect(self.toggle_offline)
         m.addAction(self.act_offline)
         m.addSeparator()
-        self.act_pet = m.addAction("显示桌宠", self.toggle_pet)
-        m.addAction("设置…", self.open_settings)
-        m.addAction("退出 Echo", self.quit)
+        self.act_pet = m.addAction(tr("显示桌宠", "Show desk pet"), self.toggle_pet)
+        m.addAction(tr("设置…", "Settings…"), self.open_settings)
+        m.addAction(tr("退出 Echo", "Quit Echo"), self.quit)
         m.aboutToShow.connect(self._sync_menu)
         self.menu = m
         self.tray.setContextMenu(m)
 
     def _sync_menu(self):
-        self.act_toggle.setText("隐藏 Echo" if self.win.isVisible() else "显示 Echo")
+        self.act_toggle.setText(tr("隐藏 Echo", "Hide Echo") if self.win.isVisible() else tr("显示 Echo", "Show Echo"))
         echo = self.win.echo
         self.act_offline.setChecked(bool(getattr(echo, "offline", False)))
         self.act_offline.setEnabled(hasattr(echo, "set_offline"))
         self.act_pet.setVisible(self.pet is not None)
-        self.act_pet.setText("隐藏桌宠" if self.pet is not None and self.pet.isVisible() else "显示桌宠")
+        self.act_pet.setText(tr("隐藏桌宠", "Hide desk pet") if self.pet is not None and self.pet.isVisible()
+                             else tr("显示桌宠", "Show desk pet"))
 
     # ---------------- 窗口显示 ----------------
     def show_window(self):
@@ -186,9 +189,11 @@ class EchoTray(QObject):
             self._told_hidden = True
             tips = []
             if self.keys[1]:
-                tips.append(f"掉队了按 {self.keys[1]}")
-            tips.append(f"唤回按 {self.keys[2]} 或点托盘里的猫" if self.keys[2] else "唤回请点托盘里的猫")
-            self.tray.showMessage("Echo 还在听课", "已收进托盘。" + "，".join(tips) + "。",
+                tips.append(tr(f"掉队了按 {self.keys[1]}", f"Press {self.keys[1]} if you fall behind"))
+            tips.append(tr(f"唤回按 {self.keys[2]} 或点托盘里的猫", f"Recall with {self.keys[2]} or the tray cat")
+                        if self.keys[2] else tr("唤回请点托盘里的猫", "Recall by clicking the tray cat"))
+            self.tray.showMessage(tr("Echo 还在听课", "Echo is still listening"),
+                                  tr("已收进托盘。", "Moved to tray. ") + "，".join(tips) + "。",
                                   QSystemTrayIcon.Information, 4000)
         self._refresh()
 
@@ -267,8 +272,11 @@ class EchoTray(QObject):
         self.app.quit()
 
     # ---------------- 状态 / 通知 ----------------
-    STATUS_TEXT = {"listening": "正在听课", "analyzing": "正在找你掉队的地方", "summarizing": "正在整理这节课",
-                   "loading_asr": "正在加载语音识别", "done": "已下课"}
+    STATUS_TEXT = {"listening": tr("正在听课", "Listening"),
+                   "analyzing": tr("正在找你掉队的地方", "Finding where you fell behind"),
+                   "summarizing": tr("正在整理这节课", "Summarizing this lesson"),
+                   "loading_asr": tr("正在加载语音识别", "Loading speech recognition"),
+                   "done": tr("已下课", "Class ended")}
 
     def _on_status(self, st):
         self._status = st
@@ -286,8 +294,9 @@ class EchoTray(QObject):
     def _on_breakpoint(self, bp, concepts):
         if not self.win.isVisible():
             self._pending = "break"
-            self.tray.showMessage("找到你掉队的地方了",
-                                  f"{bp.missing or bp.concept}\n点这里看 30 秒补课",
+            self.tray.showMessage(tr("找到你掉队的地方了", "Found where you fell behind"),
+                                  f"{bp.missing or bp.concept}\n" +
+                                  tr("点这里看 30 秒补课", "Click here for a 30-second catch-up"),
                                   QSystemTrayIcon.Information, 8000)
         self._refresh()
 
@@ -295,8 +304,9 @@ class EchoTray(QObject):
         if not self.win.isVisible():
             self._pending = "echo"
             review = sum(1 for s in report.skills if s.status not in ("ok", "fixed"))
-            self.tray.showMessage("这节课的回响好了",
-                                  f"{len(report.skills)} 个知识点，{review} 个待回看。点这里查看",
+            self.tray.showMessage(tr("这节课的回响好了", "This lesson's review is ready"),
+                                  f"{len(report.skills)} " + tr("个知识点，", " knowledge points, ") +
+                                  f"{review} " + tr("个待回看。点这里查看", " to review. Click here to see"),
                                   QSystemTrayIcon.Information, 8000)
         self._refresh()
 
@@ -305,9 +315,9 @@ class EchoTray(QObject):
         self.tray.setIcon(cat_icon("alert" if self._pending else ("busy" if busy else None)))
         parts = ["Echo", self.STATUS_TEXT.get(self._status, "")]
         if self._topic and self._status in ("listening", "analyzing"):
-            parts.append(f"老师在讲：{self._topic}")
+            parts.append(tr("老师在讲：", "Now teaching: ") + self._topic)
         if getattr(self.win.echo, "offline", False):
-            parts.append("离线")
+            parts.append(tr("离线", "offline"))
         self.tray.setToolTip(" · ".join(p for p in parts if p)[:120])
 
     # ---------------- 全局快捷键 ----------------

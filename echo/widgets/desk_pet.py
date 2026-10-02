@@ -24,6 +24,7 @@ from PyQt5.QtWidgets import QApplication, QMenu, QWidget
 from echo.theme import Colors, font, style_menu
 from echo.components.study import CatAvatar
 from echo.widgets.dock_chat import DockChat
+from echo.i18n import tr
 
 ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                       "assets", "emojis")
@@ -32,8 +33,13 @@ FACES = {
     "ok": "happy.png", "fixed": "happy.png", "warn": "confused.png", "lost": "cry.png",
     "love": "happy.png", "done": "happy.png",
 }
-IDLE_TIPS = ["听不懂就圈一下，我帮你看 👀", "跟得上吗？跟上了就点我一下", "掉队了别硬撑，右键我",
-             "我一直在听，放心听课", "双击我，圈出看不懂的地方"]
+IDLE_TIPS = [
+    tr("听不懂就圈一下，我帮你看 👀", "Stuck? Circle it and I'll take a look 👀"),
+    tr("跟得上吗？跟上了就点我一下", "Keeping up? Give me a click if you are"),
+    tr("掉队了别硬撑，右键我", "Falling behind? Right-click me"),
+    tr("我一直在听，放心听课", "I'm listening — just focus on the lesson"),
+    tr("双击我，圈出看不懂的地方", "Double-click me to circle anything you don't get"),
+]
 
 
 def _load_face(path) -> QPixmap:
@@ -97,7 +103,8 @@ class DeskPet(QWidget):
         self.win, self.tray = win, tray
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip("Echo · 单击打开面板 · 双击圈一下问 AI · 拖到屏幕边缘收起")
+        self.setToolTip(tr("Echo · 单击打开面板 · 双击圈一下问 AI · 拖到屏幕边缘收起",
+                           "Echo · click to open panel · double-click to circle-ask AI · drag to screen edge to dock"))
 
         self.mood = "idle"
         self._mood_until = 0.0
@@ -162,10 +169,10 @@ class DeskPet(QWidget):
             e.concept.connect(self._on_concept)
             e.breakpoint.connect(self._on_breakpoint)
             e.echo.connect(self._on_echo)
-            e.error.connect(lambda m: self.say("出了点小问题，我还在", 3000, "warn"))
+            e.error.connect(lambda m: self.say(tr("出了点小问题，我还在", "Small hiccup, but I'm still here"), 3000, "warn"))
             if hasattr(e, "level"):
                 e.level.connect(self._on_level)
-        self.say("我是 Echo，陪你听课～", 4000, "ok")
+        self.say(tr("我是 Echo，陪你听课～", "I'm Echo, your study buddy."), 4000, "ok")
 
     # ================= 对外 =================
     def say(self, text, ms=4000, mood=None, hold_ms=None):
@@ -261,11 +268,11 @@ class DeskPet(QWidget):
                 "done": "done"}.get(st, "listening")
         self.set_mood(base)
         if st == "analyzing":
-            self.say("我回看一下刚才的课…", 15000)
+            self.say(tr("我回看一下刚才的课…", "Let me look back at that part…"), 15000)
         elif st == "summarizing":
-            self.say("在整理这节课的回响…", 15000)
+            self.say(tr("在整理这节课的回响…", "Summarizing this lesson…"), 15000)
         elif st == "loading_asr":
-            self.say("正在加载耳朵（语音识别）…", 8000)
+            self.say(tr("正在加载耳朵（语音识别）…", "Loading speech recognition…"), 8000)
 
     def _on_level(self, level):
         self._level = max(0.0, min(1.0, float(level)))
@@ -278,21 +285,22 @@ class DeskPet(QWidget):
         if topic and topic != self.topic:
             self.topic = topic
             if self.status == "listening":
-                self.say(f"老师在讲：{topic}", 5000)
+                self.say(tr("老师在讲：", "Now teaching: ") + topic, 5000)
 
     def _on_breakpoint(self, bp, concepts):
         hidden = self.win is not None and not self.win.isVisible()
         self.badge = hidden
-        self.say(("找到啦！点我看补课" if hidden else "找到你掉队的地方了"), 9000, "alert", 4000)
+        self.say((tr("找到啦！点我看补课", "Found it! Click to see the fix") if hidden
+                  else tr("找到你掉队的地方了", "Found where you fell behind")), 9000, "alert", 4000)
 
     def _on_echo(self, report):
         self.badge = self.win is not None and not self.win.isVisible()
-        self.say("这节课的回响好了，点我看", 9000, "done", 4000)
+        self.say(tr("这节课的回响好了，点我看", "This lesson's review is ready — click to see"), 9000, "done", 4000)
 
     def _idle_tip(self):
         if time.time() - self._last_interact < 60 or self.status != "listening" or time.time() < self._bubble_until:
             return
-        tips = IDLE_TIPS + ([f"老师在讲：{self.topic}"] if self.topic else [])
+        tips = IDLE_TIPS + ([tr("老师在讲：", "Now teaching: ") + self.topic] if self.topic else [])
         self.say(random.choice(tips), 4500)
 
     # ================= 动作 =================
@@ -318,27 +326,28 @@ class DeskPet(QWidget):
             handler()
         elif self.win is not None:
             self.win.echo.feedback(kind)
-        self.say("收到，继续加油！" if kind == "ok" else "记下了，有点懵就圈出来问我", 2500, kind)
+        self.say(tr("收到，继续加油！", "Got it, keep going!") if kind == "ok"
+                 else tr("记下了，有点懵就圈出来问我", "Noted — circle it and ask me if you're confused"), 2500, kind)
 
     def _menu(self, pos):
         m = style_menu(QMenu(self))
         key = getattr(self.tray, "keys", {}).get(3, "") if self.tray is not None else ""
-        m.addAction(f"✏️  圈一下问 AI    {key}".rstrip(), self.circle_ask.emit)
+        m.addAction(f"{tr('✏️  圈一下问 AI', '✏️  Circle to ask AI')}    {key}".rstrip(), self.circle_ask.emit)
         m.addSeparator()
-        m.addAction("✓  跟上了", lambda: self._feedback("ok"))
-        m.addAction("?  有点懵", lambda: self._feedback("warn"))
-        m.addAction("!  我掉队了", lambda: self._feedback("lost"))
+        m.addAction(tr("✓  跟上了", "✓  Keeping up"), lambda: self._feedback("ok"))
+        m.addAction(tr("?  有点懵", "?  A bit lost"), lambda: self._feedback("warn"))
+        m.addAction(tr("!  我掉队了", "!  I fell behind"), lambda: self._feedback("lost"))
         m.addSeparator()
         visible = self.win is not None and self.win.isVisible()
-        m.addAction("收起 Echo 面板" if visible else "打开 Echo 面板", self._toggle_panel)
+        m.addAction(tr("收起 Echo 面板", "Hide Echo panel") if visible else tr("打开 Echo 面板", "Open Echo panel"), self._toggle_panel)
         if self.tray is not None:
-            m.addAction("设置…", self.tray.open_settings)
-        skins = m.addMenu("桌宠皮肤")
-        for skin, label in (("cartoon", "原版卡通猫"), ("line", "线稿猫")):
+            m.addAction(tr("设置…", "Settings…"), self.tray.open_settings)
+        skins = m.addMenu(tr("桌宠皮肤", "Pet skin"))
+        for skin, label in (("cartoon", tr("原版卡通猫", "Cartoon cat")), ("line", tr("线稿猫", "Line-art cat"))):
             action = skins.addAction(label, lambda checked=False, choice=skin: self.set_skin(choice))
             action.setCheckable(True)
             action.setChecked(self.skin == skin)
-        m.addAction("先藏起来（托盘里能叫回）", self.hide)
+        m.addAction(tr("先藏起来（托盘里能叫回）", "Hide for now (bring back from tray)"), self.hide)
         m.exec_(pos)
 
     # ================= 鼠标 =================
@@ -376,7 +385,9 @@ class DeskPet(QWidget):
                 self._pet_dist = 0
                 self._hearts.append([e.x(), e.y() - 10, time.time()])
                 if self.mood != "love":
-                    self.say(random.choice(["呼噜呼噜～", "喵～ 再摸摸", "好舒服，继续听课吧"]), 2000, "love", 2000)
+                    self.say(random.choice([tr("呼噜呼噜～", "Purr…"), tr("喵～ 再摸摸", "Meow~ more pets"),
+                                            tr("好舒服，继续听课吧", "That feels nice — back to the lesson")]),
+                             2000, "love", 2000)
 
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.LeftButton and self._press:
