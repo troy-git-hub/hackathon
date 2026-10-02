@@ -31,7 +31,9 @@ Name: "chinesesimp"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务："; Flags: unchecked
 
 [Files]
-Source: "..\dist\Echo\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+; 464MB 的模型是二进制，压缩既慢又压不动，单独放进来且不压缩
+Source: "..\dist\Echo\_internal\models\faster-whisper-small\model.bin"; DestDir: "{app}\_internal\models\faster-whisper-small"; Flags: ignoreversion nocompression dontverifychecksum
+Source: "..\dist\Echo\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion; Excludes: "_internal\models\faster-whisper-small\model.bin"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
