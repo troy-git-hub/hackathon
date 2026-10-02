@@ -9,11 +9,16 @@ Echo - 用户资料
 """
 import json
 import os
+import shutil
 import time
 
 from echo.backend import paths
 
 FIELDS = ("name", "nickname", "age", "hobbies", "username")
+# 头像：图片本体单独放配置目录，profile.json 里只记文件名。
+# 记绝对路径的话，换台机器（用户名不同）或换个安装位置就指向不存在的文件了。
+AVATAR_STEM = "avatar"
+AVATAR_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
 
 
 def _path() -> str:
@@ -40,8 +45,16 @@ def save(data: dict):
 
     写失败直接抛 OSError —— 资料必须存下来，调用方要提示学生。
     """
+    _update({k: data[k] for k in FIELDS if k in data})
+
+
+def _update(patch: dict):
+    """把 patch 并进 profile.json 并落盘（临时文件 + 原子替换）。
+
+    写失败直接抛 OSError —— 资料必须存下来，调用方要提示学生。
+    """
     cur = load()
-    cur.update({k: data[k] for k in FIELDS if k in data})
+    cur.update(patch)
     cur.setdefault("created", time.time())
     cur["updated"] = time.time()
     path = _path()
@@ -59,3 +72,53 @@ def display_name(data: dict = None) -> str:
         if v:
             return v
     return ""
+
+
+# ================= 头像 =================
+def _avatar_files() -> list:
+    """配置目录里现存的头像文件。可能有历史遗留的其它扩展名，一起收进来。"""
+    out = []
+    for ext in AVATAR_EXTS:
+        p = os.path.join(paths.config_dir(), AVATAR_STEM + ext)
+        if os.path.isfile(p):
+            out.append(p)
+    return out
+
+
+def avatar_path() -> str:
+    """当前头像的路径；没设过、或文件已经不在了 → 返回 ""（调用方用默认喵喵）。"""
+    name = str(load().get("avatar") or "").strip()
+    if not name or os.path.basename(name) != name:     # 防御：不接受带路径的名字
+        return ""
+    p = os.path.join(paths.config_dir(), name)
+    return p if os.path.isfile(p) else ""
+
+
+def set_avatar(src: str) -> str:
+    """把选中的图片拷进配置目录当头像，返回存下来的路径；src 传空 = 清除，回到默认喵喵。
+
+    只拷贝、不解码也不缩放：backend 不能引 PyQt5（会把 Qt 拖进后端导入链，踩
+    main.py 里记的 ctranslate2 加载顺序坑）。缩放交给 UI 层用 QPixmap 做。
+    """
+    clear_avatar()
+    src = (src or "").strip()
+    if not src:
+        return ""
+    ext = os.path.splitext(src)[1].lower()
+    if ext not in AVATAR_EXTS:
+        ext = ".png"
+    dst = os.path.join(paths.config_dir(), AVATAR_STEM + ext)
+    shutil.copyfile(src, dst)
+    _update({"avatar": os.path.basename(dst)})
+    return dst
+
+
+def clear_avatar():
+    """删掉头像文件，profile 里也不再记（回到默认的喵喵）。"""
+    for p in _avatar_files():
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    if load().get("avatar"):
+        _update({"avatar": ""})
