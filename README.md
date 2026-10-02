@@ -89,12 +89,20 @@ EchoBridge (echo/backend/qt_bridge.py) → Qt 信号（带 session 隔离）→ 
 
 ## 打包安装包
 
+安装包会**内置 Whisper `small` 模型**（约 480MB），装好即可离线转写，不联网下载模型。
+
 ```bash
 pip install pyinstaller
-build.bat                        # 产出 dist/Echo/
-# 用 Inno Setup 打开 installer/setup.iss 编译 → Echo-Setup.exe
+# 0) 准备模型（models/ 在 .gitignore 里，不随 git 分发）
+#    先 python main.py 跑一次把模型下到 HF 缓存，再复制成：
+#    models/faster-whisper-small/{config.json, model.bin, tokenizer.json, vocabulary.txt}
+build.bat                        # 产出 dist/Echo/（内含模型）
+# 用 Inno Setup 打开 installer/setup.iss 编译 → dist/Echo-Setup-1.1.exe
 ```
+
+> 克隆仓库后没放模型就 build.bat 会失败（找不到 `models/faster-whisper-small`），先按第 0 步准备。
+> 开发态不用管 models/：直接 `python main.py` 会自动下载，打包才需要把模型塞进去。
 
 ---
 
-*Echo 1.0 — 49 小时产品冲刺产物。*
+*Echo 1.1 — 49 小时产品冲刺产物。*
