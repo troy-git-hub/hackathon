@@ -131,6 +131,7 @@ class EchoEngine:
         """开一个新 session：清空课堂数据，之前发起的后台任务全部作废。"""
         with self._lock:
             self.session += 1
+            self.active = False            # 尚未开始上课（拍题/反馈这时不记入课程）
             self._concept_lock = threading.Lock()   # 每节课一把，旧任务卡住也不会挡新课
             self.start_ts = time.time()
             self.lines: List[Line] = []
@@ -148,6 +149,7 @@ class EchoEngine:
         self._ticker = threading.Thread(target=self._tick_loop, args=(sid, self._stop),
                                         daemon=True, name=f"echo-ticker-{sid}")
         self._ticker.start()
+        self.active = True               # 开始上课：此后拍题/反馈才记入课程
         self._emit(sid, "status", "listening")
 
     def stop(self):
@@ -506,6 +508,7 @@ class EchoEngine:
     def end_lesson(self):
         """课程结束：异步生成回响页数据。"""
         self.stop()
+        self.active = False              # 下课了：拍题/反馈不再记入这节课
         sid = self.session
         self._emit(sid, "status", "summarizing")
         self._pool.submit(self._safe, sid, self._make_echo, sid)

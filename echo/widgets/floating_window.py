@@ -165,7 +165,7 @@ class FloatingWindow(QWidget):
         self.echo.error.connect(self._on_error)
         self.echo.mode.connect(self._on_mode)
         self.echo.level.connect(self._on_level)
-        self.echo.start()
+        # 注意：不在这里 echo.start()。启动停在主页，等用户点「开始今天的学习」才真正开课+抓音频。
 
         # 现场兜底快捷键（Echo 窗口在前台时有效）
         QShortcut(QKeySequence("Ctrl+Shift+O"), self, self._toggle_offline, context=Qt.ApplicationShortcut)

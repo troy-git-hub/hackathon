@@ -370,6 +370,7 @@ class AskPanel(QWidget):
         engine = getattr(bridge, "engine", None)
         self.chat = VisionChat(_png_bytes(crop), lesson_context(engine))
         self.answer = ""
+        self._last_q = ""
         self.transcript_html = ""
         self._drag = None
         self._delta.connect(self._on_delta)
@@ -509,6 +510,7 @@ class AskPanel(QWidget):
         q = (q or "").strip()
         if not q or not self.btn_send.isEnabled():
             return
+        self._last_q = q
         self.input.clear()
         self.chips.hide()
         self.view.show()
@@ -546,7 +548,7 @@ class AskPanel(QWidget):
         self._set_busy(False)
         self.input.setPlaceholderText("还有哪里不懂？接着问")
         self.btn_copy.show()
-        if self.bridge is not None and self.btn_mark.isEnabled():
+        if self._course_active() and self.btn_mark.isEnabled():
             self.btn_mark.show()
         self.input.setFocus()
 
@@ -556,13 +558,31 @@ class AskPanel(QWidget):
         self.view.setHtml(self.transcript_html)
         self._set_busy(False)
 
+    def _course_active(self) -> bool:
+        """这节课是否真的开始了；没开始（还停在主页）时拍题不计入课程。"""
+        engine = getattr(self.bridge, "engine", None)
+        return bool(getattr(engine, "active", False))
+
     def _mark_warn(self):
+        if not self._course_active():
+            return
         try:
             self.bridge.feedback("warn")
+            # 拍题也计入课程：把这次「问题 + 回答」存进错题本，下课/主页里能回看
+            from echo.backend import store
+            engine = getattr(self.bridge, "engine", None)
+            cur = engine.current_concept() if engine else None
+            store.add([{
+                "topic": (cur.topic if cur else None) or "课堂拍题",
+                "missing": self._last_q or "课堂上的疑问",
+                "micro_lesson": self.answer,
+                "reason": "", "known": "", "step": "", "now": "",
+                "status": "review", "reviewed": False,
+            }])
             self.btn_mark.setText("已记下 ✓")
             self.btn_mark.setEnabled(False)
         except Exception as e:
-            log.warning("记录有点懵失败: %s", e)
+            log.warning("记录拍题失败: %s", e)
 
     # ---- 窗口 ----
     def keyPressEvent(self, e):
