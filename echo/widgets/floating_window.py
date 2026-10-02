@@ -29,6 +29,7 @@ user32 = ctypes.windll.user32
 
 from echo.theme import Colors, Radius, font, Spacing
 from echo.components.loading import PulseDots
+from echo.components.wave_orb import WaveOrb
 from echo.components.study import (CatAvatar, BreakPath, LessonStep, SkillRow,
                                    ReviewChain, echo_status, echo_mark)
 from echo.mock_data import Concept
@@ -275,7 +276,11 @@ class FloatingWindow(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
 
+        # 顶部行：左侧声纹球 + 右侧时间码
         head = QHBoxLayout()
+        self.wave_orb = WaveOrb(size=48)
+        head.addWidget(self.wave_orb)
+        head.addSpacing(Spacing.SM)
         head.addWidget(_label("老师正在讲", CAPTION))
         head.addStretch()
         self.tc_lbl = _label("00:00", f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;"
@@ -346,6 +351,9 @@ class FloatingWindow(QWidget):
         ex = _btn("⌃", "IconBtn", lambda: self._show_page(LISTEN), "展开")
         ex.setFixedSize(26, 26)
         lay.addWidget(ex)
+        # 自适应声纹球：直径跟随 mini 窗口高度，显示在最右端
+        self.mini_wave_orb = WaveOrb(size=None)
+        lay.addWidget(self.mini_wave_orb)
         return page
 
     # ----- 2 断点页（主画面）-----
@@ -783,6 +791,13 @@ class FloatingWindow(QWidget):
             self.status_dots.start()
         else:
             self.status_dots.stop()
+        # 声纹球：仅 listening 时启动；loading_asr 时也启动（表示在准备听）
+        if st == "listening":
+            self.wave_orb.start()
+            self.mini_wave_orb.start()
+        elif st in ("done", "summarizing"):
+            self.wave_orb.stop()
+            self.mini_wave_orb.stop()
         if not self.echo.engine.current_concept():
             if st == "loading_asr":
                 self.summary_lbl.setText("首次加载约 10 秒，之后会自动开始听")

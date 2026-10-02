@@ -8,6 +8,25 @@ import os
 # 确保项目根目录在 path 中
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# !!! 必须在 import PyQt5 之前预加载 Whisper 模型 !!!
+# PyQt5 与 ctranslate2 的 native 库加载顺序冲突：先 import PyQt5 再加载 WhisperModel 会访问违例
+# 必须在主线程、QApplication 创建之前、且未 import 任何 PyQt5 模块时加载
+def _preload_whisper():
+    try:
+        os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+        from echo.backend import config
+        from faster_whisper import WhisperModel
+        WhisperModel(config.WHISPER_MODEL, device=config.WHISPER_DEVICE,
+                      compute_type=config.WHISPER_COMPUTE,
+                      cpu_threads=min(8, os.cpu_count() or 4),
+                      local_files_only=True)
+        print(f"[Echo] Whisper 预加载完成: {config.WHISPER_MODEL}")
+    except Exception as e:
+        print(f"[Echo] Whisper 预加载失败（将在后台重试）: {e}")
+
+# 在 import PyQt5 之前执行预加载
+_preload_whisper()
+
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication
 from echo.theme import apply_theme
@@ -22,6 +41,7 @@ def main():
     if hasattr(QApplication, "setHighDpiScaleFactorRoundingPolicy"):
         QApplication.setHighDpiScaleFactorRoundingPolicy(
             Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+
     app = QApplication(sys.argv)
     apply_theme(app)
 

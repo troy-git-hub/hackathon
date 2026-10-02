@@ -213,8 +213,20 @@ class _LiveSource:
 
     def start(self):
         self._stop.clear()
+        # 在子线程中串行加载 ASR + 启动 capture，避免两个 native 库并发初始化冲突，同时 UI 不阻塞
+        threading.Thread(target=self._startup, daemon=True, name="echo-source").start()
+
+    def _startup(self):
+        """串行：先加载 Whisper 模型，再启动音频捕获，避免 native 库并发初始化访问违例。"""
+        try:
+            self.asr.load(lambda st: self.engine.emit_status(self.session, st))
+        except Exception as e:
+            log.exception("Whisper 加载失败")
+            self.engine.emit_error(self.session, f"语音识别加载失败：{e}")
+            return
+        self.engine.emit_status(self.session, "listening")
         self.asr.start()
-        threading.Thread(target=self._guard, daemon=True, name="echo-capture").start()
+        self._guard()
 
     def stop(self):
         self._stop.set()
