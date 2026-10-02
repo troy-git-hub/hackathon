@@ -7,8 +7,8 @@ Echo - 学习工具风格组件
 """
 import math
 
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
-from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QApplication
+from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer, pyqtSignal
 from PyQt5.QtGui import QPainter, QPainterPath, QColor, QPen, QBrush, QFont
 
 from echo.theme import Colors, Radius, Spacing, font
@@ -18,10 +18,17 @@ from echo.theme import Colors, Radius, Spacing, font
 class CatAvatar(QWidget):
     """线稿猫头。emotion: idle / ok / warn / lost / thinking / fixed"""
 
+    clicked = pyqtSignal()
+
     def __init__(self, size=30, parent=None):
         super().__init__(parent)
         self.setFixedSize(size, size)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setAccessibleName("打开 Echo 界面")
+        self._press_pos = None
+        self._dragged = False
         self._emotion = "idle"
         self._blink = False
         self._blink_timer = QTimer(self)
@@ -30,6 +37,44 @@ class CatAvatar(QWidget):
         self._revert = QTimer(self)
         self._revert.setSingleShot(True)
         self._revert.timeout.connect(lambda: self.set_emotion("idle"))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._press_pos = event.globalPos()
+            self._window_pos = self.window().pos()
+            self._dragged = False
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._press_pos is not None and event.buttons() & Qt.LeftButton:
+            delta = event.globalPos() - self._press_pos
+            if delta.manhattanLength() >= QApplication.startDragDistance():
+                self._dragged = True
+            if self._dragged:
+                self.window().move(self._window_pos + delta)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self._press_pos is not None:
+            activate = not self._dragged and self.rect().contains(event.pos())
+            self._press_pos = None
+            event.accept()
+            if activate:
+                self.clicked.emit()
+        else:
+            super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            if not event.isAutoRepeat():
+                self.clicked.emit()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
     def set_emotion(self, emotion, hold_ms=0):
         """hold_ms > 0 时，过一会儿自动回到 idle。"""
@@ -146,7 +191,7 @@ class CatAvatar(QWidget):
 
 # ======================= 断点页三节点 =======================
 ROLE_STYLE = {
-    "known": ("刚才会的", "OK_FG"),
+    "known": ("前一个知识点", "OK_FG"),
     "break": ("掉队的那一步", "ACCENT"),
     "now":   ("老师讲到这里", "NOW_FG"),
 }
@@ -164,8 +209,8 @@ class _PathNode(QWidget):
         is_bp = role == "break"
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(TEXT_LEFT, 6 if not is_bp else 8, 8, 8 if not is_bp else 10)
-        lay.setSpacing(2)
+        lay.setContentsMargins(TEXT_LEFT + 8, 12, 14, 14)
+        lay.setSpacing(5)
 
         cap = QLabel(f"{label}  ·  {concept.timecode}")
         cap.setStyleSheet(f"color: {self.color.name() if is_bp else Colors.TEXT_SECONDARY};"
@@ -191,7 +236,7 @@ class _PathNode(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         h = self.height()
-        cy = 16 if self.role != "break" else 18
+        cy = 21
 
         if self.role == "break":   # 断点行：唯一的强调底色
             p.setPen(QPen(QColor(Colors.ACCENT_BORDER), 1))
@@ -290,8 +335,8 @@ class LessonStep(QWidget):
         main = kind == "step"
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(TEXT_LEFT, 0, 0, 14 if not self.last else 0)
-        lay.setSpacing(4)
+        lay.setContentsMargins(TEXT_LEFT, 0, 8, 24 if not self.last else 0)
+        lay.setSpacing(10)
         cap = QLabel(label)
         cap.setStyleSheet(f"color: {self.color.name() if kind != 'now' else Colors.TEXT_SECONDARY};"
                           f"font-size: 12px; font-weight: 700; background: transparent;")
@@ -303,12 +348,12 @@ class LessonStep(QWidget):
         self.body.setTextInteractionFlags(Qt.TextSelectableByMouse)
         if main:
             self.body.setStyleSheet(
-                f"color: {Colors.TEXT_PRIMARY}; font-size: 14px; background: {Colors.ACCENT_SOFT};"
+                f"color: {Colors.TEXT_PRIMARY}; font-size: 15px; background: {Colors.ACCENT_SOFT};"
                 f"border: 1px solid {Colors.ACCENT_BORDER}; border-radius: {Radius.MD}px;"
-                f"padding: 10px 12px;")
+                f"padding: 16px;")
         else:
             self.body.setStyleSheet(f"color: {Colors.TEXT_PRIMARY if kind == 'now' else Colors.TEXT_SECONDARY};"
-                                    f"font-size: 13px; background: transparent;")
+                                    f"font-size: 14px; background: transparent;")
         lay.addWidget(self.body)
 
     def setText(self, html_text):
@@ -357,7 +402,7 @@ class EchoRow(QWidget):
         self.status, self.first, self.last = status, first, last
         text, fg, bg = ECHO_STATUS[status]
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(TEXT_LEFT, 6, 0, 6)
+        lay.setContentsMargins(TEXT_LEFT, 13, 0, 13)
         lay.setSpacing(Spacing.SM)
         n = QLabel(name)
         n.setWordWrap(True)

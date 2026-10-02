@@ -8,9 +8,9 @@ from PyQt5.QtGui import QColor, QFont, QPalette
 from PyQt5.QtCore import Qt
 
 
-# ---------- 调色板：跟随 Windows 深浅色（ECHO_THEME=dark/light 可强制） ----------
+# ---------- 默认暖白；ECHO_THEME=dark/light/auto 可选择深色或跟随系统 ----------
 def _system_dark() -> bool:
-    mode = os.getenv("ECHO_THEME", "auto").lower()
+    mode = os.getenv("ECHO_THEME", "light").lower()
     if mode in ("dark", "light"):
         return mode == "dark"
     try:
@@ -65,13 +65,13 @@ _DARK = dict(
 
 # 学习工具风格：中性灰底 + 唯一强调色（琥珀）只给「掉队/断点」，绿色只做弱提示
 _STUDY_LIGHT = dict(
-    WINDOW_BG="#FBFBFA", WINDOW_BORDER="#E3E3E0", SHADOW_ALPHA=26,
-    SURFACE="#FFFFFF", SURFACE_HOVER="#F4F4F2", SURFACE_PRESSED="#ECECEA",
-    BORDER="#E6E6E3", BORDER_STRONG="#D4D4D0", CODE_BG="#F2F2EF",
-    TEXT_PRIMARY="#1D1E20", TEXT_SECONDARY="#6B6D72", TEXT_DISABLED="#A8AAAE",
-    ACCENT="#D9861A", ACCENT_HOVER="#C77812", ACCENT_PRESSED="#B06A0F",
-    ACCENT_SOFT="#FCF1E0", ACCENT_BORDER="#EFCB92", ON_ACCENT="#FFFFFF",
-    OK_FG="#3E8E50", OK_SOFT="#EAF5EC", NOW_FG="#1D1E20",
+    WINDOW_BG="#FAF8F3", WINDOW_BORDER="#E4E0D8", SHADOW_ALPHA=30,
+    SURFACE="#FFFFFF", SURFACE_HOVER="#F0EDE6", SURFACE_PRESSED="#E7E3DA",
+    BORDER="#EAE6DE", BORDER_STRONG="#CFC9BC", CODE_BG="#F2EEE5",
+    TEXT_PRIMARY="#262D29", TEXT_SECONDARY="#74786F", TEXT_DISABLED="#A4A59C",
+    ACCENT="#A95D14", ACCENT_HOVER="#914D0D", ACCENT_PRESSED="#7A400C",
+    ACCENT_SOFT="#FBEDD7", ACCENT_BORDER="#E9C99B", ON_ACCENT="#FFFFFF",
+    OK_FG="#46725B", OK_SOFT="#EAF0E9", NOW_FG="#262D29",
 )
 _STUDY_DARK = dict(
     WINDOW_BG="#1C1D21", WINDOW_BORDER="#2E3036", SHADOW_ALPHA=70,
@@ -96,8 +96,8 @@ Colors.INFO = Colors.PRIMARY
 # ---------- 圆角与间距 ----------
 class Radius:
     SM = 4
-    MD = 8
-    LG = 12
+    MD = 12
+    LG = 20
     XL = 16
     PILL = 999
 
@@ -129,7 +129,7 @@ GLOBAL_QSS = f"""
 }}
 
 QWidget#EchoRoot {{
-    background-color: {Colors.MICA_LIGHT};
+    background-color: transparent;
     border-radius: {Radius.LG}px;
 }}
 
@@ -317,7 +317,7 @@ QPushButton#Quiet {{
     border-radius: {Radius.MD}px;
     color: {Colors.TEXT_SECONDARY};
     font-size: 13px;
-    padding: 6px 10px;
+    padding: 10px 12px;
 }}
 QPushButton#Quiet:hover {{ background-color: {Colors.SURFACE_HOVER}; color: {Colors.TEXT_PRIMARY}; }}
 QPushButton#Quiet:disabled {{ color: {Colors.OK_FG}; border-color: {Colors.BORDER}; }}
@@ -338,6 +338,12 @@ QPushButton#IconBtn {{
     padding: 0px;
 }}
 QPushButton#IconBtn:hover {{ background: {Colors.HOVER_OVERLAY}; color: {Colors.TEXT_PRIMARY}; }}
+
+QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; }}
+QScrollBar:vertical {{ background: transparent; width: 7px; margin: 2px 0; }}
+QScrollBar::handle:vertical {{ background: {Colors.BORDER_STRONG}; border-radius: 3px; min-height: 30px; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
 """
 
 

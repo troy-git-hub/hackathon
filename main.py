@@ -15,7 +15,7 @@ from echo.widgets.floating_window import FloatingWindow
 
 
 def main():
-    # 高分屏（如 2880x1800 @200%）按系统缩放渲染，否则整个界面只有一半大
+    
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     if hasattr(QApplication, "setHighDpiScaleFactorRoundingPolicy"):
