@@ -15,7 +15,7 @@ from ctypes import wintypes
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame, QSizePolicy, QStackedWidget,
-                             QProgressBar, QApplication, QShortcut)
+                             QProgressBar, QApplication, QShortcut, QScrollArea)
 from PyQt5.QtCore import Qt, QTimer, QRectF, QPoint
 from PyQt5.QtGui import QFont, QCursor, QPainter, QPainterPath, QColor, QBrush, QPen, QKeySequence, QPixmap
 
@@ -70,6 +70,12 @@ _FORMULA = re.compile(r"((?:[A-Za-z]\([^()（）]{1,24}\)|[A-Za-z]\b)"
                       r"[A-Za-z0-9)])")
 
 
+def _nobreak(esc: str) -> str:
+    """公式内部不许折行：Qt 富文本不认 span 上的 white-space:nowrap，
+    改为在每个字符之间插入 U+2060（word joiner），换行器会尊重它。HTML 实体整体保留。"""
+    return "&#8288;".join(re.findall(r"&#?\w+;|.", esc))
+
+
 def rich(text: str) -> str:
     """纯文本 → 富文本：公式等宽高亮，行距放宽，步骤序号弱化。"""
     paras = []
@@ -80,7 +86,7 @@ def rich(text: str) -> str:
         esc = html.escape(ln)
         esc = _FORMULA.sub(
             lambda m: (f'<span style="font-family:Consolas,\'Cascadia Mono\',monospace;'
-                       f'white-space:nowrap; background-color:{Colors.CODE_BG};">&nbsp;{m.group(1)}&nbsp;</span>')
+                       f'white-space:nowrap; background-color:{Colors.CODE_BG};">&nbsp;{_nobreak(m.group(1))}&nbsp;</span>')
             if ("(" in m.group(1) or "=" in m.group(1)) else m.group(1), esc)
         esc = re.sub(r"^(第[一二三四五六七八九十\d]+步[：:]|\d+[\.、．])",
                      rf'<span style="color:{Colors.TEXT_SECONDARY}">\1</span>', esc)
@@ -140,7 +146,28 @@ class FloatingWindow(QWidget):
         self.stack.addWidget(self._build_break())    # 2
         self.stack.addWidget(self._build_lesson())   # 3
         self.stack.addWidget(self._build_echo())     # 4
-        root.addWidget(self.stack)
+        self.body_scroll = QScrollArea()
+        self.body_scroll.setWidgetResizable(True)
+        self.body_scroll.setFrameShape(QFrame.NoFrame)
+        self.body_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # 内容放得下时不要滚动条：滚动条会吃掉宽度 → 文字多折行 → 内容比算好的高度更高 → 底部按钮被挤出可视区
+        self.body_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.body_scroll.verticalScrollBar().setStyleSheet(
+            f"QScrollBar:vertical {{ background: transparent; width: 6px; margin: 0; }}"
+            f"QScrollBar::handle:vertical {{ background: {Colors.BORDER_STRONG}; border-radius: 3px; min-height: 24px; }}"
+            "QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page "
+            "{ background: transparent; height: 0; }")
+        self.body_scroll.setStyleSheet("QScrollArea {background: transparent; border: none;}")
+        self.body_scroll.setWidget(self.stack)
+        # QScrollArea 的 viewport 默认用系统调色板填一层浅灰底（#F0F0F0），
+        # 只给 QScrollArea 设透明盖不住它 —— 深色主题下会变成浅底白字。必须让 viewport 和内容都不填底。
+        self.body_scroll.viewport().setAutoFillBackground(False)
+        # 注意必须带选择器：不带选择器的样式会层叠到所有子控件，把按钮的琥珀底也变透明
+        self.body_scroll.viewport().setObjectName("BodyViewport")
+        self.body_scroll.viewport().setStyleSheet("QWidget#BodyViewport { background: transparent; }")
+        self.stack.setAutoFillBackground(False)
+        self.stack.setStyleSheet("QStackedWidget {background: transparent;}")
+        root.addWidget(self.body_scroll)
 
     def _build_header(self) -> QWidget:
         bar = QWidget()
@@ -149,25 +176,22 @@ class FloatingWindow(QWidget):
         lay.setSpacing(Spacing.SM)
 
         self.cat = CatAvatar(30)
-        self.cat.setToolTip("Echo")
+        self.cat.setToolTip("点击打开听课界面")
+        self.cat.clicked.connect(self._open_from_avatar)
         lay.addWidget(self.cat)
 
         name = _label("Echo", f"color: {Colors.TEXT_PRIMARY}; font-size: 15px; font-weight: 700;")
         lay.addWidget(name)
 
         self.status_dot = _label("●", f"color: {Colors.OK_FG}; font-size: 8px;")
-        lay.addWidget(self.status_dot)
         self.status_dots = PulseDots(Colors.ACCENT)
         self.status_dots.hide()
-        lay.addWidget(self.status_dots)
         self.status_lbl = _label("正在听课", CAPTION)
-        lay.addWidget(self.status_lbl)
         # 小字标记当前模式：示例课 / 离线
         self.mode_lbl = _label("", f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"
                                    f"border: 1px solid {Colors.BORDER_STRONG}; border-radius: 8px;"
                                    "padding: 0 6px;")
         self.mode_lbl.hide()
-        lay.addWidget(self.mode_lbl)
         lay.addStretch()
 
         self.back_btn = _btn("← 回到课堂", "Link", self._back_to_listen)
@@ -182,9 +206,12 @@ class FloatingWindow(QWidget):
         self.min_btn = _btn("▾", "IconBtn", self._minimize, "最小化")
         self.min_btn.setFixedSize(26, 26)
         lay.addWidget(self.min_btn)
+        close_btn = _btn("×", "IconBtn", self.close, "退出 Echo")
+        close_btn.setFixedSize(26, 26)
+        lay.addWidget(close_btn)
 
         # 右上角表情包（与桌宠情绪同步，加载 assets/emojis/ 下的 PNG）
-        self.emoji_lbl = QLabel()
+        self.emoji_lbl = QLabel(bar)
         self.emoji_lbl.setFixedSize(32, 32)
         self.emoji_lbl.setScaledContents(True)
         self._emoji_pixmaps = {}
@@ -195,10 +222,20 @@ class FloatingWindow(QWidget):
                 pm = QPixmap(path)
                 if not pm.isNull():
                     self._emoji_pixmaps[emo] = pm
-        self._set_emoji("idle")
         lay.addWidget(self.emoji_lbl)
+        self._set_emoji("idle")
 
-        return bar
+        header = QWidget()
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(8)
+        header_layout.addWidget(bar)
+        status_row = QHBoxLayout()
+        for widget in (self.status_dot, self.status_dots, self.status_lbl, self.mode_lbl):
+            status_row.addWidget(widget)
+        status_row.addStretch()
+        header_layout.addLayout(status_row)
+        return header
 
     def _set_emoji(self, emotion: str):
         """切换标题栏表情包图片"""
@@ -269,6 +306,8 @@ class FloatingWindow(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(Spacing.SM)
         self.mini_cat = CatAvatar(28)
+        self.mini_cat.setToolTip("点击展开听课界面")
+        self.mini_cat.clicked.connect(self._open_from_avatar)
         lay.addWidget(self.mini_cat)
         col = QVBoxLayout()
         col.setSpacing(0)
@@ -439,8 +478,21 @@ class FloatingWindow(QWidget):
             w = PAGE_WIDTH[idx]
             h = pl.totalHeightForWidth(w) if pl.hasHeightForWidth() else pl.totalSizeHint().height()
             m = self.layout().contentsMargins()
-            if self.header.isVisible():
-                h += self.header.sizeHint().height() + self.layout().spacing()
+            scr = (self.screen() or QApplication.primaryScreen()).availableGeometry()
+            header_h = 0 if self.header.isHidden() else self.header.sizeHint().height() + self.layout().spacing()
+            # 钉死成当前页的高度：QStackedWidget 的 heightForWidth 取的是所有页里最高的那页，
+            # 放进 QScrollArea 后会把短页撑高，底部的「我掉队了」就被挤出可视区
+            self.stack.setFixedHeight(h)
+            limit = max(80, scr.height() - m.top() - m.bottom() - header_h - 24)
+            fits = h + 4 <= limit
+            # 只有内容比屏幕还高时才允许滚动（此时滚动条只有 6px，并多留出这点宽度）
+            self.body_scroll.setVerticalScrollBarPolicy(
+                Qt.ScrollBarAlwaysOff if fits else Qt.ScrollBarAsNeeded)
+            if not fits:
+                w += 8
+            body_h = min(h + 4, limit)
+            self.body_scroll.setFixedHeight(body_h)
+            h = body_h + header_h
             W, H = w + m.left() + m.right(), h + m.top() + m.bottom()
 
             old = self.geometry()
@@ -463,6 +515,9 @@ class FloatingWindow(QWidget):
 
     def _back_to_listen(self):
         self._show_page(LISTEN)
+
+    def _open_from_avatar(self):
+        self._show_page(ECHO if self._page == ECHO else LISTEN)
 
     # 兼容旧调用
     def _switch_panel(self):
@@ -754,11 +809,17 @@ class FloatingWindow(QWidget):
         if msg.message == WM_NCHITTEST:
             x = ctypes.c_short(msg.lParam & 0xFFFF).value
             y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
-            geo = self.frameGeometry()
-            x -= geo.x()
-            y -= geo.y()
-            bw = 6
-            w, h = geo.width(), geo.height()
+            # WM_NCHITTEST 使用屏幕物理像素；Qt geometry 在高 DPI 下是逻辑像素。
+            # 全程使用 Win32 窗口矩形，避免把卡片内部的按钮误判为缩放边缘。
+            rect = wintypes.RECT()
+            if not user32.GetWindowRect(wintypes.HWND(msg.hWnd), ctypes.byref(rect)):
+                return super().nativeEvent(eventType, message)
+            x -= rect.left
+            y -= rect.top
+            bw = max(1, round(6 * self.devicePixelRatioF()))
+            w, h = rect.right - rect.left, rect.bottom - rect.top
+            if not (0 <= x < w and 0 <= y < h):
+                return super().nativeEvent(eventType, message)
             if x < bw and y < bw:
                 return True, HTTOPLEFT
             if x > w - bw and y < bw:

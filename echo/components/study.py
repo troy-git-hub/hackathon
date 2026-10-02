@@ -9,7 +9,7 @@ Echo - 学习工具风格组件
 import math
 
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
-from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer
+from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer, pyqtSignal
 from PyQt5.QtGui import QPainter, QPainterPath, QColor, QPen, QBrush, QFont
 
 from echo.theme import Colors, Radius, Spacing, font
@@ -19,10 +19,14 @@ from echo.theme import Colors, Radius, Spacing, font
 class CatAvatar(QWidget):
     """线稿猫头。emotion: idle / ok / warn / lost / thinking / fixed"""
 
+    clicked = pyqtSignal()
+
     def __init__(self, size=30, parent=None):
         super().__init__(parent)
         self.setFixedSize(size, size)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setCursor(Qt.PointingHandCursor)
+        self._pressed = False
         self._emotion = "idle"
         self._blink = False
         self._blink_timer = QTimer(self)
@@ -31,6 +35,22 @@ class CatAvatar(QWidget):
         self._revert = QTimer(self)
         self._revert.setSingleShot(True)
         self._revert.timeout.connect(lambda: self.set_emotion("idle"))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._pressed = True
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self._pressed:
+            self._pressed = False
+            event.accept()
+            if self.rect().contains(event.pos()):
+                self.clicked.emit()
+        else:
+            super().mouseReleaseEvent(event)
 
     def set_emotion(self, emotion, hold_ms=0):
         """hold_ms > 0 时，过一会儿自动回到 idle。"""

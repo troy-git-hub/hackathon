@@ -220,7 +220,10 @@ class EchoEngine:
                 chars = sum(len(l.text) for l in pending)
                 due = time.time() - self._last_extract >= self.concept_interval
             if pending and (chars >= config.CONCEPT_MIN_CHARS and due or chars >= 400):
-                self._pool.submit(self._safe, sid, self._extract_concept, False, sid)
+                try:
+                    self._pool.submit(self._safe, sid, self._extract_concept, False, sid)
+                except RuntimeError:      # 程序退出时线程池已关闭
+                    return
 
     # ================= Concept Timeline =================
     def _extract_concept(self, force=False, sid=None):
