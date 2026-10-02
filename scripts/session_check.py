@@ -11,10 +11,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.stdout.reconfigure(encoding="utf-8")
-os.environ.setdefault("ECHO_DEMO_INTERVAL", "30")
 
 from echo.backend.engine import EchoEngine
-from echo.backend.sources import DemoSource
 
 SLOW = 1.5
 
@@ -111,9 +109,9 @@ eng.shutdown()
 # D: 旧音频来源在重开后继续送转写
 eng = make_engine()
 eng.start()
-old_src = DemoSource(eng)
-eng.start()
-old_src.engine.add_transcript("旧来源迟到的一句话", t=3, session=old_src.session)
+old_session = eng.session      # 旧来源建课时记下的 session
+eng.start()                    # 重开，session 已变
+eng.add_transcript("旧来源迟到的一句话", t=3, session=old_session)
 check("D 旧来源迟到的转写被丢弃", not eng.lines, f"lines={[l.text for l in eng.lines]}")
 eng.shutdown()
 
@@ -129,8 +127,24 @@ eng.shutdown()
 # F: Qt 桥接——重开前已排进 Qt 队列的旧事件不送到 UI
 from PyQt5.QtCore import QCoreApplication
 app = QCoreApplication.instance() or QCoreApplication(sys.argv)
-from echo.backend.qt_bridge import EchoBridge
-br = EchoBridge(source="demo")
+import echo.backend.qt_bridge as qt_bridge
+
+
+class _NullSource:
+    total = 0
+
+    def __init__(self, engine):
+        self.session = engine.session
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+
+qt_bridge.make_source = lambda engine, kind=None: _NullSource(engine)
+br = qt_bridge.EchoBridge(source="system")
 got = []
 br.transcript.connect(lambda tc, t: got.append(t))
 br.start()

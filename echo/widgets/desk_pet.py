@@ -1,10 +1,8 @@
 """
-Echo - 桌面宠物
+Echo - 桌面宠物（经典表情包猫）
 
-两种皮肤（设置里切换，默认 modern）：
-    · modern ：代码绘制的矢量 AI 猫 + Siri 风格声纹条（老师说话时起伏）
-    · classic：原来的表情包猫（assets/emojis 里的 8 张图）
-猫跟着课堂状态变表情，头顶气泡报「老师在讲 X」，找到断点时提醒你点它。
+assets/emojis 里的表情包猫，跟着课堂状态变表情，
+头顶气泡报「老师在讲 X」，找到断点时提醒你点它。
 
 交互：
     单击        打开 / 收起 Echo 面板
@@ -19,13 +17,10 @@ import random
 import time
 
 from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PyQt5.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
 from PyQt5.QtWidgets import QApplication, QMenu, QWidget
 
-from echo.backend import config
-from echo.theme import Colors, font, IS_DARK
-
-ACCENT = QColor(Colors.ACCENT)
+from echo.theme import Colors, font
 
 ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                       "assets", "emojis")
@@ -86,7 +81,6 @@ class DeskPet(QWidget):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.win, self.tray = win, tray
-        self.skin = config.PET_SKIN.lower()
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip("Echo · 单击打开面板 · 双击圈一下问 AI · 右键更多")
@@ -106,22 +100,14 @@ class DeskPet(QWidget):
         self._t0 = time.time()
         self._blink_t = time.time() + random.uniform(2, 5)
         self._blinking = False
-        self._phase = 0.0
 
-        # 尺寸 / 布局：modern = 猫 + 声纹条；classic = 只猫
-        if self.skin == "classic":
-            self.CAT, self.W, self.H = 104, 184, 188
-            self.faces = {}
-            for k, f in FACES.items():
-                pm = _load_face(os.path.join(ASSETS, f))
-                if not pm.isNull():
-                    self.faces[k] = pm
-        else:
-            self.CAT, self.W, self.H = 96, 236, 184
-            self.GAP, self.VBAR_W = 12, 110
-            self.faces = {}
-        self._vn = 22
-        self._vbar = [0.06] * self._vn
+        # 尺寸 / 布局：经典表情包猫（比原来再小一点）
+        self.CAT, self.W, self.H = 88, 168, 172
+        self.faces = {}
+        for k, f in FACES.items():
+            pm = _load_face(os.path.join(ASSETS, f))
+            if not pm.isNull():
+                self.faces[k] = pm
         self.setFixedSize(self.W, self.H)
 
         self._press = None
@@ -251,14 +237,8 @@ class DeskPet(QWidget):
 
     # ================= 鼠标 =================
     def _cat_rect(self) -> QRectF:
-        if self.skin == "classic":
-            x = (self.W - self.CAT) / 2
-            return QRectF(x, self.H - self.CAT - 6, self.CAT, self.CAT)
-        return QRectF(4, self.H - self.CAT - 6, self.CAT, self.CAT)
-
-    def _vbar_rect(self) -> QRectF:
-        x = 4 + self.CAT + self.GAP
-        return QRectF(x, self.H - self.CAT - 6, self.VBAR_W, self.CAT)
+        x = (self.W - self.CAT) / 2
+        return QRectF(x, self.H - self.CAT - 6, self.CAT, self.CAT)
 
     def mousePressEvent(self, e):
         self._last_interact = time.time()
@@ -317,18 +297,6 @@ class DeskPet(QWidget):
             if now > self._blink_t + 0.12:
                 self._blinking = False
                 self._blink_t = now + random.uniform(2.5, 6)
-        self._phase += 0.16
-        if self.skin == "modern":
-            voice_active = self.status in ("listening", "analyzing", "summarizing", "loading_asr")
-            for i in range(self._vn):
-                x = i / (self._vn - 1)
-                if voice_active:
-                    v = 0.5 + 0.5 * math.sin(self._phase * 1.5 - x * 7.0)
-                    v *= 0.55 + 0.45 * math.sin(self._phase * 0.8 + x * 3.4 + 1.3)
-                    v = v * (0.35 + 0.65 * (1 - abs(x - 0.5) * 2)) + random.uniform(-0.05, 0.05)
-                    self._vbar[i] = max(0.07, min(1.0, v))
-                else:
-                    self._vbar[i] = max(0.06, self._vbar[i] * 0.82)
         self._hearts = [h for h in self._hearts if now - h[2] < 1.4]
         self.update()
 
@@ -354,12 +322,7 @@ class DeskPet(QWidget):
         if st < 0.45:
             dx = 4 * math.sin(st * 60) * (1 - st / 0.45)
 
-        if self.skin == "classic":
-            self._draw_classic(p, cat, breathe, dy, dx)
-        else:
-            c = QRectF(cat.x() + dx, cat.y() + dy, cat.width() * breathe, cat.height() * breathe)
-            self._draw_cat(p, c, t)
-            self._draw_voice(p, self._vbar_rect())
+        self._draw_classic(p, cat, breathe, dy, dx)
 
         if self.badge:
             r = QRectF(cat.right() - 16, cat.top() + 6, 20, 20)
@@ -399,122 +362,6 @@ class DeskPet(QWidget):
                 a = 0.35 + 0.65 * max(0.0, math.sin(t * 4 - i * 0.8))
                 p.setBrush(QColor(242, 169, 59, int(255 * a)))
                 p.drawEllipse(QPointF(cat.center().x() - 14 + i * 14, cat.top() + 2), 4, 4)
-
-    # ---------- modern：矢量 AI 猫 ----------
-    def _draw_cat(self, p: QPainter, r: QRectF, t):
-        mood = self.mood
-        R = r.width() / 2
-        cx, cy = r.center().x(), r.center().y()
-
-        def ear_path(side):
-            q = QPainterPath()
-            q.moveTo(cx + side * R * 0.45, cy - R * 0.62)
-            q.lineTo(cx + side * R * 0.28, cy - R * 1.06)
-            q.lineTo(cx + side * R * 0.05, cy - R * 0.72)
-            q.closeSubpath()
-            return q
-
-        p.setPen(Qt.NoPen)
-        ear = QColor(Colors.SURFACE_PRESSED) if IS_DARK else QColor("#E8E9EC")
-        p.setBrush(ear)
-        p.drawPath(ear_path(-1))
-        p.drawPath(ear_path(1))
-        p.setBrush(ACCENT)
-        for side in (-1, 1):
-            q = QPainterPath()
-            q.moveTo(cx + side * R * 0.40, cy - R * 0.66)
-            q.lineTo(cx + side * R * 0.28, cy - R * 0.95)
-            q.lineTo(cx + side * R * 0.16, cy - R * 0.72)
-            q.closeSubpath()
-            p.drawPath(q)
-
-        head = QPainterPath()
-        head.addEllipse(QRectF(cx - R, cy - R, R * 2, R * 2))
-        grad = QLinearGradient(cx - R, cy - R, cx + R, cy + R)
-        grad.setColorAt(0, QColor(Colors.SURFACE_HOVER))
-        grad.setColorAt(1, QColor(Colors.SURFACE_PRESSED))
-        p.setPen(QPen(QColor(Colors.BORDER_STRONG), 1.2))
-        p.setBrush(grad)
-        p.drawPath(head)
-
-        eye_dy = -R * 0.12
-        eye_dx = R * 0.32
-        eye_r = R * 0.16
-        eyec = QColor(Colors.TEXT_PRIMARY)
-
-        def draw_eye(ex, ey, style):
-            if style == "blink":
-                p.setPen(QPen(eyec, max(1.5, R * 0.06), Qt.SolidLine, Qt.RoundCap))
-                p.drawLine(QPointF(ex - eye_r, ey), QPointF(ex + eye_r, ey))
-            elif style == "happy":
-                p.setPen(QPen(eyec, max(1.5, R * 0.07), Qt.SolidLine, Qt.RoundCap))
-                p.drawArc(QRectF(ex - eye_r, ey - eye_r * 0.6, eye_r * 2, eye_r * 1.6), 200 * 16, 140 * 16)
-            elif style == "squint":
-                p.setPen(QPen(eyec, max(1.5, R * 0.06), Qt.SolidLine, Qt.RoundCap))
-                p.drawLine(QPointF(ex - eye_r * 0.7, ey), QPointF(ex + eye_r * 0.7, ey))
-            elif style == "sad":
-                p.setPen(QPen(eyec, max(1.5, R * 0.07), Qt.SolidLine, Qt.RoundCap))
-                p.drawArc(QRectF(ex - eye_r, ey + eye_r * 0.2, eye_r * 2, eye_r * 1.4), 20 * 16, 140 * 16)
-            elif style == "wide":
-                p.setPen(Qt.NoPen)
-                p.setBrush(eyec)
-                p.drawEllipse(QPointF(ex, ey), eye_r * 1.25, eye_r * 1.25)
-                p.setBrush(QColor("#FFFFFF"))
-                p.drawEllipse(QPointF(ex - eye_r * 0.4, ey - eye_r * 0.4), eye_r * 0.35, eye_r * 0.35)
-            else:
-                p.setPen(Qt.NoPen)
-                p.setBrush(eyec)
-                p.drawEllipse(QPointF(ex, ey), eye_r * 0.82, eye_r * 0.95)
-                p.setBrush(ACCENT)
-                p.drawEllipse(QPointF(ex - eye_r * 0.25, ey - eye_r * 0.3), eye_r * 0.3, eye_r * 0.3)
-
-        styles = {"happy": ("happy", "happy"), "ok": ("happy", "happy"), "fixed": ("happy", "happy"),
-                  "love": ("happy", "happy"), "done": ("happy", "happy"),
-                  "lost": ("sad", "sad"), "warn": ("open", "squint"),
-                  "thinking": ("squint", "squint"), "alert": ("wide", "wide"),
-                  "idle": ("open", "open"), "listening": ("open", "open")}
-        ls, rs = styles.get(mood, ("open", "open"))
-        if self._blinking and mood in ("idle", "listening", "open"):
-            ls = rs = "blink"
-        draw_eye(cx - eye_dx, cy + eye_dy, ls)
-        draw_eye(cx + eye_dx, cy + eye_dy, rs)
-
-        p.setPen(Qt.NoPen)
-        blush = QColor(ACCENT)
-        blush.setAlpha(70)
-        p.setBrush(blush)
-        p.drawEllipse(QPointF(cx - R * 0.58, cy + R * 0.12), R * 0.12, R * 0.08)
-        p.drawEllipse(QPointF(cx + R * 0.58, cy + R * 0.12), R * 0.12, R * 0.08)
-
-        p.setPen(Qt.NoPen)
-        p.setBrush(ACCENT)
-        p.drawEllipse(QPointF(cx, cy + R * 0.22), R * 0.07, R * 0.05)
-        p.setPen(QPen(eyec, max(1.2, R * 0.05), Qt.SolidLine, Qt.RoundCap))
-        p.setBrush(Qt.NoBrush)
-        mouth = QRectF(cx - R * 0.22, cy + R * 0.24, R * 0.44, R * 0.3)
-        if mood in ("happy", "ok", "fixed", "love", "done"):
-            p.drawArc(mouth, 200 * 16, 140 * 16)
-        elif mood == "lost":
-            p.drawArc(mouth, 20 * 16, 140 * 16)
-        elif mood == "alert":
-            p.drawEllipse(QPointF(cx, cy + R * 0.38), R * 0.08, R * 0.1)
-        else:
-            p.drawLine(QPointF(cx - R * 0.16, cy + R * 0.4), QPointF(cx + R * 0.16, cy + R * 0.4))
-
-    def _draw_voice(self, p: QPainter, area: QRectF):
-        n = self._vn
-        gap = 3.0
-        bw = (area.width() - gap * (n - 1)) / n
-        for i in range(n):
-            h = area.height() * self._vbar[i]
-            x = area.x() + i * (bw + gap)
-            center = 1 - abs(i / (n - 1) - 0.5) * 2
-            col = QColor(ACCENT)
-            col.setAlpha(int(90 + 130 * center))
-            p.setPen(Qt.NoPen)
-            p.setBrush(col)
-            r = QRectF(x, area.center().y() - h / 2, bw, max(3.0, h))
-            p.drawRoundedRect(r, bw / 2, bw / 2)
 
     def _heart(self, p, c: QPointF, s):
         path = QPainterPath()

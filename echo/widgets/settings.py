@@ -23,12 +23,10 @@ FIELDS = [
     ("DASHSCOPE_API_KEY", "百炼 API Key", "圈一下问 AI 的视觉模型（Qwen-VL，选填）"),
 ]
 COMBOS = [
-    ("ECHO_SOURCE", "音频来源", ["system", "mic", "demo"],
-     ["系统声音（网课/会议）", "麦克风", "示例课（演示）"]),
+    ("ECHO_SOURCE", "音频来源", ["system", "mic"],
+     ["系统声音（网课/会议）", "麦克风"]),
     ("ECHO_WHISPER_MODEL", "语音识别模型", ["small", "medium"],
      ["small（快，CPU 实时）", "medium（更准，更慢）"]),
-    ("ECHO_PET_SKIN", "桌宠皮肤", ["modern", "classic"],
-     ["现代 AI 猫（带声纹条）", "经典表情包猫"]),
 ]
 
 

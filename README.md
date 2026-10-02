@@ -19,7 +19,7 @@
 | 追问 | 断点页直接打字追问，Echo 带上课堂上下文让 DeepSeek 解答 |
 | 圈一下问 AI | 全屏圈画 + 批注，把看不懂的地方截图给 Qwen-VL 视觉模型讲解（支持追问） |
 | 回响 | 下课后一张掌握度地图：每个知识点 ✓/⚠/!，掉队点一路追溯到该复习的前置 |
-| 桌面宠物 | 常驻桌面的小猫，跟着课堂变表情；旁边 Siri 风格声纹条，老师说话时起伏 |
+| 桌面宠物 | 常驻桌面的小猫（经典表情包猫），跟着课堂变表情 |
 | 系统托盘 | 关掉窗口仍在听课；全局快捷键、托盘通知、右键菜单一应俱全 |
 
 ## 运行（开发方式）
@@ -42,9 +42,8 @@ Whisper `small` 模型（约 480MB，之后走本地缓存）。
 ```ini
 DEEPSEEK_API_KEY=sk-…          # 课堂理解 / 掉队分析 / 追问（deepseek-chat）
 DASHSCOPE_API_KEY=sk-…         # 圈一下问 AI 的视觉模型（Qwen-VL，选填，不填退回 DeepSeek 视觉）
-ECHO_SOURCE=system             # system 系统声音 / mic 麦克风 / demo 示例课
+ECHO_SOURCE=system             # system 系统声音 / mic 麦克风
 ECHO_WHISPER_MODEL=small       # small（快）/ medium（更准更慢）
-ECHO_PET_SKIN=modern           # modern 矢量 AI 猫 / classic 表情包猫
 ```
 
 ## 快捷键
@@ -69,7 +68,6 @@ python scripts/tray_check.py           # 托盘 / 快捷键 / 关闭到托盘（
 音频来源 (echo/backend/sources.py)
   system : WASAPI loopback → 静音切句 → faster-whisper（热词=已识别知识点）
   mic    : 麦克风 → 同上
-  demo   : 回放 demo_lesson.txt（离线兜底）
         │ add_transcript(text, t, session)
         ▼
 EchoEngine (echo/backend/engine.py)

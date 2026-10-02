@@ -4,7 +4,7 @@ Echo - 系统托盘
 不改窗口内部代码，从外部挂到 FloatingWindow 上：
   · 托盘图标：线稿猫头，跟随任务栏深浅色；分析中 / 有新结果时右下角带琥珀色小点
   · 单击托盘图标：显示 / 隐藏 Echo
-  · 右键菜单：我掉队了、下课生成回响、新的一节课、示例课、离线模式、退出
+  · 右键菜单：我掉队了、下课生成回响、新的一节课、离线模式、退出
   · 关闭 / 最小化 → 收进托盘继续听课（Qt.Tool 窗口最小化后没有任务栏入口，原来无法找回）
   · 窗口藏起来时，掉队分析和课堂回响完成会弹托盘通知，点通知直接打开
   · 全局快捷键（看全屏网课时也能用），被别的软件占用时自动换下一个候选：
@@ -192,7 +192,6 @@ class EchoTray(QObject):
         self.act_end = m.addAction("下课，生成回响", self.end_lesson)
         m.addAction("开始新的一节课", self.restart)
         m.addSeparator()
-        self.act_demo = m.addAction("播放示例课（演示用）", self.use_demo)
         self.act_offline = QAction("离线模式（不调 AI）", m, checkable=True)
         self.act_offline.triggered.connect(self.toggle_offline)
         m.addAction(self.act_offline)
@@ -209,7 +208,6 @@ class EchoTray(QObject):
         echo = self.win.echo
         self.act_offline.setChecked(bool(getattr(echo, "offline", False)))
         self.act_offline.setEnabled(hasattr(echo, "set_offline"))
-        self.act_demo.setEnabled(hasattr(self.win, "_use_demo"))
         self.act_pet.setVisible(self.pet is not None)
         self.act_pet.setText("隐藏桌宠" if self.pet is not None and self.pet.isVisible() else "显示桌宠")
 
@@ -278,11 +276,6 @@ class EchoTray(QObject):
     def restart(self):
         self.show_window()
         self.win._restart()
-
-    def use_demo(self):
-        if hasattr(self.win, "_use_demo"):
-            self.show_window()
-            self.win._use_demo()
 
     def toggle_offline(self, checked):
         echo = self.win.echo

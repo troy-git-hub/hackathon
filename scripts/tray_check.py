@@ -13,8 +13,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 sys.stdout.reconfigure(encoding="utf-8")
-os.environ["ECHO_SOURCE"] = "demo"
-os.environ.setdefault("ECHO_DEMO_INTERVAL", "1.0")
+os.environ["ECHO_SOURCE"] = "system"
 
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import QApplication
@@ -67,7 +66,7 @@ step((300, lambda: win.close()))
 step((500, lambda: check("点关闭 → 收进托盘而不是退出", not win.isVisible() and tray.tray.isVisible())))
 step((300, lambda: press(2)))
 step((800, lambda: check("快捷键 → 唤回窗口", win.isVisible())))
-step((9000, lambda: press(1)))      # 等示例课讲几句再掉队
+step((9000, lambda: press(1)))      # 等几秒再掉队
 step((800, lambda: check("快捷键 → 直接进入掉队分析", win.isVisible() and win._page == 2,
                           f"page={win._page}")))
 step((200, lambda: win.min_btn.click()))

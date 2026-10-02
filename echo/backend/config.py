@@ -38,8 +38,6 @@ DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
 DASHSCOPE_BASE_URL = os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 QWEN_VL_MODEL = os.getenv("ECHO_QWEN_VL_MODEL", "qwen-vl-plus")   # 更准可换 qwen-vl-max
 VISION_MODEL = os.getenv("ECHO_VISION_MODEL", "deepseek-flash")
-# 桌宠皮肤：modern 矢量 AI 猫 + 声纹条 / classic 原来的表情包猫
-PET_SKIN = os.getenv("ECHO_PET_SKIN", "modern")
 
 # ---------- 课堂引擎 ----------
 # 每隔多少秒把新 transcript 交给 LLM 抽一次 concept
@@ -53,13 +51,9 @@ BREAKPOINT_TIMEOUT = _int("ECHO_BREAKPOINT_TIMEOUT", 12)
 # 断点结果出来后，最多再等多久让未处理转写并入时间轴（秒）
 FLUSH_GRACE = float(os.getenv("ECHO_FLUSH_GRACE", "2"))
 
-# ---------- 音频来源 ----------
-# system: 抓电脑正在播放的声音（网课/会议）+ Whisper   mic: 麦克风   demo: 回放示例讲稿
+# ---------- 音频来源（真实采集） ----------
+# system: 抓电脑正在播放的声音（网课/会议）+ Whisper   mic: 麦克风
 SOURCE = os.getenv("ECHO_SOURCE", "system")
-DEMO_LINE_INTERVAL = float(os.getenv("ECHO_DEMO_INTERVAL", "3"))
-DEMO_SCRIPT = os.getenv("ECHO_DEMO_SCRIPT", "")  # 可选：自定义 transcript 文本文件
-# 现场兜底：音频采集失败时自动改放示例讲稿（1=开，0=关）
-AUTO_DEMO = os.getenv("ECHO_AUTO_DEMO", "1") != "0"
 # 强制离线：不调 LLM，全部走规则 / mock（断网演示用）
 OFFLINE = os.getenv("ECHO_OFFLINE", "0") == "1"
 

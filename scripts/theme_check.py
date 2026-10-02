@@ -67,7 +67,7 @@ def _packed(value):
 def run_child(theme, shots):
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
     os.environ["ECHO_THEME"] = theme          # 必须在 import echo.theme 之前
-    os.environ.setdefault("ECHO_SOURCE", "demo")
+    os.environ.setdefault("ECHO_SOURCE", "system")
     sys.path.insert(0, str(ROOT))
 
     # 当前机器的 PyQt5 Python 包与 Qt DLL 分开安装时，可显式指定本地运行库（同 smoke_ui.py）
@@ -149,7 +149,7 @@ def run_child(theme, shots):
         def __init__(self, parent=None):
             super().__init__(parent)
             self.engine = FakeEngine()
-            self.source_kind = "demo"
+            self.source_kind = "system"
             self.total_seconds = 0
 
         def start(self):

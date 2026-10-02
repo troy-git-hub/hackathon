@@ -1,8 +1,7 @@
 """
-Echo - 课程音频来源
+Echo - 课程音频来源（真实采集，无演示数据）
   SystemAudioSource : WASAPI loopback 抓电脑正在播放的声音（腾讯会议 / Zoom / B站 / 录播课）→ Whisper
   MicSource         : 麦克风或任意输入设备 → Whisper
-  DemoSource        : 回放示例讲稿（离线兜底）
 """
 import logging
 import os
@@ -11,52 +10,11 @@ import threading
 import time
 
 from echo.backend import config
-from echo.backend.engine import EchoEngine, parse_tc
+from echo.backend.engine import EchoEngine
 
 log = logging.getLogger("echo.asr")
 
-DEFAULT_DEMO = os.path.join(os.path.dirname(__file__), "demo_lesson.txt")
 SR = 16000
-
-
-# ================= demo =================
-def load_script(path=None):
-    """读取 `时间码 文本` 格式的讲稿，# 开头为注释。"""
-    lines = []
-    with open(path or DEFAULT_DEMO, encoding="utf-8") as f:
-        for raw in f:
-            raw = raw.strip()
-            if not raw or raw.startswith("#"):
-                continue
-            tc, _, text = raw.partition(" ")
-            t = parse_tc(tc)
-            if t is None:
-                t, text = (lines[-1][0] + 10 if lines else 0), raw
-            lines.append((t, text.strip()))
-    return lines
-
-
-class DemoSource:
-    def __init__(self, engine: EchoEngine, path=None, interval=None):
-        self.engine = engine
-        self.session = engine.session     # 只往创建时那节课里送转写
-        self.lines = load_script(path or config.DEMO_SCRIPT or None)
-        self.interval = interval or config.DEMO_LINE_INTERVAL
-        self._stop = threading.Event()
-        self.total = self.lines[-1][0] if self.lines else 0
-
-    def start(self):
-        self._stop.clear()
-        threading.Thread(target=self._run, daemon=True, name="echo-demo").start()
-
-    def stop(self):
-        self._stop.set()
-
-    def _run(self):
-        for t, text in self.lines:
-            if self._stop.wait(self.interval):
-                return
-            self.engine.add_transcript(text, t=t, session=self.session)
 
 
 # ================= 切句 + 转写 =================
@@ -313,8 +271,6 @@ class MicSource(_LiveSource):
 
 def make_source(engine: EchoEngine, kind=None):
     kind = (kind or config.SOURCE).lower()
-    if kind == "demo":
-        return DemoSource(engine)
     if kind == "mic":
         return MicSource(engine)
     try:

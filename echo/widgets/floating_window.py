@@ -34,7 +34,6 @@ from echo.components.wave_orb import WaveOrb
 from echo.components.study import (CatAvatar, BreakPath, LessonStep, SkillRow,
                                    ReviewChain, echo_status, echo_mark)
 from echo.mock_data import Concept
-from echo.backend import config
 from echo.backend.engine import parse_tc
 from echo.backend.qt_bridge import EchoBridge
 from echo.components.pet import EMOTION_FILES, ASSETS_DIR
@@ -137,7 +136,6 @@ class FloatingWindow(QWidget):
         self._self_look = set()      # 学生点了「我自己看看」的断点知识点
         self._ask = None             # 断点追问会话（LessonAsk）
         self._ask_buf = ""
-        self._auto_demo_msg = ""     # 音频采集失败、bridge 自动切示例课时的原因
         self._drag_pos = None
         self._page = LISTEN
 
@@ -157,7 +155,6 @@ class FloatingWindow(QWidget):
         self.echo.start()
 
         # 现场兜底快捷键（Echo 窗口在前台时有效）
-        QShortcut(QKeySequence("Ctrl+Shift+D"), self, self._use_demo, context=Qt.ApplicationShortcut)
         QShortcut(QKeySequence("Ctrl+Shift+O"), self, self._toggle_offline, context=Qt.ApplicationShortcut)
 
     # ================= UI 构建 =================
@@ -309,7 +306,7 @@ class FloatingWindow(QWidget):
         self.progress.setStyleSheet(
             f"QProgressBar {{ background: {Colors.BORDER}; border: none; border-radius: 1px; }}"
             f"QProgressBar::chunk {{ background: {Colors.TEXT_SECONDARY}; border-radius: 1px; }}")
-        self.progress.hide()        # 实时听课没有总时长，只有 demo 回放显示进度
+        self.progress.hide()        # 实时听课没有总时长
         lay.addWidget(self.progress)
 
         # 实时字幕：左侧细线，安静地滚动
@@ -632,10 +629,6 @@ class FloatingWindow(QWidget):
         self._reset_ui()
         self.echo.start()
 
-    def _use_demo(self):
-        self._reset_ui()
-        self.echo.use_demo()
-
     def _toggle_offline(self):
         self.echo.set_offline(not self.echo.offline)
 
@@ -903,28 +896,16 @@ class FloatingWindow(QWidget):
             self.status_dots.stop()
 
     def _on_mode(self, kind, offline):
-        tags = (["示例课"] if kind == "demo" else []) + (["离线"] if offline else [])
+        tags = ["离线"] if offline else []
         text = " · ".join(tags)
-        tip = "Ctrl+Shift+D 切示例课 · Ctrl+Shift+O 切离线/在线"
-        msg, self._auto_demo_msg = self._auto_demo_msg, ""
-        if msg and kind == "demo":      # 采集失败被自动切过来的：先亮几秒原因
-            self.mode_lbl.setText("已切到示例课")
-            QTimer.singleShot(5000, lambda: self.mode_lbl.setText(self.mode_lbl.property("base")))
-            tip = f"{msg}\n{tip}"
-        else:
-            self.mode_lbl.setText(text)
+        tip = "Ctrl+Shift+O 切离线/在线"
+        self.mode_lbl.setText(text)
         self.mode_lbl.setProperty("base", text)
         self.mode_lbl.setToolTip(tip)
         self.mode_lbl.setVisible(bool(tags))
         self._fit()
 
     def _on_error(self, msg):
-        if (str(msg).startswith("音频采集失败") and config.AUTO_DEMO
-                and self.echo.source_kind != "demo"):
-            # bridge 紧接着会自动 use_demo()，这里只轻提示，不当大错误
-            self._reset_ui()
-            self._auto_demo_msg = msg
-            return
         self.status_lbl.setText("网络或 AI 出错")
         self.status_lbl.setToolTip(msg)
         self.status_dot.setStyleSheet(f"color: {Colors.ACCENT}; font-size: 8px; background: transparent;")

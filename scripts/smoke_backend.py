@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.stdout.reconfigure(encoding="utf-8")
 
 from echo.backend.engine import EchoEngine
-from echo.backend.sources import load_script
+from echo.mock_data import SAMPLE_LESSON
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--mock", action="store_true")
@@ -55,7 +55,7 @@ eng.start()
 print("LLM:", "DeepSeek" if eng.has_llm else "mock")
 
 t0 = time.time()
-for i, (t, text) in enumerate(load_script()):
+for i, (t, text) in enumerate(SAMPLE_LESSON):
     eng.add_transcript(text, t=t)
     print(f"[{t:>5.0f}s] {text}")
     time.sleep(0.4)

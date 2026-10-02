@@ -46,7 +46,7 @@ class FakeBridge(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.engine = FakeEngine()
-        self.source_kind = "demo"
+        self.source_kind = "system"
         self.total_seconds = 0
 
     def start(self):

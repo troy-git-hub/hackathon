@@ -19,14 +19,15 @@ sys.stdout.reconfigure(encoding="utf-8")
 import logging
 logging.basicConfig(level=logging.INFO, format="  %(name)s %(levelname)s %(message)s")
 from echo.backend.engine import EchoEngine
-from echo.backend.sources import SystemAudioSource, load_script, _WhisperWorker
+from echo.backend.sources import SystemAudioSource, _WhisperWorker
+from echo.mock_data import SAMPLE_LESSON
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--lines", type=int, default=14)
 ap.add_argument("--direct", action="store_true", help="不走扬声器，把音频按实时速度直接喂给切句+Whisper")
 args = ap.parse_args()
 
-text = "。".join(t for _, t in load_script()[:args.lines])
+text = "。".join(t for _, t in SAMPLE_LESSON[:args.lines])
 wav = os.path.join(tempfile.gettempdir(), "echo_live_check.wav")
 txt = os.path.join(tempfile.gettempdir(), "echo_live_check.txt")
 with open(txt, "w", encoding="utf-8-sig") as f:

@@ -11,8 +11,15 @@ pyinstaller --noconfirm --clean --windowed --name Echo --icon assets\echo.ico ^
   --exclude-module PyQt6 ^
   --exclude-module PySide2 ^
   --exclude-module PySide6 ^
+  --exclude-module torch ^
+  --exclude-module torchvision ^
+  --exclude-module torchaudio ^
+  --exclude-module sympy ^
+  --exclude-module tkinter ^
+  --exclude-module matplotlib ^
+  --exclude-module IPython ^
+  --exclude-module jupyter ^
   --add-data "assets;assets" ^
-  --add-data "echo\backend\demo_lesson.txt;echo\backend" ^
   --add-data ".env.example;." ^
   --hidden-import openai ^
   --hidden-import echo.widgets.desk_pet ^

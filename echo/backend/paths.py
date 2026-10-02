@@ -3,7 +3,7 @@ Echo - 运行路径
 
 开发时所有路径相对项目根目录；用 PyInstaller 打成 exe 后：
 
-  · 随程序附带的只读资源（assets/、demo_lesson.txt、.env.example）在 sys._MEIPASS 下
+  · 随程序附带的只读资源（assets/、.env.example）在 sys._MEIPASS 下
   · 可写的配置（.env）放在 %APPDATA%\\Echo，不能放安装目录
     —— 装在 C:\\Program Files 时那里需要管理员权限，设置窗口会保存失败
 
