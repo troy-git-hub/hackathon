@@ -25,6 +25,9 @@ build/
 dist/
 *.spec
 
+# 打包内置的 Whisper 模型（几百 MB，不进仓库）
+models/
+
 # secrets
 .env
 

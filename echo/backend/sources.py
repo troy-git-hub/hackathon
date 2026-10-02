@@ -95,12 +95,12 @@ class _WhisperWorker:
                           cpu_threads=min(config.WHISPER_THREADS, os.cpu_count() or 1))
                 # 先只用本地缓存：模型下过一次就不再联网（现场网络/SSL 抽风时联网会卡很久）
                 try:
-                    cls._model = WhisperModel(config.WHISPER_MODEL, local_files_only=True, **kw)
+                    cls._model = WhisperModel(config.whisper_model_path(), local_files_only=True, **kw)
                     log.info("Whisper 从本地缓存加载：%s", config.WHISPER_MODEL)
                 except Exception as e:
                     log.info("本地没有 Whisper 模型（%s），开始下载…", e)
                     try:
-                        cls._model = WhisperModel(config.WHISPER_MODEL, **kw)
+                        cls._model = WhisperModel(config.whisper_model_path(), **kw)
                     except Exception as e2:
                         raise RuntimeError(
                             f"Whisper 模型 {config.WHISPER_MODEL} 下载失败（{type(e2).__name__}）。"

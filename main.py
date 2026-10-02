@@ -16,7 +16,7 @@ def _preload_whisper():
         os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
         from echo.backend import config
         from faster_whisper import WhisperModel
-        WhisperModel(config.WHISPER_MODEL, device=config.WHISPER_DEVICE,
+        WhisperModel(config.whisper_model_path(), device=config.WHISPER_DEVICE,
                       compute_type=config.WHISPER_COMPUTE,
                       cpu_threads=min(config.WHISPER_THREADS, os.cpu_count() or 1),
                       local_files_only=True)

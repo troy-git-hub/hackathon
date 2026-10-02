@@ -3,6 +3,7 @@ Echo - 后端配置
 所有配置从环境变量 / 项目根目录 .env 读取。
 """
 import os
+import sys
 
 # 国内默认走 HF 镜像下载 Whisper 模型
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
@@ -72,6 +73,21 @@ OFFLINE = os.getenv("ECHO_OFFLINE", "0") == "1"
 # ---------- ASR ----------
 AUDIO_DEVICE = os.getenv("ECHO_AUDIO_DEVICE", "")  # 空=默认输入；可填设备序号或名称片段（如“立体声混音”）
 WHISPER_MODEL = os.getenv("ECHO_WHISPER_MODEL", "small")
+
+
+def whisper_model_path() -> str:
+    """实际加载 Whisper 用的模型标识。
+
+    打包成 exe 后优先用随程序分发的 models/faster-whisper-small 目录
+    （在 sys._MEIPASS 下，离线可用）；开发时用 ECHO_WHISPER_MODEL（走 HF 缓存）。
+    """
+    if getattr(sys, "frozen", False):
+        bundled = os.path.join(getattr(sys, "_MEIPASS", ""), "models", "faster-whisper-small")
+        if os.path.isdir(bundled):
+            return bundled
+    return WHISPER_MODEL
+
+
 WHISPER_DEVICE = os.getenv("ECHO_WHISPER_DEVICE", "cpu")
 WHISPER_COMPUTE = os.getenv("ECHO_WHISPER_COMPUTE", "int8")
 # Whisper 的 CPU 线程数。线程越多转写越快，但每个线程都会向 MKL 申请一块工作内存，

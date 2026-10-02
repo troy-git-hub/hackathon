@@ -47,6 +47,7 @@ pyinstaller --noconfirm --clean --windowed --name Echo --icon assets\echo.ico ^
   --exclude-module lxml ^
   --add-data "assets;assets" ^
   --add-data ".env.example;." ^
+  --add-data "models/faster-whisper-small;models/faster-whisper-small" ^
   --hidden-import openai ^
   --hidden-import onnxruntime ^
   --hidden-import ctranslate2 ^
