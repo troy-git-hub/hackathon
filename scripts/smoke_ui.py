@@ -162,6 +162,8 @@ assert window._page == ui.REVIEW, "错题复习页打不开"
 window._show_detail(0)          # 不存在的归档：应安全退化，不崩
 app.processEvents()
 assert window._page == ui.DETAIL, "历史课程回顾页打不开"
+assert window.back_btn.text() == "← 主页", \
+    f"没指定 back 进来的回顾页，返回按钮应该退回主页，实际写着「{window.back_btn.text()}」"
 
 # 主页「AI 出题练习」：没有错题时要进练习页说清楚，不能默默弹回主页
 window._show_home()
@@ -197,6 +199,16 @@ assert getattr(window, "_detail_lesson", None), "点「看回顾」后详情页�
 assert window.det_title.text() == "贝叶斯统计", f"回顾页标题不对：{window.det_title.text()}"
 assert window.status_lbl.text() == "还没开始上课", \
     f"没在上课，状态栏却写着「{window.status_lbl.text()}」"
+
+# 从「课程管理」点「看回顾」进来的，返回按钮要退回课程管理，不是一律回主页
+assert window.back_btn.text() == "← 课程管理", \
+    f"从课程管理进来的回顾页，返回按钮写着「{window.back_btn.text()}」"
+QTest.mouseClick(window.back_btn, Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.COURSES, "从课程管理进来的回顾页，点返回没有回到课程管理"
+QTest.mouseClick(rows[0], Qt.LeftButton)      # 回课程管理只是为了验证退路，继续走后面的流程
+app.processEvents()
+assert window._page == ui.DETAIL
 
 map_btns = [b for b in window.findChildren(QPushButton)
             if b.text() == "知识地图" and b.isVisible()]
@@ -283,6 +295,8 @@ window.echo.engine.active = True
 window._show_page(ui.LISTEN)
 app.processEvents()
 assert window.btn_ask.isVisible(), "听课页上没有「考考我」按钮"
+# 正在听课时不给回首页的路——想走就得走「下课」
+assert not window.home_btn.isVisible(), "正在听课时主页按钮还露着，能悄悄溜去主页丢下这节课"
 asks_before = window.echo.asks
 QTest.mouseClick(window.btn_ask, Qt.LeftButton)
 app.processEvents()
@@ -291,6 +305,25 @@ assert window.checkin_card.isVisible(), "点了「考考我」，抽问卡片没
 assert window.checkin_card.question_lbl.text(), "抽问卡片上一个字都没有"
 window.checkin_card.dismiss()
 window.echo.engine.active = False
+window._show_page(ui.LISTEN)
+app.processEvents()
+assert window.home_btn.isVisible(), "下课后（engine 不在听）主页按钮应该重新露出来"
+
+# 冗余的最小化按钮已经删掉了——托盘那个 × 已经能缩到托盘，不需要两个一样的按钮
+assert not hasattr(window, "min_btn"), "最小化按钮应该已经删掉"
+assert not any(b.toolTip() == "最小化" for b in window.findChildren(QPushButton)), \
+    "还能找到一个「最小化」按钮"
+
+# 折叠页的展开按钮用的是「+」，不是容易看漏的箭头符号
+window._show_page(ui.MINI)
+app.processEvents()
+expand_btns = [b for b in window.findChildren(QPushButton)
+               if b.toolTip() == "展开" and b.isVisible()]
+assert expand_btns, "折叠页上没找到「展开」按钮"
+assert expand_btns[0].text() == "+", f"折叠页展开按钮图标不对：{expand_btns[0].text()!r}"
+window._show_page(ui.LISTEN)
+app.processEvents()
+
 
 # 自评题的三个选项是后端给的固定文案，英文界面要翻过来；AI 出的选择题不能被改
 from echo import i18n as _i18n                      # noqa: E402
@@ -477,6 +510,20 @@ QTest.mouseClick(window.avatar_view, Qt.LeftButton)
 app.processEvents()
 assert window._page == ui.PROFILE, "点头像没进资料页"
 assert window.profile_page.name_lbl.text(), "资料页没渲染出名字"
+
+# 正在听课时从资料页点「回到主页」：不能真的回主页，那是另一条能溜走的路
+window.echo.engine.active = True
+window.profile_page.back_requested.emit()
+app.processEvents()
+assert window._page == ui.LISTEN, \
+    "正在听课时，资料页「回到主页」应该退回课堂，而不是真的去主页"
+window.echo.engine.active = False
+QTest.mouseClick(window.avatar_view, Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.PROFILE
+window.profile_page.back_requested.emit()
+app.processEvents()
+assert window._page == ui.HOME, "没在听课时，资料页「回到主页」应该正常回主页"
 
 window._show_page(ui.LISTEN)
 app.processEvents()

@@ -27,12 +27,10 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt5.QtCore import Qt, QTimer, QRectF, QPoint, pyqtSignal
 from PyQt5.QtGui import QFont, QCursor, QPainter, QPainterPath, QColor, QBrush, QPen, QKeySequence, QPixmap
 
-# Win32 常量 — 无边框窗口边缘拖拽调整大小 + 最小化
+# Win32 常量 — 无边框窗口边缘拖拽调整大小
 WM_NCHITTEST = 0x0084
 HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT = 10, 11, 12, 13, 14
 HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT = 15, 16, 17
-SC_MINIMIZE = 0xF020
-SW_MINIMIZE = 6
 user32 = ctypes.windll.user32
 
 from echo.widgets import dialogs
@@ -179,6 +177,8 @@ class FloatingWindow(QWidget):
         self._prac_back_label = ""
         self._last_report = None     # 最近一次回响（回响页「知识地图」用）
         self._detail_lesson = {}     # 当前正在看的这节历史课
+        self._detail_back = None     # 回顾页是从哪儿进来的（课程管理 / 别处），← 按钮退回那里
+        self._detail_back_label = ""
         # 「讲给 Echo 听」这一轮的状态
         self._recall_items = []      # 本轮聊到的知识点
         self._recall_root = ""       # 它们的共同根源（有的话）
@@ -328,10 +328,6 @@ class FloatingWindow(QWidget):
         self.fold_btn.setFixedSize(26, 26)
         lay.addWidget(self.fold_btn)
 
-        # 最小化按钮
-        self.min_btn = _btn("▾", "IconBtn", self._minimize, tr("最小化", "Minimize"))
-        self.min_btn.setFixedSize(26, 26)
-        lay.addWidget(self.min_btn)
         close_btn = _btn("×", "IconBtn", self.close, tr("退出 Echo", "Quit Echo"))
         close_btn.setFixedSize(26, 26)
         lay.addWidget(close_btn)
@@ -500,7 +496,7 @@ class FloatingWindow(QWidget):
         b = _btn(tr("掉队了", "Fell behind"), "Accent", self._on_lost)
         b.setStyleSheet("font-size: 13px; padding: 6px 12px;")
         lay.addWidget(b)
-        ex = _btn("⌃", "IconBtn", lambda: self._show_page(LISTEN), tr("展开", "Expand"))
+        ex = _btn("+", "IconBtn", lambda: self._show_page(LISTEN), tr("展开", "Expand"))
         ex.setFixedSize(26, 26)
         lay.addWidget(ex)
         # 自适应声纹球：直径跟随 mini 窗口高度，显示在最右端
@@ -1201,7 +1197,9 @@ class FloatingWindow(QWidget):
         h.addWidget(_btn(tr("重命名", "Rename"), "Link",
                          lambda t=ls.get("time", 0): self._course_rename(t)))
         h.addWidget(_btn(tr("看回顾", "Review"), "Quiet",
-                         lambda t=ls.get("time", 0): self._show_detail(t)),
+                         lambda t=ls.get("time", 0): self._show_detail(
+                             t, back=self._show_courses,
+                             back_label=tr("← 课程管理", "← Courses"))),
                     0, Qt.AlignVCenter)
 
         card._chk = chk
@@ -1634,7 +1632,10 @@ class FloatingWindow(QWidget):
             return
         self._prac_item = {"topic": self._lesson_name(lesson)}
         ts = getattr(self, "_detail_ts", 0)
-        self._prac_back = (lambda: self._show_detail(ts)) if ts else None
+        detail_back = self._detail_back
+        detail_back_label = self._detail_back_label
+        self._prac_back = (lambda: self._show_detail(
+            ts, back=detail_back, back_label=detail_back_label)) if ts else None
         self._prac_back_label = tr("← 课程回顾", "← Lesson review") if ts else ""
         self._prac_qs, self._prac_cards = [], []
         self._prac_submitted = False
@@ -1978,7 +1979,7 @@ class FloatingWindow(QWidget):
     # ----- 12 我的资料 -----
     def _build_profile(self) -> QWidget:
         self.profile_page = ProfilePage()
-        self.profile_page.back_requested.connect(self._show_home)
+        self.profile_page.back_requested.connect(self._leave_profile)
         self.profile_page.avatar_changed.connect(self._on_avatar_changed)
         return self.profile_page
 
@@ -1986,6 +1987,18 @@ class FloatingWindow(QWidget):
         # 切进来要 refresh：统计和头像都可能变了，不刷新显示的是上次的
         self.profile_page.refresh()
         self._show_page(PROFILE)
+
+    def _leave_profile(self):
+        """资料页自己的「回到主页」链接：正在听课时不放行。
+
+        头像在听课页也点得到（header 常驻），这条路跟 home_btn 是同一个洞——
+        不堵住的话，学生照样能从「资料页」溜到主页、把一节正在听的课晾在那。
+        """
+        engine = getattr(getattr(self, "echo", None), "engine", None)
+        if getattr(engine, "active", False):
+            self._show_page(LISTEN)
+        else:
+            self._show_home()
 
     def _on_avatar_changed(self, _path=""):
         self._refresh_avatar()
@@ -2153,14 +2166,20 @@ class FloatingWindow(QWidget):
         lay.addLayout(row)
         return page
 
-    def _show_detail(self, ts):
-        """打开一节历史课的回顾。"""
+    def _show_detail(self, ts, back=None, back_label=""):
+        """打开一节历史课的回顾。
+
+        back/back_label：← 按钮该退回哪儿。不传就按老样子退回主页——
+        比如从知识地图的「出题练一练」路径再点回这节课，不需要额外的退路。
+        """
         try:
             ls = store.get_lesson(float(ts))
         except Exception:
             ls = {}
         self._detail_lesson = ls
         self._detail_ts = ts
+        self._detail_back = back
+        self._detail_back_label = back_label
         self.det_title.setText(self._lesson_name(ls))
         self.det_sub.setText(
             tr(f"{ls.get('date', '')}　✓ 跟上了 {ls.get('ok', 0)} · 待复习 {ls.get('review', 0)}",
@@ -2244,6 +2263,8 @@ class FloatingWindow(QWidget):
         back_label = tr("← 主页", "← Home")
         if idx == PRACTICE and self._prac_back_label:
             back_label = self._prac_back_label     # 从地图/回顾进来的，返回到那儿
+        elif idx == DETAIL and self._detail_back_label:
+            back_label = self._detail_back_label    # 从课程管理进来的，返回到那儿
         elif idx == RECALL:
             back_label = tr("← 错题复习", "← Review")
         elif idx in (PROFILE, ASK):
@@ -2251,7 +2272,12 @@ class FloatingWindow(QWidget):
         self.back_btn.setText(back_label if idx in (REVIEW, PRACTICE, DETAIL, MINDMAP,
                                                     COURSES, RECALL, PROFILE, ASK)
                               else tr("← 回到课堂", "← Back to class"))
-        self.home_btn.setVisible(idx in (LISTEN, ECHO))
+        # 正在听课时不给回首页的路：中途溜去首页等于悄悄丢下这节课没收尾，
+        # 想走就得走「下课」——那条路会把回响和错题正经存下来。
+        # 折叠（fold_btn）不受影响，只是不让跳页面。
+        engine = getattr(getattr(self, "echo", None), "engine", None)
+        listening = idx == LISTEN and getattr(engine, "active", False)
+        self.home_btn.setVisible(idx == ECHO or (idx == LISTEN and not listening))
         self.end_btn.setVisible(idx == LISTEN)
         self.fold_btn.setVisible(idx == LISTEN)
         m = Spacing.MD if mini else Spacing.LG
@@ -2353,6 +2379,11 @@ class FloatingWindow(QWidget):
         if self._page == PRACTICE and self._prac_back:
             back, self._prac_back = self._prac_back, None
             self._prac_back_label = ""
+            back()
+            return
+        if self._page == DETAIL and self._detail_back:
+            back, self._detail_back = self._detail_back, None
+            self._detail_back_label = ""
             back()
             return
         if self._page == RECALL:
@@ -2767,10 +2798,6 @@ class FloatingWindow(QWidget):
             self.echo_dots.stop()
             self.echo_loading_lbl.setText(tr("回响生成失败，请检查网络后重试",
                                              "Couldn't generate the review — check your connection and try again"))
-
-    def _minimize(self):
-        hwnd = int(self.winId())
-        user32.ShowWindow(hwnd, SW_MINIMIZE)
 
     def nativeEvent(self, eventType, message):
         """Win32 WM_NCHITTEST → 无边框窗口边缘拖拽调整大小"""
