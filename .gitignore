@@ -19,6 +19,7 @@ Thumbs.db
 *.pyc
 
 debug.log
+build.log
 
 # PyInstaller 产物（几百 MB，不进仓库）
 build/
