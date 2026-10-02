@@ -151,9 +151,14 @@ def _skill_fields(sk) -> dict:
 
 def save_lesson(title: str, skills: list, review_chain: list, suggestion: str = "",
                 summary: str = "", highlights: list = None,
-                duration: float = 0.0, line_count: int = 0, char_count: int = 0) -> float:
+                duration: float = 0.0, line_count: int = 0, char_count: int = 0,
+                graph: dict = None) -> float:
     """存一节课的回响摘要，返回这条记录的 time 时间戳（给详情页定位用）。
-    skills 支持元组 / dict / 对象列表。最多保留最近 50 条。"""
+    skills 支持元组 / dict / 对象列表。最多保留最近 50 条。
+
+    graph 是可选的课前置关系（{"nodes": [...], "edges": [[前, 后], ...]}），
+    给课后「知识地图」用；不传也能画，mindmap 会按复习链和讲课顺序推导。
+    """
     skills = skills or []
     total = len(skills)
     ok = sum(1 for sk in skills if _skill_status(sk) == "ok")
@@ -174,6 +179,9 @@ def save_lesson(title: str, skills: list, review_chain: list, suggestion: str = 
         "char_count": char_count,
         "skills_detail": [_skill_fields(sk) for sk in skills],
     }
+    if graph and graph.get("nodes"):
+        record["graph"] = {"nodes": [str(n) for n in graph.get("nodes") or []],
+                           "edges": [[str(a), str(b)] for a, b in (graph.get("edges") or [])]}
     cur = _load_lessons()
     cur.append(record)
     _write_json(_lessons_path(), cur[-50:])

@@ -26,6 +26,7 @@ def suite(with_tray, with_ai):
         ("离线 UI 冒烟（页面切换 / 主按钮）", ["smoke_ui.py"], "offscreen"),
         ("主题回归（深色 + 浅色）", ["theme_check.py"], "off-screen 逐页取色"),
         ("右键菜单（样式 / 对比度 / 真渲染）", ["menu_check.py"], "offscreen"),
+        ("知识地图（建图 / 分层 / 详情 / 出题）", ["mindmap_check.py"], "不需要网络"),
         ("后端链路（离线 mock 数据）", ["smoke_backend.py", "--mock"], "不调用 AI"),
     ]
     if with_ai:

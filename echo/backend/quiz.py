@@ -79,7 +79,7 @@ def make_checkin_sync(timeline: str, transcript: str, current: str,
 
     use_llm=False 表示调用方明确要求不走 AI（离线模式），此时不再自己造 LLM。
     """
-    if llm is None and use_llm and config.DEEPSEEK_API_KEY:
+    if llm is None and use_llm and not config.OFFLINE and config.DEEPSEEK_API_KEY:
         try:
             llm = LLM()
         except Exception as e:
@@ -155,6 +155,8 @@ def to_mistake(question: dict, result: str) -> dict:
 def lesson_quiz_sync(lesson: dict, n: int = 4, llm=None) -> list:
     """按一节课的要点出课后练习题。没有 key 时返回 []，由调用方决定要不要换别的入口。"""
     lesson = lesson or {}
+    if config.OFFLINE:                    # 离线演示不联网
+        return []
     if llm is None and config.DEEPSEEK_API_KEY:
         try:
             llm = LLM()

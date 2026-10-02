@@ -69,7 +69,9 @@ def _fallback(item: dict) -> list:
 def generate_sync(item: dict, n: int = 3) -> list:
     """同步出题，给自检脚本 / 离线场景用。永远返回非空 list。"""
     item = item or {}
-    if not config.DEEPSEEK_API_KEY:
+    # 离线模式（ECHO_OFFLINE=1）下不许联网：只看 API key 会漏掉这个开关，
+    # 断网演示时点出题会一直卡到超时才退回兜底
+    if config.OFFLINE or not config.DEEPSEEK_API_KEY:
         return _fallback(item)
     try:
         system = prompts.PRACTICE_SYSTEM.format(n=n)

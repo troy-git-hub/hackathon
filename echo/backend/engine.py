@@ -74,6 +74,7 @@ class EchoReport:
     duration: float = 0.0             # 课程时长（秒）
     line_count: int = 0               # 转写句数
     char_count: int = 0               # 转写总字数
+    graph: dict = field(default_factory=dict)   # 知识点前置关系图，给课后「知识地图」用
 
 
 @dataclass
@@ -659,8 +660,31 @@ class EchoEngine:
                 log.warning("回响 LLM 失败，使用规则兜底: %s", e)
         if report is None:
             report = self._heuristic_echo()
+        report.graph = self._concept_graph()
         self._emit(sid, "status", "done")
         self._emit(sid, "echo", report)
+
+    def _concept_graph(self) -> dict:
+        """把时间轴上的知识点和它们的前置关系整理成一张图，给课后「知识地图」用。
+
+        边只保留两端都在图里的：前置概念如果没在时间轴上出现过，画出来会是个悬空的点。
+        """
+        with self._lock:
+            entries = list(self.entries)
+        nodes, edges = [], []
+        for e in entries:
+            topic = (e.concept.topic or "").strip()
+            if topic and not any(_same_topic(topic, n) for n in nodes):
+                nodes.append(topic)
+        for e in entries:
+            topic = e.concept.topic
+            for pre in (e.concept.prerequisites or []):
+                hit = next((n for n in nodes if _same_topic(pre, n)), None)
+                if hit and not _same_topic(hit, topic):
+                    edge = [hit, topic]
+                    if edge not in edges:
+                        edges.append(edge)
+        return {"nodes": nodes, "edges": edges}
 
     def _heuristic_echo(self) -> EchoReport:
         with self._lock:
