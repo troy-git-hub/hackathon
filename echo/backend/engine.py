@@ -16,7 +16,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
 from echo.backend import config, prompts
@@ -69,6 +69,11 @@ class EchoReport:
     skills: List[EchoSkill]
     review_chain: List[str]
     suggestion: str = ""
+    summary: str = ""                 # 「这节课讲了什么」，2~4 句连贯的话
+    highlights: List[str] = field(default_factory=list)   # 本节课要点，3~5 条
+    duration: float = 0.0             # 课程时长（秒）
+    line_count: int = 0               # 转写句数
+    char_count: int = 0               # 转写总字数
 
 
 @dataclass
@@ -118,6 +123,7 @@ class EchoEngine:
         self.session = 0
         self._stop = threading.Event()
         self._ticker: Optional[threading.Thread] = None
+        self.title = ""
         self.reset()
 
     # ================= 生命周期 =================
@@ -146,6 +152,14 @@ class EchoEngine:
 
     def stop(self):
         self._stop.set()
+
+    def set_title(self, name: str):
+        """给这节课命名，开课前调用；超长截断到 40 字。"""
+        self.title = (name or "").strip()[:40]
+
+    def clear_title(self):
+        """清空课程名，用于「开始新的一节课」时显式重置。"""
+        self.title = ""
 
     # ---------- session 隔离 ----------
     def _live(self, sid) -> bool:
@@ -516,6 +530,9 @@ class EchoEngine:
                     bps = "\n".join(f"- {b.breakpoint_tc} {b.concept}：缺失「{b.missing}」，{b.reason}"
                                     f"（{_bp_outcome(b)}）"
                                     for b in self.breakpoints)
+                    duration = time.time() - self.start_ts
+                    line_count = len(self.lines)
+                    char_count = sum(len(l.text) for l in self.lines)
                 data = self.llm.json(prompts.ECHO_SYSTEM,
                                      prompts.ECHO_USER.format(timeline=timeline,
                                                               feedback=feedback or "（无）",
@@ -531,8 +548,13 @@ class EchoEngine:
                     st = st if st in ("ok", "fixed", "review") else _status_from_mastery(m)
                     skills.append(EchoSkill(str(s.get("name", "")), m, st))
                 chain = [str(x) for x in (data.get("review_chain") or []) if x]
+                summary = str(data.get("summary") or "")
+                highlights = [str(x) for x in (data.get("highlights") or []) if x][:5]
                 if skills:
-                    report = EchoReport(skills, chain, str(data.get("suggestion") or ""))
+                    report = EchoReport(skills, chain, str(data.get("suggestion") or ""),
+                                        summary=summary, highlights=highlights,
+                                        duration=duration, line_count=line_count,
+                                        char_count=char_count)
             except Exception as e:
                 log.warning("回响 LLM 失败，使用规则兜底: %s", e)
         if report is None:
@@ -545,6 +567,9 @@ class EchoEngine:
             entries = list(self.entries)
             bps = list(self.breakpoints)
             fbs = [self._feedback_of(i) for i in range(len(entries))]
+            duration = time.time() - self.start_ts
+            line_count = len(self.lines)
+            char_count = sum(len(l.text) for l in self.lines)
         score = {"ok": 1.0, "warn": 0.55, "lost": 0.6, "bp": 0.15}
         skills = []
         for e, fb in zip(entries, fbs):
@@ -563,7 +588,18 @@ class EchoEngine:
             for e in entries:
                 if e.concept.topic == b.concept:
                     chain += e.concept.prerequisites[:2]
-        return EchoReport(skills, chain, f"建议复习：{chain[-1]}" if chain else "今天都跟上了！")
+        topics = "、".join(e.concept.topic for e in entries)
+        lost_topic = next((e.concept.topic for e, fb in zip(entries, fbs) if "bp" in fb), "")
+        if entries:
+            summary = f"这节课讲了：{topics}。"
+            if lost_topic:
+                summary += f"其中「{lost_topic}」你掉队过。"
+        else:
+            summary = "这节课 Echo 还没抓到足够的知识点，下次记得提前打开哦。"
+        highlights = [e.concept.summary for e in entries if e.concept.summary][:5]
+        return EchoReport(skills, chain, f"建议复习：{chain[-1]}" if chain else "今天都跟上了！",
+                          summary=summary, highlights=highlights,
+                          duration=duration, line_count=line_count, char_count=char_count)
 
     # ================= 工具 =================
     def _timeline_text(self) -> str:

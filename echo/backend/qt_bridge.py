@@ -79,6 +79,17 @@ class EchoBridge(QObject):
     def feedback(self, kind: str):
         self.engine.feedback(kind)
 
+    def set_title(self, name: str):
+        """给这节课命名。"""
+        self.engine.set_title(name)
+
+    def clear_title(self):
+        self.engine.clear_title()
+
+    @property
+    def title(self):
+        return self.engine.title
+
     def mark_fixed(self):
         """学生点了「✓ 补上了，继续听课」。"""
         self.engine.mark_fixed()

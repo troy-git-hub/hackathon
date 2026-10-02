@@ -8,8 +8,9 @@ Echo - 悬浮主窗口（学习工具风格）
   3 lesson   补课三段式：你已经知道 → 中间漏了这一步 → 所以现在你能听懂
   4 echo     回响：每个知识点一条掌握度条 + ✓ ? ! ；你的掉队点 ↓ 前置 ↓ 建议复习
   5 review   错题复习：历次掉队点的列表，可回看 / AI 出题 / 标记掌握
-  6 home     主页（启动页）：开始今天的学习 + 错题复习 + AI 出题 + 最近的课
+  6 home     主页（启动页）：命名并开始今天的学习 + 错题复习 + AI 出题 + 历史课程
   7 practice AI 出题练习：照着错题出题，看答案 + 解析
+  8 detail   历史课程详情：这节课讲了什么 + 要点 + 每个知识点掌握度
 """
 import html
 import re
@@ -44,10 +45,10 @@ from echo.components.pet import EMOTION_FILES, ASSETS_DIR
 
 SHADOW = 14
 WAIT_HINT = "播放网课后，Echo 会自动开始听"
-LISTEN, MINI, BREAK, LESSON, ECHO, REVIEW, HOME, PRACTICE = range(8)
+LISTEN, MINI, BREAK, LESSON, ECHO, REVIEW, HOME, PRACTICE, DETAIL = range(9)
 # 各页内容区宽度（不含阴影与内边距）
 PAGE_WIDTH = {LISTEN: 340, MINI: 300, BREAK: 380, LESSON: 400, ECHO: 380,
-              REVIEW: 380, HOME: 360, PRACTICE: 400}
+              REVIEW: 380, HOME: 360, PRACTICE: 400, DETAIL: 380}
 
 
 def _label(text="", style="", wrap=False):
@@ -188,6 +189,7 @@ class FloatingWindow(QWidget):
         self.stack.addWidget(self._build_review())   # 5
         self.stack.addWidget(self._build_home())     # 6
         self.stack.addWidget(self._build_practice()) # 7
+        self.stack.addWidget(self._build_detail())   # 8
         self.body_scroll = QScrollArea()
         self.body_scroll.setWidgetResizable(True)
         self.body_scroll.setFrameShape(QFrame.NoFrame)
@@ -500,9 +502,13 @@ class FloatingWindow(QWidget):
 
         head = QVBoxLayout()
         head.setSpacing(2)
-        head.addWidget(_label("今天的课", TITLE))
+        self.echo_title = _label("今天的课", TITLE)
+        self.echo_title.setWordWrap(True)
+        head.addWidget(self.echo_title)
         self.echo_sub = _label("", CAPTION)
         head.addWidget(self.echo_sub)
+        self.echo_stat = _label("", f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;")
+        head.addWidget(self.echo_stat)
         lay.addLayout(head)
 
         self.echo_loading = QFrame()
@@ -517,6 +523,10 @@ class FloatingWindow(QWidget):
         el.addWidget(self.echo_loading_lbl, 1)
         lay.addWidget(self.echo_loading)
 
+        # 「这节课讲了什么」：学生最想知道的一段
+        self.echo_sum_card, self.echo_sum_lbl, self.echo_hl_lay = self._summary_card()
+        lay.addWidget(self.echo_sum_card)
+
         self.echo_path = QWidget()
         self.echo_path_lay = QVBoxLayout(self.echo_path)
         self.echo_path_lay.setContentsMargins(0, 0, 0, 0)
@@ -529,9 +539,47 @@ class FloatingWindow(QWidget):
         row = QHBoxLayout()
         row.addWidget(_btn("错题复习", "Quiet", self._show_review))
         row.addStretch()
-        row.addWidget(_btn("开始新的一节课", "Link", self._restart))
+        row.addWidget(_btn("回到主页", "Link", self._show_home))
         lay.addLayout(row)
         return page
+
+    def _summary_card(self):
+        """「这节课讲了什么」卡片：一段话总结 + 要点列表。返回 (卡片, 总结 label, 要点 layout)。"""
+        card = QFrame()
+        card.setObjectName("SumCard")
+        card.setStyleSheet(f"QFrame#SumCard {{ background: {Colors.SURFACE};"
+                           f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.MD}px; }}")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        v.setSpacing(6)
+        v.addWidget(_label("这节课讲了什么",
+                           f"color: {Colors.ACCENT}; font-size: 12px; font-weight: 600;"))
+        text = _label("", f"color: {Colors.TEXT_PRIMARY}; font-size: 13px; line-height: 165%;", wrap=True)
+        v.addWidget(text)
+        hl = QVBoxLayout()
+        hl.setContentsMargins(0, 2, 0, 0)
+        hl.setSpacing(3)
+        v.addLayout(hl)
+        card.hide()
+        return card, text, hl
+
+    def _fill_summary(self, card, text_lbl, hl_lay, summary, highlights):
+        """把总结 + 要点填进 _summary_card 做出来的卡片；都没有就整张隐藏。"""
+        while hl_lay.count():
+            it = hl_lay.takeAt(0)
+            w = it.widget()
+            if w:
+                w.deleteLater()
+        summary = (summary or "").strip()
+        text_lbl.setText(summary)
+        text_lbl.setVisible(bool(summary))
+        for h in (highlights or [])[:5]:
+            h = str(h).strip()
+            if h:
+                hl_lay.addWidget(_label(f"· {h}",
+                                        f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;"
+                                        "line-height: 150%;", wrap=True))
+        card.setVisible(bool(summary) or hl_lay.count() > 0)
 
     # ----- 5 错题复习（主页）-----
     def _build_review(self) -> QWidget:
@@ -559,7 +607,7 @@ class FloatingWindow(QWidget):
 
         row = QHBoxLayout()
         row.addStretch()
-        row.addWidget(_btn("开始新的一节课", "Link", self._restart))
+        row.addWidget(_btn("回到主页", "Link", self._show_home))
         lay.addLayout(row)
         return page
 
@@ -580,8 +628,9 @@ class FloatingWindow(QWidget):
 
     def _review_card(self, item):
         card = QFrame()
-        card.setStyleSheet(f"QFrame {{ background: {Colors.SURFACE}; border: 1px solid {Colors.BORDER};"
-                           f"border-radius: {Radius.MD}px; }}")
+        card.setObjectName("ReviewCard")
+        card.setStyleSheet(f"QFrame#ReviewCard {{ background: {Colors.SURFACE};"
+                           f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.MD}px; }}")
         v = QVBoxLayout(card)
         v.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
         v.setSpacing(6)
@@ -629,8 +678,21 @@ class FloatingWindow(QWidget):
         self.home_hello = _label("今天也来听课", TITLE)
         head.addWidget(self.home_hello)
         self.home_sub = _label("", CAPTION)
+        self.home_sub.setWordWrap(True)
         head.addWidget(self.home_sub)
         lay.addLayout(head)
+
+        # 开课前先给这节课起个名，下课后在历史里一眼能认出来
+        lay.addWidget(_label("这节课叫什么？", CAPTION))
+        self.title_edit = QLineEdit()
+        self.title_edit.setPlaceholderText("例如：初二数学 · 正比例函数（留空就用第一个知识点）")
+        self.title_edit.setStyleSheet(
+            f"QLineEdit {{ background: {Colors.SURFACE}; color: {Colors.TEXT_PRIMARY};"
+            f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.SM}px; padding: 7px 10px;"
+            "font-size: 13px; }"
+            f"QLineEdit:focus {{ border-color: {Colors.ACCENT}; }}")
+        self.title_edit.returnPressed.connect(self._start_today)
+        lay.addWidget(self.title_edit)
 
         self.btn_today = _btn("开始今天的学习", "Accent", self._start_today,
                               "开一节新课，Echo 开始听你的网课")
@@ -644,20 +706,25 @@ class FloatingWindow(QWidget):
             "AI 出题练习", "让 AI 按你的错题出题，真的练一下", "开始练", self._start_practice)
         lay.addWidget(self.home_practice_card)
 
-        self.home_recent_cap = _label("最近的课", CAPTION)
+        self.home_recent_cap = _label("历史课程", CAPTION)
         lay.addWidget(self.home_recent_cap)
         self.home_recent = QWidget()
         self.home_recent_lay = QVBoxLayout(self.home_recent)
         self.home_recent_lay.setContentsMargins(0, 0, 0, 0)
-        self.home_recent_lay.setSpacing(4)
+        self.home_recent_lay.setSpacing(Spacing.SM)
         lay.addWidget(self.home_recent)
+        self.home_empty = _label("还没有上过课。起个名字，点上面的按钮就能开始。",
+                                 f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;", wrap=True)
+        lay.addWidget(self.home_empty)
         return page
 
     def _home_card(self, title, desc, action, slot):
         """主页上的一张功能卡：标题 + 说明 + 右侧按钮；副标题文字后面会被动态更新。"""
         card = QFrame()
-        card.setStyleSheet(f"QFrame {{ background: {Colors.SURFACE}; border: 1px solid {Colors.BORDER};"
-                           f"border-radius: {Radius.MD}px; }}")
+        # 选择器必须带 objectName：QLabel 继承自 QFrame，不限定就会被套上一层框
+        card.setObjectName("HomeCard")
+        card.setStyleSheet(f"QFrame#HomeCard {{ background: {Colors.SURFACE};"
+                           f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.MD}px; }}")
         h = QHBoxLayout(card)
         h.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.MD, Spacing.MD)
         h.setSpacing(Spacing.SM)
@@ -673,6 +740,32 @@ class FloatingWindow(QWidget):
         card.sub_lbl, card.btn = d, b
         return card
 
+    def _lesson_row(self, ls):
+        """历史课程的一行：点进去看详情。"""
+        card = QFrame()
+        card.setObjectName("LessonRow")
+        card.setStyleSheet(f"QFrame#LessonRow {{ background: {Colors.SURFACE};"
+                           f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.MD}px; }}")
+        h = QHBoxLayout(card)
+        h.setContentsMargins(Spacing.LG, Spacing.SM, Spacing.MD, Spacing.SM)
+        h.setSpacing(Spacing.SM)
+        col = QVBoxLayout()
+        col.setSpacing(2)
+        col.addWidget(_label(ls.get("title", "一节课"),
+                             f"color: {Colors.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"))
+        mins = int((ls.get("duration") or 0) // 60)
+        bits = [ls.get("date", ""), f"{ls.get('total', 0)} 个知识点"]
+        if mins:
+            bits.append(f"{mins} 分钟")
+        if ls.get("review"):
+            bits.append(f"{ls['review']} 个待复习")
+        col.addWidget(_label(" · ".join(b for b in bits if b),
+                             f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"))
+        h.addLayout(col, 1)
+        h.addWidget(_btn("看回顾", "Quiet", lambda t=ls.get("time", 0): self._show_detail(t)),
+                    0, Qt.AlignVCenter)
+        return card
+
     def _show_home(self):
         self._render_home()
         self._show_page(HOME)
@@ -680,7 +773,7 @@ class FloatingWindow(QWidget):
     def _render_home(self):
         try:
             st = store.stats()
-            lessons = store.list_lessons(3)
+            lessons = store.list_lessons(5)
         except Exception:
             st, lessons = {"lessons": 0, "pending": 0, "mastered": 0}, []
         pending, mastered, n_lesson = st.get("pending", 0), st.get("mastered", 0), st.get("lessons", 0)
@@ -695,26 +788,29 @@ class FloatingWindow(QWidget):
 
         self.home_review_card.sub_lbl.setText(
             f"{pending} 个掉队过的知识点等你回看" if pending else "暂时没有错题，听课时点「我掉队了」就会收进来")
-        self.home_review_card.btn.setEnabled(bool(pending))
         self.home_practice_card.sub_lbl.setText(
-            "让 AI 按你的错题出题，真的练一下" if pending else "有错题之后，AI 就能照着出题")
-        self.home_practice_card.btn.setEnabled(bool(pending))
+            f"让 AI 照着这 {pending} 个错题出题，真的练一下" if pending else "有错题之后，AI 就能照着出题")
 
         while self.home_recent_lay.count():
             w = self.home_recent_lay.takeAt(0).widget()
             if w:
                 w.deleteLater()
         for ls in lessons:
-            tail = f"{ls.get('ok', 0)} 个跟上 · {ls.get('review', 0)} 个待复习"
-            row = _label(f"· {ls.get('title', '一节课')}　{ls.get('date', '')}　{tail}",
-                         f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;", wrap=True)
-            self.home_recent_lay.addWidget(row)
+            self.home_recent_lay.addWidget(self._lesson_row(ls))
         has = bool(lessons)
         self.home_recent_cap.setVisible(has)
         self.home_recent.setVisible(has)
+        self.home_empty.setVisible(not has)
 
     def _start_today(self):
+        """给这节课命名并开课。"""
+        name = self.title_edit.text().strip()
+        if hasattr(self.echo, "set_title"):
+            self.echo.set_title(name)
+        self.title_edit.clear()
         self._restart()
+        if name:
+            self.topic_lbl.setText(name)
 
     # ----- 7 AI 出题练习 -----
     def _build_practice(self) -> QWidget:
@@ -870,6 +966,71 @@ class FloatingWindow(QWidget):
             store.mark_reviewed(topic)
         self._show_home()
 
+    # ----- 8 历史课程详情 -----
+    def _build_detail(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(Spacing.MD)
+
+        head = QVBoxLayout()
+        head.setSpacing(2)
+        self.det_title = _label("", TITLE)
+        self.det_title.setWordWrap(True)
+        head.addWidget(self.det_title)
+        self.det_sub = _label("", CAPTION)
+        head.addWidget(self.det_sub)
+        self.det_stat = _label("", f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;")
+        head.addWidget(self.det_stat)
+        lay.addLayout(head)
+
+        self.det_sum_card, self.det_sum_lbl, self.det_hl_lay = self._summary_card()
+        lay.addWidget(self.det_sum_card)
+
+        self.det_path = QWidget()
+        self.det_path_lay = QVBoxLayout(self.det_path)
+        self.det_path_lay.setContentsMargins(0, 0, 0, 0)
+        self.det_path_lay.setSpacing(0)
+        lay.addWidget(self.det_path)
+
+        self.det_review = ReviewChain()
+        lay.addWidget(self.det_review)
+
+        row = QHBoxLayout()
+        row.addWidget(_btn("错题复习", "Quiet", self._show_review))
+        row.addStretch()
+        row.addWidget(_btn("回到主页", "Link", self._show_home))
+        lay.addLayout(row)
+        return page
+
+    def _show_detail(self, ts):
+        """打开一节历史课的回顾。"""
+        try:
+            ls = store.get_lesson(float(ts))
+        except Exception:
+            ls = {}
+        self.det_title.setText(ls.get("title") or "这节课")
+        self.det_sub.setText(
+            f"{ls.get('date', '')}　✓ 跟上了 {ls.get('ok', 0)} · 待复习 {ls.get('review', 0)}".strip())
+        self.det_stat.setText(self._stat_line(ls))
+        self._fill_summary(self.det_sum_card, self.det_sum_lbl, self.det_hl_lay,
+                           ls.get("summary", ""), ls.get("highlights", []))
+
+        while self.det_path_lay.count():
+            w = self.det_path_lay.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        skills = ls.get("skills_detail") or []
+        for sk in skills:
+            st = echo_status(sk.get("status", "ok"))
+            m = sk.get("mastery", 0.0)
+            note = "掉队过 · 已补上" if st == "fixed" else ""
+            self.det_path_lay.addWidget(SkillRow(sk.get("name", ""), m, echo_mark(st, m), note))
+        self.det_path.setVisible(bool(skills))
+        self.det_review.setVisible(
+            self.det_review.set_chain(ls.get("review_chain") or [], ls.get("suggestion", "")))
+        self._show_page(DETAIL)
+
     # ================= 页面切换 / 尺寸 =================
     def _show_page(self, idx):
         self._page = idx
@@ -880,8 +1041,8 @@ class FloatingWindow(QWidget):
 
         mini = idx == MINI
         self.header.setVisible(not mini)
-        self.back_btn.setVisible(idx in (BREAK, LESSON, REVIEW, PRACTICE))
-        self.back_btn.setText("← 主页" if idx in (REVIEW, PRACTICE) else "← 回到课堂")
+        self.back_btn.setVisible(idx in (BREAK, LESSON, REVIEW, PRACTICE, DETAIL))
+        self.back_btn.setText("← 主页" if idx in (REVIEW, PRACTICE, DETAIL) else "← 回到课堂")
         self.home_btn.setVisible(idx in (LISTEN, ECHO))
         self.end_btn.setVisible(idx == LISTEN)
         self.fold_btn.setVisible(idx == LISTEN)
@@ -956,8 +1117,8 @@ class FloatingWindow(QWidget):
         self._show_page(LISTEN)
 
     def _back(self):
-        """← 按钮：复习/练习页回主页，断点/补课页回课堂。"""
-        if self._page in (REVIEW, PRACTICE):
+        """← 按钮：复习/练习/回顾页回主页，断点/补课页回课堂。"""
+        if self._page in (REVIEW, PRACTICE, DETAIL):
             self._show_home()
         else:
             self._show_page(LISTEN)
@@ -984,8 +1145,11 @@ class FloatingWindow(QWidget):
         self.echo_dots.start()
         self.echo_loading.show()
         self.echo_path.hide()
+        self.echo_sum_card.hide()
         self.review_card.hide()
         self.echo_sub.setText("")
+        self.echo_stat.setText("")
+        self.echo_title.setText((getattr(self.echo, "title", "") or "").strip() or "今天的课")
         self.echo.end_lesson()
         self._show_page(ECHO)
 
@@ -1208,6 +1372,11 @@ class FloatingWindow(QWidget):
 
         cnt = {k: sum(1 for r in rows if r[2] == k) for k in ("ok", "unsure", "lost")}
         self.echo_sub.setText(f"✓ 跟上了 {cnt['ok']} · ? 有点懵 {cnt['unsure']} · ! 掉队了 {cnt['lost']}")
+        title = (getattr(self.echo, "title", "") or "").strip()
+        self.echo_title.setText(title or "今天的课")
+        self.echo_stat.setText(self._stat_line(report))
+        self._fill_summary(self.echo_sum_card, self.echo_sum_lbl, self.echo_hl_lay,
+                           getattr(report, "summary", ""), getattr(report, "highlights", []))
         self.review_card.setVisible(self.review_card.set_chain(report.review_chain, report.suggestion))
         cnt["review"] = cnt["unsure"] + cnt["lost"]
         self._save_review()
@@ -1215,12 +1384,35 @@ class FloatingWindow(QWidget):
         self._cat("ok" if not cnt["review"] else "idle")
         self._fit()
 
+    @staticmethod
+    def _stat_line(src) -> str:
+        """时长 · 知识点数 · 转写字数，src 可以是 EchoReport 或归档 dict。"""
+        get = src.get if isinstance(src, dict) else lambda k, d=0: getattr(src, k, d)
+        mins = int((get("duration", 0) or 0) // 60)
+        total = get("total", 0) if isinstance(src, dict) else len(getattr(src, "skills", []) or [])
+        bits = []
+        if mins:
+            bits.append(f"听了 {mins} 分钟")
+        if total:
+            bits.append(f"{total} 个知识点")
+        chars = get("char_count", 0) or 0
+        if chars:
+            bits.append(f"转写 {chars} 字")
+        return " · ".join(bits)
+
     def _save_lesson(self, report):
-        """把这节课存进历史，主页「最近的课」里能看到。"""
+        """把这节课存进历史，主页「历史课程」里能看到。"""
         try:
-            cs = self.echo.engine.concepts()
-            title = cs[0].topic if cs else (report.skills[0].name if report.skills else "一节课")
-            store.save_lesson(title, report.skills, report.review_chain, report.suggestion)
+            title = (getattr(self.echo, "title", "") or "").strip()
+            if not title:
+                cs = self.echo.engine.concepts()
+                title = cs[0].topic if cs else (report.skills[0].name if report.skills else "一节课")
+            store.save_lesson(title, report.skills, report.review_chain, report.suggestion,
+                              summary=getattr(report, "summary", ""),
+                              highlights=getattr(report, "highlights", []),
+                              duration=getattr(report, "duration", 0.0),
+                              line_count=getattr(report, "line_count", 0),
+                              char_count=getattr(report, "char_count", 0))
         except Exception:
             pass
 

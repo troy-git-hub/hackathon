@@ -108,6 +108,10 @@ window._show_home()
 app.processEvents()
 assert window._page == ui.HOME, "主页打不开"
 assert window.home_sub.text(), "主页统计行为空"
+# 两张功能卡的按钮任何时候都能点（没错题时进去看空状态提示）
+assert window.home_review_card.btn.isEnabled(), "「去复习」按钮不可点"
+assert window.home_practice_card.btn.isEnabled(), "「开始练」按钮不可点"
+window.title_edit.setText("初二数学 · 正比例函数")
 QTest.mouseClick(window.btn_today, Qt.LeftButton)
 app.processEvents()
 assert window._page == ui.LISTEN, "「开始今天的学习」没有进入听课页"
@@ -115,6 +119,10 @@ assert window._page == ui.LISTEN, "「开始今天的学习」没有进入听课
 window._show_review()
 app.processEvents()
 assert window._page == ui.REVIEW, "错题复习页打不开"
+
+window._show_detail(0)          # 不存在的归档：应安全退化，不崩
+app.processEvents()
+assert window._page == ui.DETAIL, "历史课程回顾页打不开"
 
 window.close()
 print("UI smoke passed: one window, avatar and primary flow work")

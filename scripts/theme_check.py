@@ -185,7 +185,7 @@ def run_child(theme, shots):
     allowed = {c for c in allowed if c is not None}
     pages = [(ui.LISTEN, "听课"), (ui.MINI, "折叠"), (ui.BREAK, "断点"),
              (ui.LESSON, "补课"), (ui.ECHO, "回响"), (ui.HOME, "主页"),
-             (ui.REVIEW, "错题"), (ui.PRACTICE, "练习")]
+             (ui.REVIEW, "错题"), (ui.PRACTICE, "练习"), (ui.DETAIL, "回顾")]
     for idx, label in pages:
         window._show_page(idx)
         if idx == ui.BREAK:

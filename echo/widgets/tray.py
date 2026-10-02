@@ -192,7 +192,7 @@ class EchoTray(QObject):
         m.addAction(f"圈一下问 AI    {self.keys[3]}".rstrip(), self.circle_ask)
         self.act_end = m.addAction("下课，生成回响", self.end_lesson)
         m.addAction("错题复习", self.review)
-        m.addAction("开始新的一节课", self.restart)
+        m.addAction("开始新的一节课…", self.restart)
         m.addSeparator()
         self.act_offline = QAction("离线模式（不调 AI）", m, checkable=True)
         self.act_offline.triggered.connect(self.toggle_offline)
@@ -276,8 +276,12 @@ class EchoTray(QObject):
         self.win._go_echo()
 
     def restart(self):
+        """回主页给新课命名，再由主页的「开始今天的学习」正式开课。"""
         self.show_window()
-        self.win._restart()
+        if hasattr(self.win, "_show_home"):
+            self.win._show_home()
+        else:
+            self.win._restart()
 
     def review(self):
         self.show_window()

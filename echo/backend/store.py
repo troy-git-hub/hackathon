@@ -130,8 +130,30 @@ def _skill_status(sk) -> str:
     return getattr(sk, "status", "ok")
 
 
-def save_lesson(title: str, skills: list, review_chain: list, suggestion: str = "") -> None:
-    """存一节课的回响摘要。skills 支持元组 / dict / 对象列表。最多保留最近 50 条。"""
+def _skill_fields(sk) -> dict:
+    """统一吃 (name, mastery, status) 元组 / dict / 对象三种形式，取出三个字段。"""
+    if isinstance(sk, dict):
+        name, mastery, status = sk.get("name", ""), sk.get("mastery", 0.0), sk.get("status", "ok")
+    elif isinstance(sk, (list, tuple)):
+        name = sk[0] if len(sk) > 0 else ""
+        mastery = sk[1] if len(sk) > 1 else 0.0
+        status = sk[2] if len(sk) > 2 else "ok"
+    else:
+        name = getattr(sk, "name", "")
+        mastery = getattr(sk, "mastery", 0.0)
+        status = getattr(sk, "status", "ok")
+    try:
+        mastery = float(mastery)
+    except (TypeError, ValueError):
+        mastery = 0.0
+    return {"name": str(name), "mastery": mastery, "status": str(status)}
+
+
+def save_lesson(title: str, skills: list, review_chain: list, suggestion: str = "",
+                summary: str = "", highlights: list = None,
+                duration: float = 0.0, line_count: int = 0, char_count: int = 0) -> float:
+    """存一节课的回响摘要，返回这条记录的 time 时间戳（给详情页定位用）。
+    skills 支持元组 / dict / 对象列表。最多保留最近 50 条。"""
     skills = skills or []
     total = len(skills)
     ok = sum(1 for sk in skills if _skill_status(sk) == "ok")
@@ -145,10 +167,25 @@ def save_lesson(title: str, skills: list, review_chain: list, suggestion: str = 
         "review": total - ok,
         "review_chain": list(review_chain or []),
         "suggestion": suggestion or "",
+        "summary": summary or "",
+        "highlights": [str(x) for x in (highlights or [])],
+        "duration": duration,
+        "line_count": line_count,
+        "char_count": char_count,
+        "skills_detail": [_skill_fields(sk) for sk in skills],
     }
     cur = _load_lessons()
     cur.append(record)
     _write_json(_lessons_path(), cur[-50:])
+    return now
+
+
+def get_lesson(ts: float) -> dict:
+    """按 time 时间戳取一条课程归档，找不到返回 {}。"""
+    for it in _load_lessons():
+        if abs(it.get("time", 0) - ts) < 0.001:
+            return it
+    return {}
 
 
 def list_lessons(limit: int = 5) -> list:
