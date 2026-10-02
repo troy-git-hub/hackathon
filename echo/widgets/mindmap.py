@@ -289,6 +289,9 @@ class MindMapPage(QWidget):
     """
 
     practice_requested = pyqtSignal(str)
+    # 页面内容变高/变矮了（换课、出题回来、展开详情），宿主据此重新适配窗口高度；
+    # 不接的话出题回来那几张卡会被窗口底边截掉
+    content_changed = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -296,6 +299,7 @@ class MindMapPage(QWidget):
         self._mistakes = []
         self._graph = {"nodes": [], "edges": []}
         self._build()
+        self.detail.content_changed.connect(self.content_changed.emit)
 
     # ---------- 构建 ----------
     def _build(self):
@@ -426,6 +430,7 @@ class MindMapPage(QWidget):
         self.canvas.set_graph(self._graph)
         self.detail.clear()
         self.detail.setVisible(bool(nodes))
+        self.content_changed.emit()
 
     def select(self, topic: str):
         """外部直接选中某个知识点（比如从别处跳进来）。"""
@@ -443,6 +448,7 @@ class _DetailPanel(QFrame):
     """单个知识点的详情：老师怎么讲的 + 缺的那一步 + 一道题和解析。"""
 
     practice_requested = pyqtSignal(str)
+    content_changed = pyqtSignal()          # 详情面板变高了，宿主该重新算窗口高度
     # 出题在后台线程，出好后必须回到主线程再动控件（PyQt 信号跨线程会自动排队）
     _questions_ready = pyqtSignal(object)
 
@@ -549,6 +555,7 @@ class _DetailPanel(QFrame):
             self.miss_lbl.setText("这个知识点没掉队过，可以直接出题确认一下。")
             self.miss_lbl.setStyleSheet(f"color:{Colors.TEXT_SECONDARY};")
         self.miss_lbl.setVisible(True)
+        self.content_changed.emit()
 
     def load_questions(self, lesson: dict, topic: str, mistakes: list = None):
         self._clear_quiz()
@@ -562,6 +569,7 @@ class _DetailPanel(QFrame):
             self._questions_ready.emit(questions)
 
         mindmap.questions_for(lesson, topic, mistakes, n=2, on_done=done, on_error=lambda _m: None)
+        self.content_changed.emit()
 
     def _render_questions(self, questions: list):
         # 这个槽跑在主线程（信号跨线程排队过来的），可以安全动控件
@@ -602,6 +610,7 @@ class _DetailPanel(QFrame):
                 ex.setStyleSheet(f"color:{Colors.TEXT_SECONDARY}; background: transparent;")
                 box.addWidget(ex)
             self.quiz_box.addWidget(card)
+        self.content_changed.emit()
 
     def _clear_quiz(self):
         while self.quiz_box.count():

@@ -180,6 +180,8 @@ class FloatingWindow(QWidget):
         if hasattr(self.echo, "quiz_ready"):
             self.echo.quiz_ready.connect(self._on_quiz_ready)
         self.mindmap_page.practice_requested.connect(self._go_practice)
+        # 地图页内容变高变矮时重新适配窗口（出题回来那几张卡不然会被底边截掉）
+        self.mindmap_page.content_changed.connect(self._fit)
         # 注意：不在这里 echo.start()。启动停在主页，等用户点「开始今天的学习」才真正开课+抓音频。
 
         # 现场兜底快捷键（Echo 窗口在前台时有效）
