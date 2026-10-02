@@ -97,7 +97,7 @@ pip install pyinstaller
 #    先 python main.py 跑一次把模型下到 HF 缓存，再复制成：
 #    models/faster-whisper-small/{config.json, model.bin, tokenizer.json, vocabulary.txt}
 build.bat                        # 产出 dist/Echo/（内含模型）
-# 用 Inno Setup 打开 installer/setup.iss 编译 → dist/Echo-Setup-1.2.exe
+# 用 Inno Setup 打开 installer/setup.iss 编译 → dist/Echo-Setup-1.3.exe
 ```
 
 > 克隆仓库后没放模型就 build.bat 会失败（找不到 `models/faster-whisper-small`），先按第 0 步准备。
@@ -105,4 +105,4 @@ build.bat                        # 产出 dist/Echo/（内含模型）
 
 ---
 
-*Echo 1.2 — 49 小时产品冲刺产物。*
+*Echo 1.3 — 49 小时产品冲刺产物。*
