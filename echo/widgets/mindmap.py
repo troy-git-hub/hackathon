@@ -4,6 +4,9 @@ Echo - 知识地图
 一节课上完，把知识点画成一张图：节点是知识点，连线是「学这个之前得先懂那个」。
 点某个节点，下面就是它的详情 —— 老师当时怎么讲的、不懂的话这一步缺在哪、以及一道题和解析。
 
+画布是可交互的：空白处拖动平移、滚轮缩放、点节点选中、直接把节点拖到别处。
+新开一张图会自动缩放到刚好放得下，之后由你自己摆。
+
 自包含组件，宿主只要：
     map = MindMapPage(parent)
     map.show_lesson(lesson, mistakes)      # lesson 传 store.get_lesson(ts)，或 mindmap.from_report(report)
@@ -12,17 +15,20 @@ Echo - 知识地图
 
 图上全 ok 的知识点也画，但弱化显示；掉队过/待回看的用强调色，一眼能看出卡在哪。
 """
-from PyQt5.QtCore import QPointF, QRectF, Qt, pyqtSignal
+from PyQt5.QtCore import QPointF, QRectF, QSizeF, Qt, pyqtSignal
 from PyQt5.QtGui import QBrush, QColor, QFontMetrics, QPainter, QPainterPath, QPen
-from PyQt5.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
-                             QSizePolicy, QVBoxLayout, QWidget)
+from PyQt5.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
+                             QVBoxLayout, QWidget)
 
 from echo.backend import mindmap
 from echo.theme import Colors, Radius, Spacing, font
 
-NODE_W, NODE_H = 112, 40
-LEVEL_H = 76
-PAD_X, PAD_Y = 14, 16
+NODE_W, NODE_H = 118, 42
+LEVEL_H = 88
+GAP_X = 20
+PAD = 24
+MIN_SCALE, MAX_SCALE = 0.45, 2.4
+DRAG_SLOP = 4          # 超过这个位移才算拖动，不然算点击
 
 
 def status_style(status: str) -> tuple:
@@ -35,109 +41,218 @@ def status_style(status: str) -> tuple:
 
 
 class _Canvas(QWidget):
-    """只负责画图和处理点击。"""
+    """知识地图画布。
+
+    画的时候把画笔平移到 _offset、缩放到 _scale，之后一律用「世界坐标」画，
+    所以拖动只是改 _offset、缩放只是改 _scale，节点位置不用重算。
+    """
 
     node_clicked = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMouseTracking(True)
-        self.setCursor(Qt.ArrowCursor)
-        self._nodes = []          # [(topic, status, QRectF)]
-        self._edges = []          # [(from_rect, to_rect, topic)]
+        self.setMinimumHeight(240)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._nodes = []          # [(topic, status)]
+        self._pos = {}            # topic -> QPointF（世界坐标）
+        self._levels = {}         # topic -> 依赖层级，重置视图时用来还原排布
+        self._edges = []          # [(topic_a, topic_b)]
+        self._world = QSizeF(1, 1)
+        self._scale = 1.0
+        self._offset = QPointF(0, 0)
         self._selected = ""
         self._hover = ""
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._drag = None
+        self._press = None
+        self._moved = False
+        self._need_fit = False
+        self._user_moved = False   # 学生自己拖过/缩放过之后，就别再自动改他的视图
 
-    def set_graph(self, graph: dict, selected: str = ""):
-        self._selected = selected
+    # ---------------- 数据 ----------------
+    def set_graph(self, graph: dict, selected: str = "", keep_positions: bool = False):
+        """换一张图。keep_positions=True 时保留用户拖动后的位置（只换选中态用）。"""
         nodes = graph.get("nodes") or []
         edges = graph.get("edges") or []
-        by_level = {}
-        for n in nodes:
-            by_level.setdefault(n.get("level", 0), []).append(n)
-        levels = sorted(by_level)
-
-        rects = {}
-        width = max(self.width(), 320)
-        height = PAD_Y * 2 + max(1, len(levels)) * LEVEL_H
-        for li, lv in enumerate(levels):
-            row = by_level[lv]
-            n = len(row)
-            # 每层横向均分，整层居中；层内节点多时压缩间距
-            span = width - PAD_X * 2
-            step = span / max(1, n)
-            w = min(NODE_W, max(64, step - 8))
-            y = PAD_Y + li * LEVEL_H + (LEVEL_H - NODE_H) / 2
-            for i, node in enumerate(row):
-                x = PAD_X + step * i + (step - w) / 2
-                rects[node["id"]] = QRectF(x, y, w, NODE_H)
-
-        self._nodes = [(n["id"], n.get("status", "ok"), rects[n["id"]]) for n in nodes
-                       if n["id"] in rects]
-        topic_rects = {n["id"]: rects[n["id"]] for n in nodes if n["id"] in rects}
-        self._edges = [(topic_rects[e["from"]], topic_rects[e["to"]])
-                       for e in edges
-                       if e.get("from") in topic_rects and e.get("to") in topic_rects]
-        self.setMinimumHeight(int(height))
+        topics = [n["id"] for n in nodes]
+        self._nodes = [(n["id"], n.get("status", "ok")) for n in nodes]
+        self._levels = {n["id"]: n.get("level", 0) for n in nodes}
+        self._edges = [(e["from"], e["to"]) for e in edges
+                       if e.get("from") is not None and e.get("to") is not None]
+        if not keep_positions or set(self._pos) != set(topics):
+            self._auto_layout(nodes)
+            self._need_fit = True
+            self._user_moved = False
+        self._selected = selected
         self.update()
 
+    def _auto_layout(self, nodes: list):
+        """默认排布：按依赖层级从上往下，同层横向均分。"""
+        by_level = {}
+        for n in nodes:
+            by_level.setdefault(n.get("level", 0), []).append(n["id"])
+        levels = sorted(by_level)
+        widest = max((len(by_level[lv]) for lv in levels), default=1)
+        width = max(320.0, widest * (NODE_W + GAP_X) + PAD * 2)
+        self._pos = {}
+        for li, lv in enumerate(levels):
+            row = by_level[lv]
+            step = width / len(row)
+            y = PAD + li * LEVEL_H
+            for i, topic in enumerate(row):
+                self._pos[topic] = QPointF(step * i + (step - NODE_W) / 2, y)
+        self._world = QSizeF(width, PAD * 2 + max(1, len(levels)) * LEVEL_H)
+
+    def reset_view(self):
+        """回到默认排布和缩放。"""
+        self._auto_layout([{"id": t, "level": self._levels.get(t, 0)} for t, _s in self._nodes])
+        self._user_moved = False
+        self.fit()
+
+    def resizeEvent(self, e):
+        """学生还没自己摆弄过时，跟着尺寸重新适配 —— 详情面板一长高，地图容易被挤出去。"""
+        super().resizeEvent(e)
+        if self._nodes and not self._user_moved:
+            self.fit()
+
+    def fit(self):
+        w, h = max(self.width(), 40), max(self.height(), 40)
+        sx = w / max(self._world.width(), 1.0)
+        sy = h / max(self._world.height(), 1.0)
+        self._scale = max(MIN_SCALE, min(MAX_SCALE, min(sx, sy, 1.0)))
+        self._offset = QPointF((w - self._world.width() * self._scale) / 2,
+                               (h - self._world.height() * self._scale) / 2)
+        self.update()
+
+    def _ensure_fit(self):
+        if self._need_fit and self.width() > 60 and self._nodes:
+            self._need_fit = False
+            self.fit()
+
+    # ---------------- 坐标 ----------------
+    def _rect(self, topic: str) -> QRectF:
+        p = self._pos.get(topic)
+        return QRectF(p.x(), p.y(), NODE_W, NODE_H) if p else QRectF()
+
+    def _to_world(self, pos) -> QPointF:
+        return QPointF((pos.x() - self._offset.x()) / self._scale,
+                       (pos.y() - self._offset.y()) / self._scale)
+
+    def _from_world(self, pt: QPointF) -> QPointF:
+        return QPointF(pt.x() * self._scale + self._offset.x(),
+                       pt.y() * self._scale + self._offset.y())
+
     def _hit(self, pos) -> str:
-        for topic, _status, rect in self._nodes:
-            if rect.contains(QPointF(pos)):
+        wp = self._to_world(pos)
+        for topic, _status in self._nodes:
+            if self._rect(topic).contains(wp):
                 return topic
         return ""
 
+    # ---------------- 交互 ----------------
+    def mousePressEvent(self, e):
+        if e.button() != Qt.LeftButton:
+            return
+        self._press = QPointF(e.pos())
+        self._moved = False
+        hit = self._hit(e.pos())
+        if hit:
+            self._drag = {"kind": "node", "topic": hit,
+                          "start": self._to_world(e.pos()),
+                          "origin": QPointF(self._pos[hit])}
+        else:
+            self._drag = {"kind": "pan", "origin": QPointF(self._offset)}
+
     def mouseMoveEvent(self, e):
+        if self._drag:
+            if (QPointF(e.pos()) - self._press).manhattanLength() > DRAG_SLOP:
+                self._moved = True
+            if self._moved:
+                self._user_moved = True    # 学生自己动过视图了，之后不再自动适配
+                if self._drag["kind"] == "pan":
+                    self._offset = self._drag["origin"] + (QPointF(e.pos()) - self._press)
+                else:
+                    topic = self._drag["topic"]
+                    delta = self._to_world(e.pos()) - self._drag["start"]
+                    self._pos[topic] = self._drag["origin"] + delta
+                self.update()
+            return
         hit = self._hit(e.pos())
         if hit != self._hover:
             self._hover = hit
-            self.setCursor(Qt.PointingHandCursor if hit else Qt.ArrowCursor)
+            self.setCursor(Qt.OpenHandCursor if not hit else Qt.PointingHandCursor)
             self.update()
 
     def mouseReleaseEvent(self, e):
-        if e.button() == Qt.LeftButton:
-            hit = self._hit(e.pos())
-            if hit:
-                self._selected = hit
-                self.node_clicked.emit(hit)
-                self.update()
+        if e.button() != Qt.LeftButton:
+            return
+        drag, moved = self._drag, self._moved
+        self._drag = None
+        if drag and not moved and drag["kind"] == "node":
+            self._selected = drag["topic"]
+            self.node_clicked.emit(drag["topic"])
+            self.update()
+        elif not drag or not moved:
+            self.update()
 
+    def wheelEvent(self, e):
+        """滚轮缩放，以光标为中心。"""
+        factor = 1.12 ** (e.angleDelta().y() / 120.0)
+        new = max(MIN_SCALE, min(MAX_SCALE, self._scale * factor))
+        if abs(new - self._scale) < 1e-6:
+            return
+        cursor = QPointF(e.pos())
+        self._offset = cursor - (cursor - self._offset) * (new / self._scale)
+        self._scale = new
+        self._user_moved = True
+        self.update()
+
+    def leaveEvent(self, e):
+        self._hover = ""
+        self.update()
+
+    # ---------------- 绘制 ----------------
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.TextAntialiasing)
+        # 自己铺底：拖动时不会透出下面的东西
+        p.fillRect(self.rect(), QColor(Colors.WINDOW_BG))
+        self._ensure_fit()
+        p.translate(self._offset)
+        p.scale(self._scale, self._scale)
 
-        # ---- 连线：从上一层的底边中点，画到下一层的顶边中点 ----
         p.setBrush(Qt.NoBrush)
         for a, b in self._edges:
-            pen = QPen(QColor(Colors.BORDER_STRONG), 1.6)
+            if a not in self._pos or b not in self._pos:
+                continue
+            ra, rb = self._rect(a), self._rect(b)
+            x1, y1 = ra.center().x(), ra.bottom()
+            x2, y2 = rb.center().x(), rb.top()
+            if y2 < y1:                       # 目标在上方（用户拖乱了）：改从下往上连
+                y1, y2 = ra.top(), rb.bottom()
+            mid = (y1 + y2) / 2
+            hot = self._selected and (a == self._selected or b == self._selected)
+            pen = QPen(QColor(Colors.ACCENT if hot else Colors.BORDER_STRONG), 2.2 if hot else 1.5)
             pen.setCapStyle(Qt.RoundCap)
             p.setPen(pen)
-            x1, y1 = a.center().x(), a.bottom()
-            x2, y2 = b.center().x(), b.top()
-            mid = (y1 + y2) / 2
             path = QPainterPath(QPointF(x1, y1))
             path.cubicTo(QPointF(x1, mid), QPointF(x2, mid), QPointF(x2, y2))
-            # 选中节点的连线强调一下，顺着线能看清它依赖谁、被谁依赖
-            if self._selected and (self._node_topic(a) == self._selected or self._node_topic(b) == self._selected):
-                p.setPen(QPen(QColor(Colors.ACCENT), 2.2))
             p.drawPath(path)
-            p.setPen(QPen(QColor(Colors.BORDER_STRONG), 1.6))
-            # 箭头
-            arrow = QPainterPath(QPointF(x2, y2))
-            arrow.lineTo(x2 - 4, y2 - 6)
-            arrow.lineTo(x2 + 4, y2 - 6)
+
+            direction = 1 if y2 >= y1 else -1
+            tip = QPointF(x2, y2)
+            arrow = QPainterPath(tip)
+            arrow.lineTo(x2 - 4.5, y2 - 6 * direction)
+            arrow.lineTo(x2 + 4.5, y2 - 6 * direction)
             arrow.closeSubpath()
-            p.setBrush(QBrush(QColor(Colors.ACCENT if self._selected and
-                                     (self._node_topic(a) == self._selected or
-                                      self._node_topic(b) == self._selected) else Colors.BORDER_STRONG)))
+            p.setBrush(QBrush(QColor(Colors.ACCENT if hot else Colors.BORDER_STRONG)))
             p.setPen(Qt.NoPen)
             p.drawPath(arrow)
             p.setBrush(Qt.NoBrush)
 
-        # ---- 节点 ----
-        for topic, status, rect in self._nodes:
+        for topic, status in self._nodes:
+            rect = self._rect(topic)
             border, fill, text = status_style(status)
             selected = topic == self._selected
             hover = topic == self._hover
@@ -151,26 +266,19 @@ class _Canvas(QWidget):
 
             color = QColor(text)
             if status == mindmap.STATUS_OK and not (selected or hover):
-                color.setAlpha(160)          # 全 ok 的节点弱化
+                color.setAlpha(165)          # 全 ok 的节点弱化，图里一眼看到重点
             p.setPen(QPen(color))
             p.setFont(font(11, 600 if status != mindmap.STATUS_OK else 400))
             fm = QFontMetrics(p.font())
-            label = fm.elidedText(topic, Qt.ElideMiddle, int(rect.width()) - 14)
-            p.drawText(rect, Qt.AlignCenter, label)
+            p.drawText(rect, Qt.AlignCenter,
+                       fm.elidedText(topic, Qt.ElideMiddle, int(NODE_W) - 16))
 
-            # 状态小圆点
             if status != mindmap.STATUS_OK:
                 p.setBrush(QBrush(QColor(border)))
                 p.setPen(Qt.NoPen)
-                p.drawEllipse(QPointF(rect.left() + 9, rect.top() + 9), 3.0, 3.0)
+                p.drawEllipse(QPointF(rect.left() + 10, rect.top() + 10), 3.2, 3.2)
                 p.setBrush(Qt.NoBrush)
         p.end()
-
-    def _node_topic(self, rect: QRectF) -> str:
-        for topic, _s, r in self._nodes:
-            if r is rect:
-                return topic
-        return ""
 
 
 class MindMapPage(QWidget):
@@ -187,7 +295,6 @@ class MindMapPage(QWidget):
         self._lesson = {}
         self._mistakes = []
         self._graph = {"nodes": [], "edges": []}
-        self._detail_topic = ""
         self._build()
 
     # ---------- 构建 ----------
@@ -209,20 +316,28 @@ class MindMapPage(QWidget):
 
         self.canvas = _Canvas()
         self.canvas.node_clicked.connect(self._on_node)
-        self.scroll = QScrollArea()
-        self.scroll.setWidget(self.canvas)
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.scroll.viewport().setObjectName("MapViewport")
-        self.scroll.viewport().setStyleSheet("QWidget#MapViewport { background: transparent; }")
-        self.scroll.setFrameShape(QFrame.NoFrame)
-        self.scroll.setMinimumHeight(200)
-        root.addWidget(self.scroll, 1)
+        root.addWidget(self.canvas, 1)
 
+        tools = QHBoxLayout()
+        tools.setSpacing(Spacing.SM)
         self.legend = QLabel("● 待回看   ● 补上了   ○ 已跟上")
         self.legend.setFont(font(10))
         self.legend.setStyleSheet(f"color:{Colors.TEXT_SECONDARY};")
-        root.addWidget(self.legend)
+        tools.addWidget(self.legend)
+        tools.addStretch(1)
+        self.reset_btn = QPushButton("重置视图")
+        self.reset_btn.setObjectName("MapTool")
+        self.reset_btn.setCursor(Qt.PointingHandCursor)
+        self.reset_btn.setToolTip("回到自动排布的位置")
+        self.reset_btn.clicked.connect(lambda: self.canvas.reset_view())
+        tools.addWidget(self.reset_btn)
+        root.addLayout(tools)
+
+        hint = QLabel("拖动空白处平移 · 滚轮缩放 · 点节点看讲解 · 节点也能直接拖走")
+        hint.setFont(font(10))
+        hint.setStyleSheet(f"color:{Colors.TEXT_DISABLED};")
+        hint.setWordWrap(True)
+        root.addWidget(hint)
 
         self.detail = _DetailPanel()
         self.detail.practice_requested.connect(self.practice_requested.emit)
@@ -238,12 +353,14 @@ class MindMapPage(QWidget):
     def _apply_style(self):
         self.setStyleSheet(f"""
             QWidget {{ background: transparent; }}
-            QScrollArea {{ background: transparent; border: none; }}
-            QScrollBar:vertical {{ background: transparent; width: 6px; }}
-            QScrollBar::handle:vertical {{
-                background: {Colors.BORDER_STRONG}; border-radius: 3px; min-height: 24px;
+            QPushButton#MapTool {{
+                background: {Colors.SURFACE}; color: {Colors.TEXT_SECONDARY};
+                border: 1px solid {Colors.BORDER}; border-radius: {Radius.SM}px;
+                padding: 3px 10px; font-size: 11px;
             }}
-            QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
+            QPushButton#MapTool:hover {{
+                color: {Colors.TEXT_PRIMARY}; border-color: {Colors.ACCENT};
+            }}
         """)
 
     # ---------- 对外 ----------
@@ -252,7 +369,6 @@ class MindMapPage(QWidget):
         self._lesson = lesson or {}
         self._mistakes = mistakes if mistakes is not None else []
         self._graph = mindmap.build(self._lesson, self._mistakes)
-        self._detail_topic = ""
 
         nodes = self._graph["nodes"]
         review = sum(1 for n in nodes if n["status"] == mindmap.STATUS_REVIEW)
@@ -264,11 +380,12 @@ class MindMapPage(QWidget):
             bits.append(f"{fixed} 个已补上")
         if not review and nodes:
             bits.append("都跟上了")
-        self.sub.setText(" · ".join(bits) + "　（点知识点看讲解和题目）")
+        self.sub.setText(" · ".join(bits))
 
         self.empty.setVisible(not nodes)
         self.canvas.setVisible(bool(nodes))
         self.legend.setVisible(bool(nodes))
+        self.reset_btn.setVisible(bool(nodes))
         self.canvas.set_graph(self._graph)
         self.detail.clear()
         self.detail.setVisible(bool(nodes))
@@ -279,10 +396,9 @@ class MindMapPage(QWidget):
 
     # ---------- 内部 ----------
     def _on_node(self, topic: str):
-        self._detail_topic = topic
-        self.canvas.set_graph(self._graph, selected=topic)
-        detail = mindmap.node_detail(self._lesson, topic, self._mistakes)
-        self.detail.show_detail(detail)
+        # 只换选中态，别把学生拖好的位置重置掉
+        self.canvas.set_graph(self._graph, selected=topic, keep_positions=True)
+        self.detail.show_detail(mindmap.node_detail(self._lesson, topic, self._mistakes))
         self.detail.load_questions(self._lesson, topic, self._mistakes)
 
 

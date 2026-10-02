@@ -188,6 +188,106 @@ check("没有图的课也能建图", len(mindmap.build(store.get_lesson(ts2), []
 
 eng.shutdown()
 
+# ---------- J. 画布交互 ----------
+section("J. 画布交互（拖动 / 缩放 / 点击）")
+from PyQt5.QtCore import QEvent, QPoint, QPointF, Qt      # noqa: E402
+from PyQt5.QtGui import QMouseEvent, QWheelEvent          # noqa: E402
+from PyQt5.QtWidgets import QApplication                  # noqa: E402
+
+app = QApplication.instance() or QApplication(sys.argv)
+from echo.widgets.mindmap import _Canvas                  # noqa: E402
+
+c = _Canvas()
+c.resize(400, 300)
+clicked = []
+c.node_clicked.connect(clicked.append)
+c.set_graph(g)
+c.grab()                                   # 触发一次绘制，让自动适配生效
+
+
+def press(x, y):
+    c.mousePressEvent(QMouseEvent(QEvent.MouseButtonPress, QPoint(x, y),
+                                  Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+
+
+def move(x, y):
+    c.mouseMoveEvent(QMouseEvent(QEvent.MouseMove, QPoint(x, y),
+                                 Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
+
+
+def release(x, y):
+    c.mouseReleaseEvent(QMouseEvent(QEvent.MouseButtonRelease, QPoint(x, y),
+                                    Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+
+
+def wheel(dy, x=200, y=150):
+    c.wheelEvent(QWheelEvent(QPointF(x, y), QPointF(x, y), QPoint(0, 0), QPoint(0, dy),
+                             Qt.NoButton, Qt.NoModifier, Qt.ScrollUpdate, False))
+
+
+check("新图自动缩放到放得下",
+      c._world.width() * c._scale <= c.width() + 1
+      and c._world.height() * c._scale <= c.height() + 1)
+check("缩放不会超过 1.0（小图不放大）", c._scale <= 1.0)
+
+off = QPointF(c._offset)
+press(6, 292)
+move(60, 250)
+release(60, 250)
+check("空白处拖动 = 平移", abs(c._offset.x() - off.x()) > 20)
+check("平移不会误触选中", not clicked)
+
+scale0 = c._scale
+wheel(120)
+check("滚轮向上放大", c._scale > scale0)
+for _ in range(60):
+    wheel(120)
+check("缩放有上限", abs(c._scale - 2.4) < 0.01, f"{c._scale:.2f}")
+for _ in range(80):
+    wheel(-120)
+check("缩放有下限", abs(c._scale - 0.45) < 0.01, f"{c._scale:.2f}")
+
+r = c._rect("贝叶斯公式")
+center = c._from_world(r.center())
+cx, cy = int(center.x()), int(center.y())
+press(cx, cy)
+release(cx, cy)
+check("点节点会发信号", clicked and clicked[-1] == "贝叶斯公式")
+check("点节点会选中", c._selected == "贝叶斯公式")
+
+before = QPointF(c._pos["贝叶斯公式"])
+r = c._rect("贝叶斯公式")
+center = c._from_world(r.center())
+cx, cy = int(center.x()), int(center.y())
+press(cx, cy)
+move(cx + 40, cy + 20)
+release(cx + 40, cy + 20)
+moved = c._pos["贝叶斯公式"] - before
+# 屏幕上移 40px、当前缩放 s → 世界坐标里应移动 40/s
+expect = 40 / c._scale
+check(f"拖节点跟手（世界位移 ≈ {expect:.0f}）", abs(moved.x() - expect) < 3,
+      f"实际 {moved.x():.0f}")
+check("拖动不算点击", len(clicked) == 1)
+
+c.resize(400, 180)                          # 缩小画布
+off_before_resize = QPointF(c._offset)
+c.resize(400, 180)
+check("学生动过视图后，改尺寸不再自动改他的视图",
+      abs(c._offset.x() - off_before_resize.x()) < 0.01,
+      f"{off_before_resize.x():.0f} -> {c._offset.x():.0f}")
+
+c.reset_view()
+check("重置视图还原自动排布",
+      abs(c._pos["贝叶斯公式"].y() - (24 + 1 * 88)) < 0.01,
+      f"y={c._pos['贝叶斯公式'].y():.1f}")
+check("重置后层级还在", sorted(c._levels.values()) == [0, 1, 2])
+
+blank = _Canvas()
+blank.resize(300, 200)
+blank.set_graph({"nodes": [], "edges": []})
+blank.grab()
+check("空图绘制不崩", True)
+
 print("\n" + "=" * 56)
 if FAILED:
     print(f"失败 {len(FAILED)} 项：" + "、".join(FAILED))
