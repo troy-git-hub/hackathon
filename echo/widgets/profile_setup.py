@@ -5,11 +5,15 @@ Echo - 首次登录
 点「开始使用」后写进 profile.json（echo.backend.profile），以后启动不再弹。
 资料没存下来就不放行：写文件失败会提示并留在这个窗口；直接关掉窗口则退出 Echo，下次启动再问。
 """
+import os
+import tempfile
+
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit,
-                             QSpinBox, QVBoxLayout)
+from PyQt5.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
+                             QLabel, QLineEdit, QPushButton, QSpinBox, QVBoxLayout)
 
 from echo.backend import profile
+from echo.components.avatar import AvatarView, load_normalized
 from echo.i18n import tr
 from echo.theme import Colors, font
 from echo.widgets import dialogs
@@ -21,6 +25,7 @@ class ProfileSetupDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(tr("欢迎使用 Echo", "Welcome to Echo"))
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self._avatar_pm = None        # 预览中的头像（还没落盘；None = 用默认喵喵）
         self._build()
 
     def _build(self):
@@ -37,6 +42,32 @@ class ProfileSetupDialog(QDialog):
         sub.setStyleSheet(f"color:{Colors.TEXT_SECONDARY}; font-size:12px;")
         sub.setWordWrap(True)
         root.addWidget(sub)
+
+        # 头像（可选）：不选就用默认喵喵。选中后只是预览，点「开始使用」才真正存。
+        avatar_row = QHBoxLayout()
+        avatar_row.setSpacing(14)
+        self.avatar_view = AvatarView(72)
+        avatar_row.addWidget(self.avatar_view, 0, Qt.AlignTop)
+        a_col = QVBoxLayout()
+        a_col.setSpacing(6)
+        self.avatar_hint = QLabel(tr("挑一张头像吧，不想挑就用默认的喵喵。",
+                                     "Pick a photo — or just keep the default cat."))
+        self.avatar_hint.setStyleSheet(f"color:{Colors.TEXT_SECONDARY}; font-size:12px;")
+        self.avatar_hint.setWordWrap(True)
+        a_col.addWidget(self.avatar_hint)
+        a_btns = QHBoxLayout()
+        a_btns.setSpacing(6)
+        self.btn_pick_avatar = QPushButton(tr("选一张图", "Choose a photo"))
+        self.btn_pick_avatar.clicked.connect(self._pick_avatar)
+        a_btns.addWidget(self.btn_pick_avatar)
+        self.btn_default_avatar = QPushButton(tr("用默认喵喵", "Use the default cat"))
+        self.btn_default_avatar.clicked.connect(self._use_default_avatar)
+        a_btns.addWidget(self.btn_default_avatar)
+        a_btns.addStretch()
+        a_col.addLayout(a_btns)
+        a_col.addStretch()
+        avatar_row.addLayout(a_col, 1)
+        root.addLayout(avatar_row)
 
         form = QFormLayout()
         form.setSpacing(10)
@@ -64,7 +95,7 @@ class ProfileSetupDialog(QDialog):
         root.addWidget(btns)
 
         self.setStyleSheet(dialog_qss())
-        self.resize(440, 320)
+        self.resize(460, 450)        # 比原来高：加了头像那一段
 
     def _line(self, placeholder):
         ed = QLineEdit()
@@ -92,7 +123,55 @@ class ProfileSetupDialog(QDialog):
             dialogs.warn(self, tr("保存失败", "Save failed"),
                          f"{tr('资料没能保存：', 'Could not save your profile: ')}{e}")
             return
+        if self._avatar_pm is not None:
+            self._save_avatar()
         self.accept()
+
+    # ================= 头像 =================
+    def _pick_avatar(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("选一张头像", "Choose a photo"), "",
+            tr("图片 (*.png *.jpg *.jpeg *.webp *.bmp)",
+               "Images (*.png *.jpg *.jpeg *.webp *.bmp)"))
+        if not path:
+            return
+        pm = load_normalized(path)
+        if pm.isNull():
+            dialogs.warn(self, tr("这张图读不了", "Can't read that image"),
+                         tr("换一张试试（支持 PNG / JPG / WebP / BMP）。",
+                            "Try another one (PNG / JPG / WebP / BMP)."))
+            return
+        self._avatar_pm = pm
+        self.avatar_view.set_pixmap(pm)
+        self.avatar_hint.setText(tr("就用这张。不满意可以再选，或者换回喵喵。",
+                                    "Looks good. Pick again anytime, or switch back to the cat."))
+
+    def _use_default_avatar(self):
+        self._avatar_pm = None
+        self.avatar_view.set_pixmap(None)          # None → 退回默认喵喵
+        self.avatar_hint.setText(tr("挑一张头像吧，不想挑就用默认的喵喵。",
+                                    "Pick a photo — or just keep the default cat."))
+
+    def _save_avatar(self):
+        """把预览的图写进配置目录。
+
+        存的是**规范化后的图**（EXIF 旋转已应用、长边已缩到 512），不是用户原图的
+        路径：原图被删掉、挪走、换台机器都不影响头像。中间过一道临时文件，是因为
+        backend 的 profile 只负责拷文件（它不能引 PyQt5，没法直接存 QPixmap）。
+        头像没存上不算致命 —— 资料已经存好了，退回默认喵喵就是了。
+        """
+        tmp = os.path.join(tempfile.gettempdir(), f"echo-avatar-{os.getpid()}.png")
+        try:
+            if not self._avatar_pm.save(tmp, "PNG"):
+                return
+            profile.set_avatar(tmp)
+        except OSError:
+            pass
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
 
 def ensure_profile() -> bool:
