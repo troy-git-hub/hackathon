@@ -207,6 +207,10 @@ class FloatingWindow(QWidget):
             self.echo.checkin_result.connect(self._on_checkin_result)
             self.checkin_card.answered.connect(self.echo.answer_checkin)
             self.checkin_card.skipped.connect(self.echo.skip_checkin)
+            # 卡片收起来后窗口要缩回去，否则听课页下面留一大块空白。
+            # 分两步：先松开 stack 的固定高度（它会把页面高度顶住，量不准），
+            # 等布局落定一拍再重新适配。
+            self.checkin_card.closed.connect(self._on_checkin_closed)
         if hasattr(self.echo, "quiz_ready"):
             self.echo.quiz_ready.connect(self._on_quiz_ready)
         self.mindmap_page.practice_requested.connect(self._go_practice)
@@ -868,6 +872,17 @@ class FloatingWindow(QWidget):
         store.mark_reviewed(topic)
         self._render_review()
         self._fit()
+
+    def _on_checkin_closed(self):
+        """抽问卡片收起来了：把窗口缩回听课页该有的高度。
+
+        dismiss() 里刚 hide()，此时页面布局还按卡片在的时候算着高度；
+        而 stack 的固定高度又会反过来把页面撑住，量出来的永远是老尺寸。
+        所以先松开固定高度，等一拍让布局落定，再重新适配。
+        """
+        self.stack.setFixedHeight(0)
+        QTimer.singleShot(0, self._fit)
+
 
     def _save_review(self):
         try:
@@ -1655,6 +1670,11 @@ class FloatingWindow(QWidget):
                       wrap=True)
         v.addWidget(body)
         self.recall_box_lay.addWidget(f)
+        # 气泡是运行时加进来的，页面布局还按老内容算着尺寸：
+        # 不主动重排一次，换行标签的高度会是 0，界面上只剩几条空条。
+        self.recall_box_lay.activate()
+        self.recall_box.adjustSize()
+        self._fit()
         return f
 
     def _recall_clear(self):
@@ -2013,6 +2033,10 @@ class FloatingWindow(QWidget):
         def do():
             idx = self.stack.currentIndex()
             pl = self.stack.currentWidget().layout()
+            # 量之前先把 stack 的固定高度松开。它会反过来把页面的高度撑大：
+            # 「页面高度 → stack 高度 → 页面高度」互相顶住，一旦某次量高了，
+            # 之后就永远是那个高个子 —— 抽问卡收起来、换个短页面都缩不回去。
+            self.stack.setFixedHeight(0)
             pl.activate()
             w = PAGE_WIDTH[idx]
             h = pl.totalHeightForWidth(w) if pl.hasHeightForWidth() else pl.totalSizeHint().height()

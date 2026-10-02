@@ -35,6 +35,9 @@ class CheckinCard(QFrame):
 
     answered = pyqtSignal(int)
     skipped = pyqtSignal()
+    # 卡片收起来了（叉掉、或答完再叉掉）。宿主据此重排窗口 ——
+    # 卡片一藏，听课页就矮回去，窗口不跟着缩会留一大块空白。
+    closed = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -248,6 +251,7 @@ class CheckinCard(QFrame):
         self._locked = False
         self._clear_options()
         self.hide()
+        self.closed.emit()
 
     # ---------- 内部 ----------
     def _clear_options(self):

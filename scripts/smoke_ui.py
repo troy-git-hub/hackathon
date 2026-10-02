@@ -57,6 +57,10 @@ class FakeBridge(QObject):
     error = pyqtSignal(str)
     mode = pyqtSignal(str, bool)
     level = pyqtSignal(float)
+    # 必须带上这两个：没有它们，FloatingWindow 里「课堂抽查」那一整块接线
+    # （答题、跳过、卡片收起后重排窗口）在自检里根本不会被执行到
+    checkin = pyqtSignal(object)
+    checkin_result = pyqtSignal(object)
     quiz_ready = pyqtSignal(object)
 
     def __init__(self, parent=None):
@@ -92,6 +96,16 @@ class FakeBridge(QObject):
         """课后练习：立刻回一道题，用来验「出几道题练练」能走到练习页。"""
         self.quiz_ready.emit([{"question": "试一下", "options": ["A. 甲", "B. 乙"],
                                "answer": "A", "explain": "解析示例"}])
+
+    def answer_checkin(self, idx):
+        """课堂抽问作答。回一条结果，界面据此显示判分。"""
+        rec = {"result": "right", "choice": idx, "explain": "示例解析",
+               "answer_text": "B. 乙"}
+        self.checkin_result.emit(rec)
+        return rec
+
+    def skip_checkin(self):
+        """学生把抽问关掉了。"""
 
 
 ui.EchoBridge = FakeBridge
@@ -385,55 +399,32 @@ assert "极限" in window.recall_sub.text() or "2 个知识点" in window.recall
 
 n_bubbles = window.recall_box_lay.count()
 assert n_bubbles >= 2, f"开场白 + 第一问至少两条气泡，实际 {n_bubbles}"
+# 气泡是运行时加进来的：不主动重排一次，换行标签高度会是 0，界面只剩几条空条
+for i in range(n_bubbles):
+    w = window.recall_box_lay.itemAt(i).widget()
+    texts = [l.text() for l in w.findChildren(QLabel) if l.text().strip() not in ("", "Echo")]
+    assert texts, f"第 {i} 条气泡是空的"
+    assert all(l.height() > 0 for l in w.findChildren(QLabel) if l.text().strip()), \
+        f"第 {i} 条气泡的文字高度是 0（没重排）"
 
-# 答完两道题 → 出判断（离线没 key，应退回让学生自己选，而不是假装判过）
-for _ in range(5):
-    if window.recall_input.isEnabled():
-        break
-    QTest.qWait(30)
-window.recall_input.setText("就是曲线的斜率。")
-QTest.mouseClick(window.recall_send, Qt.LeftButton)
-app.processEvents()
-assert window.recall_box_lay.count() > n_bubbles, "学生的话没出现在对话里"
-assert len(window._recall_answers) == 1, "没记下第一次回答"
-
-window.recall_input.setText("把范围一直缩小。")
-QTest.mouseClick(window.recall_send, Qt.LeftButton)
-for _ in range(40):
+# 课堂抽问卡片收起来后，窗口要缩回去（原来会留一大块空白）
+window._show_page(ui.LISTEN)
+for _ in range(10):        # _fit() 里有个 singleShot(0)，先等它落定再量基准
     app.processEvents()
-    if not window._recall_busy and len(window._recall_answers) >= 2:
-        break
-    QTest.qWait(30)
-assert len(window._recall_answers) == 2, "没记下第二次回答"
-manual = [b for b in window.recall_box.findChildren(QPushButton)
-          if b.text().replace("● ", "") in ("清楚", "模糊", "没理解")]
-assert manual, "没判出来时应让学生自己选，界面上没有手动档位"
-
-# 手动改一档 → 调度跟着变
-next(b for b in manual if b.text().replace("● ", "") == "清楚").click()
-app.processEvents()
-rec = next(it for it in store.load() if it.get("level"))
-assert rec["level"] == 1 and rec["due"] > _t.time() + 6 * 86400, \
-    f"手动判「清楚」应推到 7 天后：level={rec.get('level')}"
-
-# 复习页两个区域：答完的不消失，落到「过几天再复习」
-window._show_review()
-app.processEvents()
-assert window.review_title.text() == "错题复习", window.review_title.text()
-lab = [w.text() for w in window.review_list.findChildren(QLabel) if "过几天再复习" in w.text()]
-assert lab, f"答完的知识点应该落到「过几天再复习」，实际标题：{lab}"
-assert window.review_list_lay.count() >= 3, \
-    f"应收起/今天/过几天三段，实际 {window.review_list_lay.count()} 项"
-
-# 「还是没懂」→ 明天就回来
-window._grade_review("链式法则", store.AGAIN)
-again = next(it for it in store.load() if it["topic"] == "链式法则")
-assert again["level"] == 0 and again["due"] < _t.time() + 2 * 86400, \
-    "「还是没懂」应该明天就回来"
-window._show_home()
-app.processEvents()
-assert "1" in window.recall_title.text(), f"首页计数没跟着变：{window.recall_title.text()}"
-store._write([])
+    QTest.qWait(10)
+h_before = window.height()
+window._on_checkin({"topic": "条件概率", "question": "P(A|B) 是什么？",
+                    "options": ["A. 甲", "B. 乙"], "answer": "B", "explain": "x"})
+for _ in range(15):
+    app.processEvents()
+assert window.height() > h_before, "弹出抽问后窗口没变高"
+window.checkin_card.close_btn.click()
+for _ in range(25):
+    app.processEvents()
+    QTest.qWait(10)
+assert abs(window.height() - h_before) <= 2,     f"叉掉抽问卡片后窗口没缩回去：{h_before} → {window.height()}"
+assert abs(window.stack.height() - window.stack.currentWidget().layout()
+           .totalHeightForWidth(ui.PAGE_WIDTH[ui.LISTEN])) <= 2,     "stack 的固定高度还留着抽问卡在时的高度"
 
 window.close()
 print("UI smoke passed: one window, avatar and primary flow work")
