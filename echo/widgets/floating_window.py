@@ -42,6 +42,7 @@ from echo.backend.engine import parse_tc
 from echo.backend.qt_bridge import EchoBridge
 from echo.backend import store
 from echo.components.pet import EMOTION_FILES, ASSETS_DIR
+from echo.widgets.checkin import CheckinCard
 
 SHADOW = 14
 WAIT_HINT = "播放网课后，Echo 会自动开始听"
@@ -165,6 +166,14 @@ class FloatingWindow(QWidget):
         self.echo.error.connect(self._on_error)
         self.echo.mode.connect(self._on_mode)
         self.echo.level.connect(self._on_level)
+        # 课堂抽查
+        if hasattr(self.echo, "checkin"):
+            self.echo.checkin.connect(self._on_checkin)
+            self.echo.checkin_result.connect(self._on_checkin_result)
+            self.checkin_card.answered.connect(self.echo.answer_checkin)
+            self.checkin_card.skipped.connect(self.echo.skip_checkin)
+        if hasattr(self.echo, "quiz_ready"):
+            self.echo.quiz_ready.connect(self._on_quiz_ready)
         # 注意：不在这里 echo.start()。启动停在主页，等用户点「开始今天的学习」才真正开课+抓音频。
 
         # 现场兜底快捷键（Echo 窗口在前台时有效）
@@ -310,6 +319,10 @@ class FloatingWindow(QWidget):
                                       "font-family: Consolas, 'Cascadia Mono', monospace;")
         head.addWidget(self.tc_lbl)
         lay.addLayout(head)
+
+        # 课堂抽查浮层：默认隐藏，抽问触发时出现在听课页顶部
+        self.checkin_card = CheckinCard(page)
+        lay.addWidget(self.checkin_card)
 
         self.topic_lbl = _label("等待老师开讲…", f"color: {Colors.TEXT_PRIMARY}; font-size: 21px;"
                                               "font-weight: 700;", wrap=True)
@@ -966,6 +979,28 @@ class FloatingWindow(QWidget):
             store.mark_reviewed(topic)
         self._show_home()
 
+    def _make_detail_quiz(self):
+        """按这节历史课的要点出课后练习题。"""
+        lesson = getattr(self, "_detail_lesson", {}) or {}
+        if not lesson or not hasattr(self.echo, "make_lesson_quiz"):
+            return
+        self._prac_item = {"topic": lesson.get("title") or "课后练习"}
+        self.prac_loading_lbl.setText("正在按这节课的要点出题…")
+        self.prac_dots.start()
+        self.prac_loading.show()
+        self.prac_body.hide()
+        self.prac_answer.hide()
+        self.btn_prac_show.setEnabled(False)
+        self.btn_prac_next.setEnabled(False)
+        self._show_page(PRACTICE)
+        self.echo.make_lesson_quiz(lesson, 4)
+
+    def _on_quiz_ready(self, questions):
+        lesson = getattr(self, "_detail_lesson", {}) or {}
+        self._prac_item = {"topic": lesson.get("title") or "课后练习"}
+        self._show_page(PRACTICE)
+        self._on_prac_done(questions)
+
     # ----- 8 历史课程详情 -----
     def _build_detail(self) -> QWidget:
         page = QWidget()
@@ -997,7 +1032,7 @@ class FloatingWindow(QWidget):
         lay.addWidget(self.det_review)
 
         row = QHBoxLayout()
-        row.addWidget(_btn("错题复习", "Quiet", self._show_review))
+        row.addWidget(_btn("出几道题练练", "Accent", self._make_detail_quiz))
         row.addStretch()
         row.addWidget(_btn("回到主页", "Link", self._show_home))
         lay.addLayout(row)
@@ -1009,6 +1044,7 @@ class FloatingWindow(QWidget):
             ls = store.get_lesson(float(ts))
         except Exception:
             ls = {}
+        self._detail_lesson = ls
         self.det_title.setText(ls.get("title") or "这节课")
         self.det_sub.setText(
             f"{ls.get('date', '')}　✓ 跟上了 {ls.get('ok', 0)} · 待复习 {ls.get('review', 0)}".strip())
@@ -1465,6 +1501,19 @@ class FloatingWindow(QWidget):
     def _on_level(self, level):
         self.wave_orb.set_level(level)
         self.mini_wave_orb.set_level(level)
+
+    def _on_checkin(self, question):
+        """课堂抽问：展开到听课页让卡片可见，并让窗口随之变高。"""
+        if self._page == MINI:
+            self._show_page(LISTEN)
+        self.checkin_card.ask(question)
+        if self._page == LISTEN:
+            self._fit()
+
+    def _on_checkin_result(self, record):
+        self.checkin_card.show_result(record)
+        if self._page == LISTEN:
+            self._fit()
 
     def _on_mode(self, kind, offline):
         tags = ["离线"] if offline else []
