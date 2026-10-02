@@ -23,8 +23,8 @@ from PyQt5.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QSizePoli
 from echo.backend import mindmap
 from echo.theme import Colors, Radius, Spacing, font
 
-NODE_W, NODE_H = 118, 42
-LEVEL_H = 88
+NODE_W, NODE_H = 118, 54
+LEVEL_H = 96
 GAP_X = 20
 PAD = 24
 MIN_SCALE, MAX_SCALE = 0.45, 2.4
@@ -58,9 +58,10 @@ class _Canvas(QWidget):
         self.setMouseTracking(True)
         self.setMinimumHeight(300)      # 太小的话自动缩放会把节点压得看不清
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._nodes = []          # [(topic, status)]
+        self._nodes = []          # [(topic, status, timecode)]
         self._pos = {}            # topic -> QPointF（世界坐标）
         self._levels = {}         # topic -> 依赖层级，重置视图时用来还原排布
+        self._review_first = ""   # 复习链的根源概念，图上标出来告诉学生从哪开始补
         self._edges = []          # [(topic_a, topic_b)]
         self._world = QSizeF(1, 1)
         self._scale = 1.0
@@ -79,8 +80,10 @@ class _Canvas(QWidget):
         nodes = graph.get("nodes") or []
         edges = graph.get("edges") or []
         topics = [n["id"] for n in nodes]
-        self._nodes = [(n["id"], n.get("status", "ok")) for n in nodes]
+        self._nodes = [(n["id"], n.get("status", "ok"), n.get("timecode") or "")
+                       for n in nodes]
         self._levels = {n["id"]: n.get("level", 0) for n in nodes}
+        self._review_first = graph.get("review_first") or ""
         self._edges = [(e["from"], e["to"]) for e in edges
                        if e.get("from") is not None and e.get("to") is not None]
         if not keep_positions or set(self._pos) != set(topics):
@@ -109,7 +112,8 @@ class _Canvas(QWidget):
 
     def reset_view(self):
         """回到默认排布和缩放。"""
-        self._auto_layout([{"id": t, "level": self._levels.get(t, 0)} for t, _s in self._nodes])
+        self._auto_layout([{"id": t, "level": self._levels.get(t, 0)}
+                           for t, _s, _tc in self._nodes])
         self._user_moved = False
         self.fit()
 
@@ -148,7 +152,7 @@ class _Canvas(QWidget):
 
     def _hit(self, pos) -> str:
         wp = self._to_world(pos)
-        for topic, _status in self._nodes:
+        for topic, _status, _tc in self._nodes:
             if self._rect(topic).contains(wp):
                 return topic
         return ""
@@ -255,30 +259,51 @@ class _Canvas(QWidget):
             p.drawPath(arrow)
             p.setBrush(Qt.NoBrush)
 
-        for topic, status in self._nodes:
+        for topic, status, timecode in self._nodes:
             rect = self._rect(topic)
             border, fill, text = status_style(status)
             selected = topic == self._selected
             hover = topic == self._hover
+            first = topic == self._review_first
             if hover and not selected:
                 fill = Colors.SURFACE_HOVER
             p.setBrush(QBrush(QColor(fill)))
-            p.setPen(QPen(QColor(Colors.ACCENT if selected else border), 2.0 if selected else 1.3))
+            if selected or first:
+                pen = QPen(QColor(Colors.ACCENT if selected else Colors.PRIMARY), 2.0)
+                if first and not selected:
+                    pen.setStyle(Qt.DashLine)      # 建议先看：虚线描边，跟选中态区分开
+                p.setPen(pen)
+            else:
+                p.setPen(QPen(QColor(border), 1.3))
             path = QPainterPath()
             path.addRoundedRect(rect, Radius.MD, Radius.MD)
             p.drawPath(path)
 
-            color = QColor(text)
-            p.setPen(QPen(color))
+            p.setPen(QPen(QColor(text)))
             p.setFont(font(11, 600 if status != mindmap.STATUS_OK else 500))
             fm = QFontMetrics(p.font())
-            p.drawText(rect, Qt.AlignCenter,
-                       fm.elidedText(topic, Qt.ElideMiddle, int(NODE_W) - 16))
+            label = fm.elidedText(topic, Qt.ElideMiddle, int(NODE_W) - 16)
+            # 有讲课时间码时，知识点名往上挪一点，下面空出来标时间
+            if timecode:
+                p.drawText(QRectF(rect.left(), rect.top() + 6, rect.width(), NODE_H - 22),
+                           Qt.AlignCenter, label)
+                p.setPen(QPen(QColor(Colors.TEXT_SECONDARY)))
+                p.setFont(font(9))
+                p.drawText(QRectF(rect.left(), rect.bottom() - 17, rect.width(), 14),
+                           Qt.AlignCenter, timecode)
+            else:
+                p.drawText(rect, Qt.AlignCenter, label)
 
             if status != mindmap.STATUS_OK:
                 p.setBrush(QBrush(QColor(border)))
                 p.setPen(Qt.NoPen)
-                p.drawEllipse(QPointF(rect.left() + 10, rect.top() + 10), 3.2, 3.2)
+                p.drawEllipse(QPointF(rect.left() + 10, rect.top() + 11), 3.2, 3.2)
+                p.setBrush(Qt.NoBrush)
+
+            if first:                              # 右上角小标：先看这个
+                p.setBrush(QBrush(QColor(Colors.PRIMARY)))
+                p.setPen(Qt.NoPen)
+                p.drawEllipse(QPointF(rect.right() - 10, rect.top() + 11), 3.2, 3.2)
                 p.setBrush(Qt.NoBrush)
         p.end()
 
@@ -345,7 +370,7 @@ class MindMapPage(QWidget):
         root.addWidget(self.canvas, 1)
         tools = QHBoxLayout()
         tools.setSpacing(Spacing.SM)
-        self.legend = QLabel("● 待回看   ● 补上了   ○ 已跟上")
+        self.legend = QLabel("● 待回看   ● 补上了   ○ 已跟上   ⋯ 建议先看")
         self.legend.setFont(font(10))
         self.legend.setStyleSheet(f"color:{Colors.TEXT_SECONDARY};")
         tools.addWidget(self.legend)
@@ -444,7 +469,8 @@ class MindMapPage(QWidget):
     def _on_node(self, topic: str):
         # 只换选中态，别把学生拖好的位置重置掉
         self.canvas.set_graph(self._graph, selected=topic, keep_positions=True)
-        self.detail.show_detail(mindmap.node_detail(self._lesson, topic, self._mistakes))
+        self.detail.show_detail(mindmap.node_detail(
+            self._lesson, topic, self._mistakes, self._graph.get("review_first", "")))
         self.detail.load_questions(self._lesson, topic, self._mistakes)
 
 
@@ -539,11 +565,16 @@ class _DetailPanel(QFrame):
         self.status_lbl.setStyleSheet(f"color:{color};")
 
         taught = (detail.get("taught") or "").strip()
+        tc = (detail.get("timecode") or "").strip()
+        if tc:
+            taught = f"老师讲到 {tc}　{taught}".strip()
         self.body_lbl.setText(taught or "这节课没有留下这个知识点的讲解记录。")
         self.body_lbl.setStyleSheet("")
 
         # 不懂的话，把它缺的那一步说清楚
         miss_bits = []
+        if detail.get("review_first"):
+            miss_bits.append("建议先补这个 —— 复习链追到的最根源概念。")
         if detail.get("missing"):
             miss_bits.append("你可能卡在：" + detail["missing"])
         if detail.get("known"):

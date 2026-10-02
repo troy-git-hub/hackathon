@@ -675,11 +675,14 @@ class EchoEngine:
         """
         with self._lock:
             entries = list(self.entries)
-        nodes, edges = [], []
+        nodes, edges, times = [], [], {}
         for e in entries:
             topic = (e.concept.topic or "").strip()
-            if topic and not any(_same_topic(topic, n) for n in nodes):
+            if not topic:
+                continue
+            if not any(_same_topic(topic, n) for n in nodes):
                 nodes.append(topic)
+                times[topic] = e.concept.timecode
         for e in entries:
             topic = e.concept.topic
             for pre in (e.concept.prerequisites or []):
@@ -696,7 +699,7 @@ class EchoEngine:
                 edges.append([prev, topic])
                 linked.add(topic)
             prev = topic
-        return {"nodes": nodes, "edges": edges}
+        return {"nodes": nodes, "edges": edges, "times": times}
 
     def _heuristic_echo(self) -> EchoReport:
         with self._lock:

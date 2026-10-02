@@ -182,6 +182,10 @@ def save_lesson(title: str, skills: list, review_chain: list, suggestion: str = 
     if graph and graph.get("nodes"):
         record["graph"] = {"nodes": [str(n) for n in graph.get("nodes") or []],
                            "edges": [[str(a), str(b)] for a, b in (graph.get("edges") or [])]}
+        times = graph.get("times") or {}
+        if times:
+            # 每个知识点老师讲到的时间点，地图上标出来方便回看录像
+            record["graph"]["times"] = {str(k): str(v) for k, v in times.items()}
     cur = _load_lessons()
     cur.append(record)
     _write_json(_lessons_path(), cur[-50:])

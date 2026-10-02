@@ -24,7 +24,7 @@ if runtime:
 
 from PyQt5.QtCore import QObject, Qt, pyqtSignal
 from PyQt5.QtTest import QTest
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication, QPushButton
 
 from echo.mock_data import SAMPLE_BREAKPOINT, SAMPLE_CONCEPTS
 from echo.theme import apply_theme
@@ -49,6 +49,7 @@ class FakeBridge(QObject):
     error = pyqtSignal(str)
     mode = pyqtSignal(str, bool)
     level = pyqtSignal(float)
+    quiz_ready = pyqtSignal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -73,6 +74,11 @@ class FakeBridge(QObject):
 
     def end_lesson(self):
         pass
+
+    def make_lesson_quiz(self, lesson, n=4):
+        """课后练习：立刻回一道题，用来验「出几道题练练」能走到练习页。"""
+        self.quiz_ready.emit([{"question": "试一下", "options": ["A. 甲", "B. 乙"],
+                               "answer": "A", "explain": "解析示例"}])
 
 
 ui.EchoBridge = FakeBridge
@@ -149,9 +155,22 @@ ts = store.save_lesson(
     highlights=["贝叶斯公式 P(A|B)=P(B|A)P(A)/P(B)"],
     graph={"nodes": ["条件概率定义", "贝叶斯公式"],
            "edges": [["条件概率定义", "贝叶斯公式"]]})
-window._show_detail(ts)
+window._show_home()
 app.processEvents()
-map_btns = [b for b in window.findChildren(type(window.back_btn))
+rows = [b for b in window.home_recent.findChildren(QPushButton)
+        if b.text() == "看回顾" and b.isVisible()]
+assert rows, "主页最近课程里没有「看回顾」按钮"
+# 这一步必须真的点按钮：_btn 曾经把 clicked 的 checked=False 喂进 lambda 的默认参数，
+# 时间戳变成 0、课程查不到 —— 回顾页打开是空的，知识地图和出题按钮跟着一起失效。
+QTest.mouseClick(rows[0], Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.DETAIL, "点「看回顾」没有打开回顾页"
+assert getattr(window, "_detail_lesson", None), "点「看回顾」后详情页没拿到课程数据"
+assert window.det_title.text() == "贝叶斯统计", f"回顾页标题不对：{window.det_title.text()}"
+assert window.status_lbl.text() == "还没开始上课", \
+    f"没在上课，状态栏却写着「{window.status_lbl.text()}」"
+
+map_btns = [b for b in window.findChildren(QPushButton)
             if b.text() == "知识地图" and b.isVisible()]
 assert map_btns, "历史课回顾页上没有可见的「知识地图」按钮"
 QTest.mouseClick(map_btns[0], Qt.LeftButton)
@@ -160,6 +179,15 @@ assert window._page == ui.MINDMAP, "点「知识地图」没有打开地图页"
 assert len(window.mindmap_page.canvas._nodes) == 2, "知识地图上没有画出知识点"
 assert window.mindmap_page.lesson_title.text(), "知识地图页没有显示课程标题"
 assert window.mindmap_page.lesson_points.text(), "知识地图页没有显示课程要点"
+
+window._show_detail(ts)
+app.processEvents()
+quiz_btns = [b for b in window.findChildren(QPushButton)
+             if b.text() == "出几道题练练" and b.isVisible()]
+assert quiz_btns, "回顾页上没有可见的「出几道题练练」按钮"
+QTest.mouseClick(quiz_btns[0], Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.PRACTICE, "点「出几道题练练」没有打开练习页"
 
 # 没有 graph 的老课程也要能画（退回按复习链 + 讲课顺序推导）
 ts2 = store.save_lesson("老课程", [{"name": "甲", "mastery": 0.5, "status": "review"},

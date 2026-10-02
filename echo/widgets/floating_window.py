@@ -66,7 +66,11 @@ def _btn(text, obj, slot, tip=""):
     b = QPushButton(text)
     b.setObjectName(obj)
     b.setCursor(QCursor(Qt.PointingHandCursor))
-    b.clicked.connect(slot)
+    # QPushButton.clicked 带一个 checked=False 参数。直接 connect 的话，带默认参数的写法
+    # （lambda t=ls["time"]: ...）声明的那个参数会收到 False，默认值被顶掉——
+    # 「看回顾」拿到的时间戳就变成 0，详情页永远是空的，知识地图和出题按钮跟着一起失效。
+    # 统一把信号参数丢掉，槽一律无参调用。
+    b.clicked.connect(lambda *_: slot())
     if tip:
         b.setToolTip(tip)
     return b
@@ -249,7 +253,8 @@ class FloatingWindow(QWidget):
         self.status_dot = _label("●", f"color: {Colors.OK_FG}; font-size: 8px;")
         self.status_dots = PulseDots(Colors.ACCENT)
         self.status_dots.hide()
-        self.status_lbl = _label("正在听课", CAPTION)
+        self._had_lesson = False        # 有没有上过课，决定状态栏写「还没开始上课」还是「已下课」
+        self.status_lbl = _label("还没开始上课", CAPTION)
         # 小字标记当前模式：示例课 / 离线
         self.mode_lbl = _label("", f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"
                                    f"border: 1px solid {Colors.BORDER_STRONG}; border-radius: 8px;"
@@ -1264,7 +1269,23 @@ class FloatingWindow(QWidget):
         m = Spacing.MD if mini else Spacing.LG
         self.layout().setContentsMargins(SHADOW + m, SHADOW + (Spacing.SM if mini else Spacing.MD),
                                          SHADOW + m, SHADOW + (Spacing.SM if mini else Spacing.LG))
+        self._sync_status()
         self._fit()
+
+    def _sync_status(self):
+        """状态栏跟着引擎真实状态走。
+
+        原来标签初始就是「正在听课」，可应用启动停在主页、根本没开课，
+        翻历史课的回顾时也一直挂着「正在听课」—— 看着像在监听，实际什么都没跑。
+        """
+        # __init__ 里 _show_home() 比 self.echo 还早，这里必须容错
+        engine = getattr(getattr(self, "echo", None), "engine", None)
+        if getattr(engine, "active", False):
+            return                      # 在上课：交给引擎的状态事件去更新
+        self.status_lbl.setText("已下课" if getattr(self, "_had_lesson", False) else "还没开始上课")
+        self.status_lbl.setToolTip("")
+        self.status_dot.setVisible(False)
+        self.status_dots.stop()
 
     def _fit(self):
         """按当前页内容算窗口大小；扩展时尽量保持窗口中心不动，不跑出屏幕。"""
@@ -1642,6 +1663,7 @@ class FloatingWindow(QWidget):
     }
 
     def _on_status(self, st):
+        self._had_lesson = True         # 引擎发了状态，说明这节课真的在跑
         text, busy = self.STATUS.get(st, self.STATUS["listening"])
         self.status_lbl.setText(text)
         self.status_lbl.setToolTip("")

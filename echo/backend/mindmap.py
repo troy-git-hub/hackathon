@@ -154,6 +154,7 @@ def build(lesson: dict, mistakes: list = None) -> dict:
     edges = [{"from": a, "to": b} for a, b in edges]
 
     levels = _levels(nodes_src, [(e["from"], e["to"]) for e in edges])
+    times = (raw or {}).get("times") or {}
     nodes = []
     for t in nodes_src:
         sk = _skill_of(lesson, t)
@@ -165,10 +166,20 @@ def build(lesson: dict, mistakes: list = None) -> dict:
             "status": status,
             "mastery": float(sk.get("mastery") or 0.0),
             "level": levels.get(t, 0),
-            "timecode": mk.get("timecode") or "",
+            "timecode": mk.get("timecode") or times.get(t) or "",
             "has_mistake": bool(mk),
         })
+    # 复习链的最后一项是「最该先复习的根源概念」（回响 prompt 里就是这么排的），
+    # 地图上把它标出来，学生一眼知道从哪开始补。
+    review_chain = [c for c in (lesson.get("review_chain") or []) if c]
+    review_first = ""
+    for cand in reversed(review_chain):
+        hit = next((n["topic"] for n in nodes if _same(cand, n["topic"])), "")
+        if hit:
+            review_first = hit
+            break
     return {"nodes": nodes, "edges": edges, "levels": levels,
+            "review_first": review_first,
             "has_real_graph": bool(raw and raw.get("nodes"))}
 
 
@@ -225,7 +236,8 @@ def make_item(lesson: dict, topic: str, mistake: dict = None) -> dict:
     }
 
 
-def node_detail(lesson: dict, topic: str, mistakes: list = None) -> dict:
+def node_detail(lesson: dict, topic: str, mistakes: list = None,
+                review_first: str = "") -> dict:
     """点开某个知识点要显示的东西：状态、老师怎么讲的、不懂时的讲解。
 
     同步返回；题目和解析另外走 questions_for()，因为要调 AI。
@@ -249,6 +261,7 @@ def node_detail(lesson: dict, topic: str, mistakes: list = None) -> dict:
         "micro_lesson": mk.get("micro_lesson") or "",
         "timecode": mk.get("timecode") or "",
         "has_mistake": bool(mk),
+        "review_first": bool(review_first and _same(topic, review_first)),
     }
 
 

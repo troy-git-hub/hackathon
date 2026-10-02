@@ -101,9 +101,24 @@ check("复习链方向正确（根源在前）",
 check("每个非根节点都有父（图连通）",
       len(gh["edges"]) >= len(gh["nodes"]) - 1, f"{len(gh['edges'])} 边 / {len(gh['nodes'])} 点")
 
+# ---------- L. 时间码 + 建议先看 ----------
+section("L. 时间码与建议先看")
+timed = mindmap.build({
+    "review_chain": ["丙", "乙", "甲"],
+    "graph": {"nodes": ["甲", "乙", "丙"], "edges": [["甲", "乙"], ["乙", "丙"]],
+              "times": {"甲": "00:05", "乙": "02:30", "丙": "04:10"}}}, [])
+by_topic = {n["topic"]: n for n in timed["nodes"]}
+check("节点带上老师讲到的时间码", by_topic["乙"]["timecode"] == "02:30", str(by_topic["乙"]))
+check("复习链的根源被标成「建议先看」", timed["review_first"] == "甲", timed["review_first"])
+check("详情能标出「建议先看」",
+      mindmap.node_detail({"review_chain": ["丙", "乙", "甲"]}, "甲", [], "甲")["review_first"] is True)
+check("其它节点不会被标",
+      mindmap.node_detail({"review_chain": ["丙", "乙", "甲"]}, "乙", [], "甲")["review_first"] is False)
+check("没有复习链时不乱标",
+      mindmap.build({"skills_detail": [{"name": "甲"}]}, [])["review_first"] == "")
+
 # ---------- K. 连通性 ----------
 section("K. 图必须连通（不能有孤点）")
-
 
 def degrees(graph):
     deg = {}
@@ -236,7 +251,8 @@ from PyQt5.QtGui import QMouseEvent, QWheelEvent          # noqa: E402
 from PyQt5.QtWidgets import QApplication                  # noqa: E402
 
 app = QApplication.instance() or QApplication(sys.argv)
-from echo.widgets.mindmap import _Canvas                  # noqa: E402
+from echo.widgets import mindmap as mm_view           # noqa: E402
+from echo.widgets.mindmap import _Canvas               # noqa: E402
 
 c = _Canvas()
 c.resize(400, 300)
@@ -319,7 +335,7 @@ check("学生动过视图后，改尺寸不再自动改他的视图",
 
 c.reset_view()
 check("重置视图还原自动排布",
-      abs(c._pos["贝叶斯公式"].y() - (24 + 1 * 88)) < 0.01,
+      abs(c._pos["贝叶斯公式"].y() - (mm_view.PAD + 1 * mm_view.LEVEL_H)) < 0.01,
       f"y={c._pos['贝叶斯公式'].y():.1f}")
 check("重置后层级还在", sorted(c._levels.values()) == [0, 1, 2])
 
