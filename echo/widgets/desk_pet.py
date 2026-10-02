@@ -17,10 +17,11 @@ import random
 import time
 
 from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
+from PyQt5.QtGui import QColor, QCursor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
 from PyQt5.QtWidgets import QApplication, QMenu, QWidget
 
 from echo.theme import Colors, font, style_menu
+from echo.components.study import CatAvatar
 
 ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                       "assets", "emojis")
@@ -115,6 +116,16 @@ class DeskPet(QWidget):
             if not pm.isNull():
                 self.faces[k] = pm
         self.setFixedSize(self.W, self.H)
+        self._dock_side = None
+        self._dock_hover = False
+        self._dock_width, self._dock_height = 38, 118
+        self._flyout_width, self._flyout_height = 230, 118
+        self._dock_screen = None
+        self._dock_avatar = CatAvatar(56, self)
+        self._dock_avatar.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._dock_avatar.hide()
+        self._collapse_timer = QTimer(self, singleShot=True, interval=300,
+                                      timeout=self._collapse_if_outside)
 
         self._press = None
         self._dragged = False
@@ -157,7 +168,74 @@ class DeskPet(QWidget):
             self._jump_t = time.time()
         if mood in ("lost", "alert"):
             self._shake_t = time.time()
+        self._sync_dock_avatar()
         self.update()
+
+    def _sync_dock_avatar(self):
+        mood = self.mood
+        emotion = {"alert": "lost", "lost": "lost", "warn": "warn",
+                   "thinking": "thinking", "ok": "ok", "fixed": "fixed",
+                   "done": "ok", "love": "ok"}.get(mood, "idle")
+        if self._dock_avatar._emotion != emotion:
+            self._dock_avatar.set_emotion(emotion)
+
+    def _dock_geometry(self):
+        screen = self._dock_screen or QApplication.primaryScreen()
+        return screen.availableGeometry()
+
+    def _set_dock_hover(self, hover):
+        if not self._dock_side or self._dock_hover == hover:
+            return
+        g = self._dock_geometry()
+        center_y = self.y() + self.height() // 2
+        self._dock_hover = hover
+        w = self._flyout_width if hover else self._dock_width
+        h = self._flyout_height if hover else self._dock_height
+        self.setFixedSize(w, h)
+        x = g.left() if self._dock_side == "left" else g.right() - w + 1
+        y = max(g.top(), min(center_y - h // 2, g.bottom() - h + 1))
+        self.move(x, y)
+        avatar_size = 56 if hover else 30
+        self._dock_avatar.setFixedSize(avatar_size, avatar_size)
+        avatar_x = (39 if self._dock_side == "left" else w - 95) if hover else 4
+        avatar_y = 26 if hover else 80
+        self._dock_avatar.move(avatar_x, avatar_y)
+        self._dock_avatar.show()
+        self.update()
+
+    def _dock(self, side, screen):
+        self._dock_side = side
+        self._dock_screen = screen
+        self._dock_hover = True
+        self._set_dock_hover(False)
+
+    def _undock(self, cursor_pos=None):
+        if not self._dock_side:
+            return
+        self._collapse_timer.stop()
+        self._dock_side = None
+        self._dock_hover = False
+        self._dock_avatar.hide()
+        center_y = self.y() + self.height() // 2
+        self.setFixedSize(self.W, self.H)
+        x = cursor_pos.x() - self.W // 2 if cursor_pos is not None else self.x()
+        y = cursor_pos.y() - self.H // 2 if cursor_pos is not None else center_y - self.H // 2
+        self.move(x, y)
+        self.update()
+
+    def _snap_if_at_side(self):
+        screen = QApplication.screenAt(self.frameGeometry().center()) or self.screen()
+        if screen is None:
+            return
+        g = screen.availableGeometry()
+        if self.x() <= g.left() + 12:
+            self._dock("left", screen)
+        elif self.x() + self.width() >= g.right() - 11:
+            self._dock("right", screen)
+
+    def _collapse_if_outside(self):
+        if self._dock_side and not self.rect().contains(self.mapFromGlobal(QCursor.pos())):
+            self._set_dock_hover(False)
 
     def place_default(self):
         g = QApplication.primaryScreen().availableGeometry()
@@ -268,6 +346,10 @@ class DeskPet(QWidget):
             if d.manhattanLength() > 5:
                 self._dragged = True
             if self._dragged:
+                if self._dock_side:
+                    self._undock(e.globalPos())
+                    self._press = (e.globalPos(), self.pos())
+                    return
                 self.move(self._press[1] + d)
             return
         if self._cat_rect().contains(QPointF(e.pos())):
@@ -284,6 +366,8 @@ class DeskPet(QWidget):
         if e.button() == Qt.LeftButton and self._press:
             if not self._dragged:
                 self._click_timer.start()
+            else:
+                self._snap_if_at_side()
             self._press = None
 
     def mouseDoubleClickEvent(self, e):
@@ -297,15 +381,21 @@ class DeskPet(QWidget):
 
     def enterEvent(self, e):
         self._pet_x, self._pet_dist = None, 0.0
+        if self._dock_side:
+            self._collapse_timer.stop()
+            self._set_dock_hover(True)
 
     def leaveEvent(self, e):
         self._pet_x = None
+        if self._dock_side and not self._press:
+            self._collapse_timer.start()
 
     # ================= 动画 =================
     def _tick(self):
         now = time.time()
         if self.mood != self._base_mood and now > self._mood_until:
             self.mood = self._base_mood
+            self._sync_dock_avatar()
         if now > self._blink_t:
             self._blinking = True
             if now > self._blink_t + 0.12:
@@ -329,6 +419,9 @@ class DeskPet(QWidget):
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
+        if self._dock_side:
+            self._draw_dock(p)
+            return
         now = time.time()
         t = now - self._t0
         cat = self._cat_rect()
@@ -367,6 +460,41 @@ class DeskPet(QWidget):
 
         if self.bubble and now < self._bubble_until:
             self._draw_bubble(p, self.bubble, cat, min(1.0, (self._bubble_until - now) / 0.3))
+
+    def _draw_dock(self, p):
+        """圆角声纹签：上方真实音量，下方同源矢量猫；悬停显示消息。"""
+        w, h = self.width(), self.height()
+        panel = QRectF(0, 3, w, h - 6)
+        p.setPen(QPen(QColor(Colors.BUBBLE_BORDER), 1))
+        p.setBrush(QColor(Colors.BUBBLE_BG))
+        p.drawRoundedRect(panel, 13, 13)
+        bar_x = 8 if self._dock_side == "left" else w - 30
+        for i, v in enumerate(self._vbar):
+            length = 4 + 18 * v
+            y = 12 + i * 7.5
+            p.setPen(Qt.NoPen)
+            col = QColor(Colors.ACCENT)
+            col.setAlpha(105 + int(135 * v))
+            p.setBrush(col)
+            p.drawRoundedRect(QRectF(bar_x + (22 - length) / 2, y, length, 4), 2, 2)
+        if not self._dock_hover:
+            return
+        text_x = 103 if self._dock_side == "left" else 12
+        text_w = 118
+        p.setPen(QColor(Colors.TEXT_SECONDARY))
+        p.setFont(font(10, QFont.DemiBold))
+        p.drawText(QRectF(text_x, 18, text_w, 18), Qt.AlignLeft | Qt.AlignVCenter,
+                   "ECHO · 正在说")
+        p.setPen(QColor(Colors.TEXT_PRIMARY))
+        p.setFont(font(12, QFont.DemiBold))
+        topic = self.bubble if time.time() < self._bubble_until else (
+            f"老师在讲：{self.topic}" if self.topic else "我在听，随时问我")
+        p.drawText(QRectF(text_x, 42, text_w, 50), Qt.AlignLeft | Qt.AlignVCenter |
+                   Qt.TextWordWrap, topic)
+        if self.badge:
+            p.setBrush(QColor(Colors.ACCENT))
+            p.setPen(Qt.NoPen)
+            p.drawEllipse(QRectF(w - 12 if self._dock_side == "left" else 4, 7, 7, 7))
 
     # ---------- classic：表情包猫 ----------
     def _draw_classic(self, p, cat, breathe, dy, dx):
