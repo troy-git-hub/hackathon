@@ -542,6 +542,33 @@ class EchoEngine:
             if self.breakpoints:
                 self.breakpoints[-1].self_review = True
 
+    def relapse_topics(self) -> List[str]:
+        """这一节课里「以前就掉过队、这次又掉了」的知识点（按出现顺序，去重）。
+
+        错题本里本来就有记录，说明上次掉的队并没有真的补上 —— 这是「其实没掌握」的
+        强信号。不这么判的话，一个早就该重新学的知识点会带着之前连对攒下的长间隔
+        （可能 30 天）躺在清单里，学生一直等不到它。
+
+        必须在 store.add(...) 之前调用：add 会把这一节的断点全写进错题本，
+        那之后就分不出哪些是「本来就在里面」的了。
+
+        拿去做：store.add(store.from_breakpoints(engine), relapse=bool(列表非空))。
+        add 只对错题本里已有记录的 topic 生效，所以整批传一个布尔值就够。
+        """
+        with self._lock:
+            bps = list(self.breakpoints)
+        try:
+            from echo.backend import store
+            known = {str(it.get("topic") or "").strip() for it in store.load()}
+        except Exception:
+            return []                     # 读不到错题本：当作没有复发，别把进度误清零
+        out: List[str] = []
+        for bp in bps:
+            topic = str(getattr(bp, "concept", "") or "").strip()
+            if topic and topic in known and topic not in out:
+                out.append(topic)
+        return out
+
     # ================= 课堂抽问（摸鱼探测） =================
     def _checkin_due(self) -> bool:
         """该抽问了吗？只在开课中、有可考的知识点、学生久没动手、且距上次抽问够久时为真。

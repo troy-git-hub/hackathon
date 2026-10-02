@@ -140,6 +140,7 @@ class DeskPet(QWidget):
         self.badge = False
         self.due_count = 0           # 今天该回响的知识点数（挂边小球上显示）
         self._due_announced = False  # 每次运行只主动提醒一次，别反复念
+        self._due_checked = 0.0      # 上次查待回响的时间（面板关着时用来降频）
 
         self.bubble = ""
         self._bubble_until = 0.0
@@ -194,7 +195,7 @@ class DeskPet(QWidget):
 
         # 「今天该回响」：间隔重复到期的知识点数。
         # 不在 __init__ 里直接查 —— 读 review.json 是磁盘 I/O，冷启动路径上同步读会拖慢桌宠出现。
-        self._due_timer = QTimer(self, interval=600_000, timeout=self._check_due)
+        self._due_timer = QTimer(self, interval=15_000, timeout=self._due_poll)
         self._due_timer.start()
         QTimer.singleShot(2500, lambda: self._check_due(announce=True))
 
@@ -401,13 +402,27 @@ class DeskPet(QWidget):
             count = int(store.due_summary().get("count") or 0)
         except Exception:
             return                       # 没有记录 / 文件坏了：桌宠照常用，不报错
-        self.due_count = max(0, count)
+        before, self.due_count = self.due_count, max(0, count)
+        self._due_checked = time.time()
         if announce and self.due_count and not self._due_announced:
             self._due_announced = True
             n = self.due_count
             self.say(tr(f"今天有 {n} 个知识点要确认，点我",
                         f"{n} concept{'s' if n > 1 else ''} to review today — click me"),
                      7000, "alert", 3000)
+            return
+        # 刚把今天到期的全过完（面板还开着 = 学生正在「讲给 Echo 听」里）→ 收个尾。
+        # 只在归零时说：还剩几个就冒话会打断正在进行的那轮对话。
+        if before and not self.due_count and self.win is not None and self.win.isVisible():
+            self.say(tr("今天该回响的都过了一遍，记下了", "That's today's review done — nice work"),
+                     6000, "done", 3000)
+
+    def _due_poll(self):
+        """面板开着时（学生在复习/聊天）查勤一点，好在一轮结束时接住话头；
+        面板关着就没必要，5 分钟一次够了。"""
+        visible = self.win is not None and self.win.isVisible()
+        if visible or time.time() - self._due_checked >= 300:
+            self._check_due()
 
     def _idle_tip(self):
         if time.time() - self._last_interact < 60 or self.status != "listening" or time.time() < self._bubble_until:

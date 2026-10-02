@@ -227,6 +227,31 @@ def run_child(theme, shots):
     check(f"[{theme}] 窗口不超出屏幕", window.height() <= scr.height() and window.width() <= scr.width(),
           f"窗口 {window.width()}x{window.height()}，屏幕 {scr.width()}x{scr.height()}")
 
+    # --- 首次登录窗：QDialog，不在主窗口的页面栈里，上面的逐页取色覆盖不到它 ---
+    from echo.widgets.profile_setup import ProfileSetupDialog
+    dlg = ProfileSetupDialog()
+    dlg.resize(440, 320)
+    dlg.show()
+    for _ in range(6):
+        app.processEvents()
+    dimg = dlg.grab().toImage()
+    DW, DH = dimg.width(), dimg.height()
+    dcnt = Counter()
+    for y in range(8, DH - 8, 2):
+        for x in range(8, DW - 8, 2):
+            dcnt[dimg.pixelColor(x, y).rgb() & 0xFFFFFF] += 1
+    dtop, dn = dcnt.most_common(1)[0]
+    dtotal = sum(dcnt.values())
+    dqt = dcnt.get(_packed(QT_DEFAULT_LIGHT), 0)
+    if shots:
+        dimg.save(str(Path(os.environ.get("TEMP", ".")) / f"echo_theme_{theme}_profile.png"))
+    check(f"[{theme}] 首次登录窗底色是主题色", dtop in allowed,
+          f"主色 {'#%06X' % dtop}（占比 {dn / dtotal:.0%}）不在 "
+          f"{[('#%06X' % c) for c in sorted(allowed)]}")
+    check(f"[{theme}] 首次登录窗没有残留的浅灰底", dqt / dtotal < 0.02,
+          f"{dqt / dtotal:.1%} 的像素是 Qt 默认浅灰 {QT_DEFAULT_LIGHT}")
+    dlg.close()
+
     window.close()
     print(f"RESULT {sum(results)}/{len(results)} {theme}", flush=True)
     return 0 if all(results) else 1
