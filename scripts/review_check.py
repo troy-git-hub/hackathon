@@ -10,6 +10,11 @@ Echo - 间隔重复复习自检
   D. 老数据（1.x 只有 reviewed 布尔值）迁移后不丢、不乱
   E. 首页「今天该回响」卡片的数据
   F. 重新记录同一个知识点时，复习进度不被清零
+  G. 接口健壮性
+  H. 断点找到的那一刻就落盘（不等下课，重开课程/崩溃不丢）
+  I. 「✓ 补上了」/「我自己看看」立刻同步状态
+  J. 同一个知识点在新一节课又掉队 → 判定复发
+  K. 「为什么要复习它」的依据（due_reason）
 
 退出码：全部通过为 0。
 """
@@ -209,10 +214,42 @@ store._write([])
 check("空错题本的卡片不崩", store.due_summary(now=T0)["count"] == 0)
 check("空错题本的今日任务是空的", store.due_items(now=T0) == [])
 
-section("H. 端到端：下课时又在同一个知识点掉队")
+section("H. 断点找到的那一刻就落盘（不等下课）")
 from echo.backend.engine import EchoEngine          # noqa: E402
 from echo.mock_data import BreakPoint               # noqa: E402
 
+store._write([])
+eng = EchoEngine(use_llm=False)
+bp1 = BreakPoint("12:00", "链式法则", "为什么要连乘？", "老师跳过了推导", "讲解…")
+eng._persist_breakpoint(bp1, check_relapse=True)
+check("断点一找到就进错题本，不用等下课",
+      any(it["topic"] == "链式法则" for it in store.load()))
+check("刚发现的断点不是复发（错题本之前是空的）",
+      next(it for it in store.load() if it["topic"] == "链式法则").get("level", 0) == 0)
+
+# 模拟「中途重开课程」：以前的 bug 是 engine.reset() 把内存里的断点全清空、
+# 而断点只在内存里、从没写过盘，这节课已经找到的全丢了。现在找到那一刻就已经
+# 落盘了，重开只清内存，不影响已经存下的记录。
+eng.start()
+check("重开课程后，刚才那条断点还在错题本里（不会跟着内存一起清空）",
+      any(it["topic"] == "链式法则" for it in store.load()))
+eng.shutdown()
+
+section("I. 「✓ 补上了」/「我自己看看」立刻同步状态")
+store._write([])
+eng = EchoEngine(use_llm=False)
+bp2 = BreakPoint("13:00", "泰勒展开", "为什么只取前几项？", "讲得快", "讲解…")
+eng._persist_breakpoint(bp2, check_relapse=True)
+check("刚存的状态是 review",
+      next(it for it in store.load() if it["topic"] == "泰勒展开")["status"] == "review")
+with eng._lock:
+    eng.breakpoints = [bp2]
+eng.mark_fixed()
+check("点了「补上了」立刻同步成 fixed（不用等下课）",
+      next(it for it in store.load() if it["topic"] == "泰勒展开")["status"] == "fixed")
+eng.shutdown()
+
+section("J. 端到端：同一个知识点在新一节课又掉队")
 store._write([])
 store.add([{"topic": "极限", "missing": "第一次掉队"}])
 store.grade("极限", store.CLEAR, now=T0)
@@ -220,30 +257,48 @@ store.grade("极限", store.CLEAR, now=T0)
 check("先攒到 level 2", store.load()[0]["level"] == 2, str(store.load()[0]["level"]))
 
 eng = EchoEngine(use_llm=False)
-with eng._lock:
-    eng.breakpoints = [BreakPoint("12:00", "极限", "为什么是无限逼近？", "老师跳过了推导", "讲解…")]
-check("认得出这是复发", eng.relapse_topics() == ["极限"], str(eng.relapse_topics()))
-
-# 这段就是 floating_window._save_review 干的事：先问复发，再 add
-store.add(store.from_breakpoints(eng), relapse=bool(eng.relapse_topics()))
+bp3 = BreakPoint("12:00", "极限", "为什么是无限逼近？", "老师跳过了推导", "讲解…")
+eng._persist_breakpoint(bp3, check_relapse=True)   # _find_breakpoint 里真实发生的调用
 after = next(it for it in store.load() if it["topic"] == "极限")
 check("复发 → 进度清零", after["level"] == 0, str(after["level"]))
 check("复发 → 回到今天的清单", after["due"] <= time.time() + 1, str(after.get("due")))
 check("复发 → 描述更新成这次的",
       after.get("missing") == "为什么是无限逼近？", after.get("missing"))
 
-# 全新的知识点不该被牵连（错题本里本来没有 prev）
-store.add(store.from_breakpoints(eng), relapse=True)
-new = next(it for it in store.load() if it["topic"] == "极限")
-check("同一个知识点再存一次仍然清零", new["level"] == 0)
-
-# 概念为空的断点不能拿空串去匹配
-eng2 = EchoEngine(use_llm=False)
-with eng2._lock:
-    eng2.breakpoints = [BreakPoint("01:00", "", "x", "y", "z")]
-check("concept 为空的断点被跳过", eng2.relapse_topics() == [], str(eng2.relapse_topics()))
+# 后续同步状态（mark_fixed 之类）不该把它当成又一次新的复发重新清零
+with eng._lock:
+    eng.breakpoints = [bp3]
+eng.mark_fixed()
+after2 = next(it for it in store.load() if it["topic"] == "极限")
+check("状态同步不重新触发复发判断", after2["level"] == 0 and after2["status"] == "fixed",
+      str(after2))
 eng.shutdown()
-eng2.shutdown()
+
+section("K. 「为什么要复习它」的依据")
+fresh("第一次见")
+reason0 = store.due_reason(store.load()[0], now=T0)
+check("从没确认过 → 说清楚是第一次", "第一次" in reason0, reason0)
+
+store.grade("第一次见", store.AGAIN, now=T0)
+reason1 = store.due_reason(store.load()[0], now=T0 + 1 * DAY)
+check("上次没懂 → 依据里说没想起来", "没想起来" in reason1, reason1)
+
+store.grade("第一次见", store.FUZZY, now=T0 + 1 * DAY)
+reason2 = store.due_reason(store.load()[0], now=T0 + 4 * DAY)
+check("上次模糊 → 依据里说模糊", "模糊" in reason2, reason2)
+
+store.grade("第一次见", store.CLEAR, now=T0 + 4 * DAY)
+reason3 = store.due_reason(store.load()[0], now=T0 + 11 * DAY)
+check("上次清楚、过了几天 → 依据里带上天数", "7 天" in reason3, reason3)
+check("见过不止一次 → 依据里说第几次见到它", "第 4 次" in reason3, reason3)
+
+section("L. 概念为空的断点不落盘")
+eng = EchoEngine(use_llm=False)
+bp_empty = BreakPoint("01:00", "", "x", "y", "z")
+n_before = len(store.load())
+eng._persist_breakpoint(bp_empty, check_relapse=True)
+check("concept 为空的断点不落盘", len(store.load()) == n_before)
+eng.shutdown()
 
 print("\n" + "=" * 56)
 if FAILED:

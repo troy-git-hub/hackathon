@@ -839,6 +839,12 @@ class FloatingWindow(QWidget):
                        f"color: {Colors.TEXT_PRIMARY}; font-size: 15px; font-weight: 600;")
         topic.setWordWrap(True)
         v.addWidget(topic)
+        # 为什么现在该复习它——不是随机抽的，是调度算出来的，让学生看见依据
+        reason = store.due_reason(item)
+        if reason:
+            rl = _label(f"◷ {reason}", f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;",
+                       wrap=True)
+            v.addWidget(rl)
         miss = item.get("missing") or item.get("reason") or tr("这里没跟上", "Lost track here")
         ml = _label(tr(f"没跟上：{miss}", f"Missed: {miss}"),
                     f"color: {Colors.ACCENT}; font-size: 13px;")
@@ -924,12 +930,15 @@ class FloatingWindow(QWidget):
 
 
     def _save_review(self):
+        """保险丝，不是主要存储路径：断点在找到的那一刻已经即时落盘了
+        （engine._persist_breakpoint），这里下课时再存一遍只是兜底——万一中途有次
+        落盘因为短暂的 I/O 错误失败了，下课时还能补上。
+
+        relapse 不在这里重判：复发已经在 engine 里按每条断点找到的那一刻单独判过了，
+        这时候再传 relapse=True 会把这节课自己刚存的记录当场误判成复发。
+        """
         try:
-            engine = self.echo.engine
-            # 必须在 add 之前问：add 之后所有断点都进错题本了，就分不出
-            # 哪些是「本来就在里面」的，也就判不出复发。
-            relapsed = engine.relapse_topics()
-            store.add(store.from_breakpoints(engine), relapse=bool(relapsed))
+            store.add(store.from_breakpoints(self.echo.engine))
         except Exception:
             pass
 

@@ -17,7 +17,7 @@ import time
 
 from echo.backend import paths
 
-_LOCK = threading.Lock()
+_LOCK = threading.RLock()     # 可重入：grade()/add() 整段持锁时内部还要调 load()
 
 # ================= 间隔重复 =================
 # 学生复习完一个知识点后的三档自评。没有「掌握了」这个终态 ——
@@ -104,35 +104,40 @@ def add(items, relapse: bool = False):
     会被排到一个月后。所以这种情况下把 level 清零、立刻到期重来。
 
     默认 False：其它调用点（抽问答错、拍题）只是把新内容补进来，不该动已有的进度。
+
+    整段持锁：engine 现在找到断点就立刻调用这个函数（不再等下课批量写），
+    并发调用变多了，读-改-写必须是一个原子操作，否则两次几乎同时的 add()
+    会读到同一份旧数据，后写的那次把先写的那次覆盖掉。
     """
     if not items:
         return
-    cur = load()
-    by_topic = {it.get("topic"): it for it in cur}
-    now = time.time()
-    for it in items:
-        topic = (it.get("topic") or "").strip()
-        if not topic:
-            continue
-        it["topic"] = topic
-        it.setdefault("time", now)
-        prev = by_topic.get(topic)
-        if prev:
-            it["reviewed"] = prev.get("reviewed", False)
-            if prev.get("reviewed_at"):
-                it["reviewed_at"] = prev["reviewed_at"]
-            it["time"] = prev.get("time", it["time"])
-            # 复习进度跟着走，否则同一个知识点再次被记进来就把阶梯清零了
-            for k in ("level", "due", "last_result", "review_count"):
-                if k in prev:
-                    it[k] = prev[k]
-            if relapse:
-                it["level"] = 0
-                it["due"] = now          # 立刻回到今天的复习清单里
-                it["last_result"] = AGAIN
-                it["reviewed"] = False
-        by_topic[topic] = it
-    _write(list(by_topic.values()))
+    with _LOCK:
+        cur = load()
+        by_topic = {it.get("topic"): it for it in cur}
+        now = time.time()
+        for it in items:
+            topic = (it.get("topic") or "").strip()
+            if not topic:
+                continue
+            it["topic"] = topic
+            it.setdefault("time", now)
+            prev = by_topic.get(topic)
+            if prev:
+                it["reviewed"] = prev.get("reviewed", False)
+                if prev.get("reviewed_at"):
+                    it["reviewed_at"] = prev["reviewed_at"]
+                it["time"] = prev.get("time", it["time"])
+                # 复习进度跟着走，否则同一个知识点再次被记进来就把阶梯清零了
+                for k in ("level", "due", "last_result", "review_count"):
+                    if k in prev:
+                        it[k] = prev[k]
+                if relapse:
+                    it["level"] = 0
+                    it["due"] = now          # 立刻回到今天的复习清单里
+                    it["last_result"] = AGAIN
+                    it["reviewed"] = False
+            by_topic[topic] = it
+        _write(list(by_topic.values()))
 
 
 def mark_reviewed(topic: str):
@@ -152,25 +157,26 @@ def grade(topic: str, result: str, now: float = None) -> dict:
     if result not in GRADES:
         raise ValueError(f"未知的复习结果：{result!r}")
     now = time.time() if now is None else now
-    cur = load()
-    hit = {}
-    for it in cur:
-        if it.get("topic") != topic:
-            continue
-        _schedule(it, now)
-        level, due = next_due(it.get("level", 0), result, now)
-        it["level"] = level
-        it["due"] = due
-        it["last_result"] = result
-        it["reviewed_at"] = now
-        # reviewed 仍然写：主页统计和老的筛选逻辑还在看它。
-        # 语义变成「这一轮暂时过了」，到期后 due_items() 会把它重新捞出来。
-        it["reviewed"] = result != AGAIN
-        it["review_count"] = int(it.get("review_count") or 0) + 1
-        hit = it
-    if hit:
-        _write(cur)
-    return hit
+    with _LOCK:
+        cur = load()
+        hit = {}
+        for it in cur:
+            if it.get("topic") != topic:
+                continue
+            _schedule(it, now)
+            level, due = next_due(it.get("level", 0), result, now)
+            it["level"] = level
+            it["due"] = due
+            it["last_result"] = result
+            it["reviewed_at"] = now
+            # reviewed 仍然写：主页统计和老的筛选逻辑还在看它。
+            # 语义变成「这一轮暂时过了」，到期后 due_items() 会把它重新捞出来。
+            it["reviewed"] = result != AGAIN
+            it["review_count"] = int(it.get("review_count") or 0) + 1
+            hit = it
+        if hit:
+            _write(cur)
+        return hit
 
 
 def due_items(now: float = None) -> list:
@@ -203,6 +209,33 @@ def later_items(now: float = None) -> list:
             out.append(it)
     out.sort(key=lambda it: it.get("due", 0))
     return out
+
+
+def due_reason(item: dict, now: float = None) -> str:
+    """一句话：为什么这个知识点现在该复习了。
+
+    不是 AI 现编的 —— 就是把调度状态翻成人话，让学生知道「这不是随机抽的」。
+    复习卡片（今天该复习 / 过几天再复习）都用这个。
+    """
+    now = time.time() if now is None else now
+    count = int(item.get("review_count") or 0)
+    last = item.get("last_result")
+    if count == 0:
+        base = "第一次掉队，还没确认过"
+    elif last == AGAIN:
+        base = "上次还是没想起来，这次再试试"
+    elif last == FUZZY:
+        base = "上次印象有点模糊，再看一次"
+    elif last == CLEAR:
+        reviewed_at = item.get("reviewed_at") or now
+        days = max(0, round((now - reviewed_at) / DAY))
+        base = ("刚确认过，按计划抽查一下" if days <= 0 else
+                f"上次说记得清楚，{days} 天过去了，抽查一下有没有忘")
+    else:
+        base = "该复习一下了"
+    if count >= 2:
+        base += f"（第 {count + 1} 次见到它）"
+    return base
 
 
 def due_summary(now: float = None) -> dict:

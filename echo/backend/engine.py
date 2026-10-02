@@ -452,8 +452,42 @@ class EchoEngine:
                 return
             shown = self._attach_breakpoint(bp)
             self.breakpoints.append(bp)
+        # 立刻落盘，不等下课：以前是整节课的断点都攒在内存里，下课时才一次性写进
+        # 错题本——中途重开课程、应用崩溃、或者没点「下课」就关窗口，这节课已经找到
+        # 的断点（包括已经花 API 调用生成的补课讲解）就全没了，找不回来。
+        self._persist_breakpoint(bp, check_relapse=True)
         self._emit(sid, "status", "listening")
         self._emit(sid, "breakpoint", bp, shown)
+
+    def _persist_breakpoint(self, bp, check_relapse: bool = False):
+        """把一个断点立刻写进错题本。mark_fixed/mark_self 改了状态后也调这个来同步。
+
+        check_relapse=True（只有刚找到这一刻才传）：在这条断点自己还没存进错题本之前，
+        查它的 topic 是不是已经在里面——是的话说明「上次掉的队没真的补上，这次又掉了」，
+        这是判断复发的唯一正确时机。等它自己存进去之后再查，查到的就是它自己，
+        每条断点都会被误判成复发。
+        """
+        topic = (bp.concept or "").strip()
+        if not topic:
+            return
+        try:
+            relapse = False
+            if check_relapse:
+                relapse = topic in {str(it.get("topic") or "").strip() for it in store.load()}
+            store.add([{
+                "topic": topic,
+                "timecode": bp.breakpoint_tc,
+                "missing": bp.missing,
+                "reason": bp.reason,
+                "micro_lesson": bp.micro_lesson,
+                "known": bp.known,
+                "step": bp.step,
+                "now": bp.now,
+                "status": "fixed" if bp.fixed else "review",
+                "reviewed": False,
+            }], relapse=relapse)
+        except Exception as e:
+            log.warning("断点落盘失败: %s", e)
 
     def _heuristic_breakpoint(self, cur: str = "") -> BreakPoint:
         """规则兜底：取最近一个点过「有点懵」的知识点，否则取「现在」的前一个。"""
@@ -523,51 +557,35 @@ class EchoEngine:
             return [e.concept for e in shown]
 
     def mark_fixed(self):
-        """学生点了「✓ 补上了」：把最近一个断点标记为已补上。"""
-        with self._lock:
-            self._last_interaction = time.time()
-            if not self.breakpoints:
-                return
-            bp = self.breakpoints[-1]
-            bp.fixed = True
-            for e in reversed(self.entries):
-                if e.is_bp and e.concept.timecode == bp.breakpoint_tc:
-                    e.fixed = True
-                    break
+        """学生点了「✓ 补上了」：把最近一个断点标记为已补上，立刻同步到错题本。
 
-    def mark_self(self):
-        """学生点了「我自己看看」：最近一个断点记为自己回看，回响里仍算待复习。"""
+        断点在找到的那一刻已经存过一次了（见 _persist_breakpoint）；这里只是状态变了
+        （review → fixed），重存一遍覆盖掉旧状态——免得崩溃/重开发生在点完「补上了」
+        之后、下课之前，这个状态白点了。
+        """
+        bp = None
         with self._lock:
             self._last_interaction = time.time()
             if self.breakpoints:
-                self.breakpoints[-1].self_review = True
+                bp = self.breakpoints[-1]
+                bp.fixed = True
+                for e in reversed(self.entries):
+                    if e.is_bp and e.concept.timecode == bp.breakpoint_tc:
+                        e.fixed = True
+                        break
+        if bp is not None:
+            self._persist_breakpoint(bp)
 
-    def relapse_topics(self) -> List[str]:
-        """这一节课里「以前就掉过队、这次又掉了」的知识点（按出现顺序，去重）。
-
-        错题本里本来就有记录，说明上次掉的队并没有真的补上 —— 这是「其实没掌握」的
-        强信号。不这么判的话，一个早就该重新学的知识点会带着之前连对攒下的长间隔
-        （可能 30 天）躺在清单里，学生一直等不到它。
-
-        必须在 store.add(...) 之前调用：add 会把这一节的断点全写进错题本，
-        那之后就分不出哪些是「本来就在里面」的了。
-
-        拿去做：store.add(store.from_breakpoints(engine), relapse=bool(列表非空))。
-        add 只对错题本里已有记录的 topic 生效，所以整批传一个布尔值就够。
-        """
+    def mark_self(self):
+        """学生点了「我自己看看」：最近一个断点记为自己回看，回响里仍算待复习。"""
+        bp = None
         with self._lock:
-            bps = list(self.breakpoints)
-        try:
-            from echo.backend import store
-            known = {str(it.get("topic") or "").strip() for it in store.load()}
-        except Exception:
-            return []                     # 读不到错题本：当作没有复发，别把进度误清零
-        out: List[str] = []
-        for bp in bps:
-            topic = str(getattr(bp, "concept", "") or "").strip()
-            if topic and topic in known and topic not in out:
-                out.append(topic)
-        return out
+            self._last_interaction = time.time()
+            if self.breakpoints:
+                bp = self.breakpoints[-1]
+                bp.self_review = True
+        if bp is not None:
+            self._persist_breakpoint(bp)
 
     # ================= 课堂抽问（摸鱼探测） =================
     def _checkin_due(self) -> bool:
