@@ -102,5 +102,19 @@ assert window._page == ui.LISTEN, "返回课堂按钮失效"
 
 screen_h = app.primaryScreen().availableGeometry().height()
 assert window.height() <= screen_h, f"窗口高度 {window.height()} 超出屏幕 {screen_h}"
+
+# 主页 / 错题复习（上下文保存）
+window._show_home()
+app.processEvents()
+assert window._page == ui.HOME, "主页打不开"
+assert window.home_sub.text(), "主页统计行为空"
+QTest.mouseClick(window.btn_today, Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.LISTEN, "「开始今天的学习」没有进入听课页"
+
+window._show_review()
+app.processEvents()
+assert window._page == ui.REVIEW, "错题复习页打不开"
+
 window.close()
 print("UI smoke passed: one window, avatar and primary flow work")

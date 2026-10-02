@@ -31,15 +31,18 @@ def load() -> list:
         return data if isinstance(data, list) else []
 
 
-def _write(items):
-    p = _path()
-    tmp = p + ".tmp"
+def _write_json(path, items):
+    tmp = path + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, p)
+        os.replace(tmp, path)
     except OSError:
         pass
+
+
+def _write(items):
+    _write_json(_path(), items)
 
 
 def add(items):
@@ -101,3 +104,64 @@ def from_breakpoints(engine) -> list:
             "reviewed": False,
         })
     return out
+
+
+def _lessons_path() -> str:
+    return os.path.join(paths.config_dir(), "lessons.json")
+
+
+def _load_lessons() -> list:
+    """读取所有课程历史（list[dict]）。文件不存在或损坏时返回 []。"""
+    with _LOCK:
+        try:
+            with open(_lessons_path(), encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            return []
+        return data if isinstance(data, list) else []
+
+
+def _skill_status(sk) -> str:
+    """统一吃 (name, mastery, status) 元组 / dict / 对象三种形式，取出 status。"""
+    if isinstance(sk, dict):
+        return sk.get("status", "ok")
+    if isinstance(sk, (list, tuple)):
+        return sk[2] if len(sk) > 2 else "ok"
+    return getattr(sk, "status", "ok")
+
+
+def save_lesson(title: str, skills: list, review_chain: list, suggestion: str = "") -> None:
+    """存一节课的回响摘要。skills 支持元组 / dict / 对象列表。最多保留最近 50 条。"""
+    skills = skills or []
+    total = len(skills)
+    ok = sum(1 for sk in skills if _skill_status(sk) == "ok")
+    now = time.time()
+    record = {
+        "time": now,
+        "title": title or "未命名课程",
+        "date": time.strftime("%Y-%m-%d", time.localtime(now)),
+        "total": total,
+        "ok": ok,
+        "review": total - ok,
+        "review_chain": list(review_chain or []),
+        "suggestion": suggestion or "",
+    }
+    cur = _load_lessons()
+    cur.append(record)
+    _write_json(_lessons_path(), cur[-50:])
+
+
+def list_lessons(limit: int = 5) -> list:
+    """最近的课，新 → 旧。"""
+    cur = _load_lessons()
+    cur.sort(key=lambda it: it.get("time", 0), reverse=True)
+    return cur[:limit]
+
+
+def stats() -> dict:
+    """课程 + 错题复习情况汇总。"""
+    lessons = _load_lessons()
+    reviews = load()
+    pending = sum(1 for it in reviews if not it.get("reviewed"))
+    mastered = sum(1 for it in reviews if it.get("reviewed"))
+    return {"lessons": len(lessons), "pending": pending, "mastered": mastered}

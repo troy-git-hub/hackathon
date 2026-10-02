@@ -187,6 +187,7 @@ class EchoTray(QObject):
         m.setAttribute(Qt.WA_TranslucentBackground, True)
         self.act_toggle = m.addAction("显示 / 隐藏 Echo", self.toggle_window)
         m.addSeparator()
+        m.addAction("⌂  主页", self.home)
         self.act_lost = m.addAction(f"我掉队了    {self.keys[1]}".rstrip(), self.lost)
         m.addAction(f"圈一下问 AI    {self.keys[3]}".rstrip(), self.circle_ask)
         self.act_end = m.addAction("下课，生成回响", self.end_lesson)
@@ -282,6 +283,11 @@ class EchoTray(QObject):
         self.show_window()
         if hasattr(self.win, "_show_review"):
             self.win._show_review()
+
+    def home(self):
+        self.show_window()
+        if hasattr(self.win, "_show_home"):
+            self.win._show_home()
 
     def toggle_offline(self, checked):
         echo = self.win.echo
