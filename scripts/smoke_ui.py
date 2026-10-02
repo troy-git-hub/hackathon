@@ -24,7 +24,7 @@ if runtime:
 
 from PyQt5.QtCore import QObject, Qt, pyqtSignal
 from PyQt5.QtTest import QTest
-from PyQt5.QtWidgets import QApplication, QPushButton
+from PyQt5.QtWidgets import QApplication, QLabel, QPushButton
 
 from echo.mock_data import SAMPLE_BREAKPOINT, SAMPLE_CONCEPTS
 from echo.theme import apply_theme
@@ -274,6 +274,25 @@ window.checkin_card.dismiss()
 window.echo.engine.active = False
 
 # 课程管理：搜索过滤 + 重命名 + 批量删除（对话框在 offscreen 下会阻塞，这里只测非交互路径）
+# 课名是 AI 填的占位名时，列表上别把「（未知）」当课名摆出来
+assert ui.FloatingWindow._lesson_name({"title": "贝叶斯统计"}) == "贝叶斯统计"
+assert ui.FloatingWindow._lesson_name(
+    {"title": "（未知）", "skills_detail": [{"name": "定义域"}]}) == "定义域", \
+    "占位课名应该退回用知识点名"
+assert ui.FloatingWindow._lesson_name({"title": "未知", "date": "10月2日"}) == "10月2日", \
+    "没有知识点时退回用日期"
+
+store.save_lesson("（未知）", [{"name": "函数定义域求解", "mastery": 0.8, "status": "ok"}], [])
+window._show_courses()
+app.processEvents()
+window.courses_search.setText("函数定义域求解")
+app.processEvents()
+assert len(window._course_cards) == 1, "按列表上显示的名字搜不到这门课"
+assert any("函数定义域求解" in w.text() for w in window._course_cards[0].findChildren(QLabel)), \
+    "标题是占位名的课没有显示成知识点名"
+window.courses_search.setText("")
+app.processEvents()
+
 window._show_courses()
 app.processEvents()
 assert window._page == ui.COURSES, "「课程管理」页打不开"

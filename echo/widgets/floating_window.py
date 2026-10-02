@@ -856,8 +856,11 @@ class FloatingWindow(QWidget):
             all_lessons = []
         query = (self.courses_search.text() or "").strip()
         q = query.lower()
+        # 按列表上显示的名字搜：标题是占位名的那节课显示的是知识点名，
+        # 搜列表上看得见的字才找得到它
         shown = [ls for ls in all_lessons
-                 if not q or q in (ls.get("title") or "").lower() or q in (ls.get("date") or "").lower()]
+                 if not q or q in self._lesson_name(ls).lower()
+                 or q in (ls.get("title") or "").lower() or q in (ls.get("date") or "").lower()]
 
         self.courses_sub.setText(f"共 {len(all_lessons)} 节课" + (f" · 匹配 {len(shown)} 节" if q else ""))
 
@@ -873,6 +876,21 @@ class FloatingWindow(QWidget):
         self.courses_empty.setVisible(not shown)
         if getattr(self, "_page", None) == COURSES:
             self._fit()
+
+    @staticmethod
+    def _lesson_name(ls: dict) -> str:
+        """课程在列表里显示的名字。
+
+        AI 偶尔会把标题也写成「（未知）」这种占位名（老数据里就有一节），
+        与其把「（未知）」当课名摆出来，不如退回用这节课的知识点或日期。
+        """
+        title = (ls.get("title") or "").strip()
+        if title and not mindmap.is_placeholder_topic(title):
+            return title
+        first = next((s.get("name") for s in (ls.get("skills_detail") or []) if s.get("name")), "")
+        if first:
+            return first
+        return (ls.get("date") or "").strip() or "一节课"
 
     def _courses_row(self, ls):
         """一节历史课一行：勾选框 + 名称/日期 + 重命名 + 看回顾。"""
@@ -896,7 +914,7 @@ class FloatingWindow(QWidget):
 
         col = QVBoxLayout()
         col.setSpacing(2)
-        title = _label(ls.get("title", "一节课"),
+        title = _label(self._lesson_name(ls),
                        f"color: {Colors.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;")
         title.setWordWrap(True)
         col.addWidget(title)
@@ -1299,7 +1317,7 @@ class FloatingWindow(QWidget):
         lesson = getattr(self, "_detail_lesson", {}) or {}
         if not lesson or not hasattr(self.echo, "make_lesson_quiz"):
             return
-        self._prac_item = {"topic": lesson.get("title") or "课后练习"}
+        self._prac_item = {"topic": self._lesson_name(lesson)}
         ts = getattr(self, "_detail_ts", 0)
         self._prac_back = (lambda: self._show_detail(ts)) if ts else None
         self._prac_back_label = "← 课程回顾" if ts else ""
@@ -1316,7 +1334,7 @@ class FloatingWindow(QWidget):
 
     def _on_quiz_ready(self, questions):
         lesson = getattr(self, "_detail_lesson", {}) or {}
-        self._prac_item = {"topic": lesson.get("title") or "课后练习"}
+        self._prac_item = {"topic": self._lesson_name(lesson)}
         self._show_page(PRACTICE)
         self._on_prac_done(questions)
 
@@ -1366,7 +1384,7 @@ class FloatingWindow(QWidget):
             ls = {}
         self._detail_lesson = ls
         self._detail_ts = ts
-        self.det_title.setText(ls.get("title") or "这节课")
+        self.det_title.setText(self._lesson_name(ls))
         self.det_sub.setText(
             f"{ls.get('date', '')}　✓ 跟上了 {ls.get('ok', 0)} · 待复习 {ls.get('review', 0)}".strip())
         self.det_stat.setText(self._stat_line(ls))
