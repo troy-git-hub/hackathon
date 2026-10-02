@@ -18,7 +18,7 @@ def _preload_whisper():
         from faster_whisper import WhisperModel
         WhisperModel(config.WHISPER_MODEL, device=config.WHISPER_DEVICE,
                       compute_type=config.WHISPER_COMPUTE,
-                      cpu_threads=min(8, os.cpu_count() or 4),
+                      cpu_threads=min(config.WHISPER_THREADS, os.cpu_count() or 1),
                       local_files_only=True)
         print(f"[Echo] Whisper 预加载完成: {config.WHISPER_MODEL}")
     except Exception as e:
