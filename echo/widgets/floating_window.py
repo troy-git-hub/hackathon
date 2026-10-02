@@ -9,7 +9,7 @@ Echo - 悬浮主窗口（学习工具风格）
   4 echo     回响：每个知识点一条掌握度条 + ✓ ? ! ；你的掉队点 ↓ 前置 ↓ 建议复习
   5 review   错题复习：历次掉队点的列表，可回看 / AI 出题 / 标记掌握
   6 home     主页（启动页）：命名并开始今天的学习 + 错题复习 + AI 出题 + 历史课程
-  7 practice AI 出题练习：照着错题出题，看答案 + 解析
+  7 practice AI 出题练习：照着错题出题，选择/填写答案 → 交卷 → 答案比对 + 订正解析
   8 detail   历史课程详情：这节课讲了什么 + 要点 + 每个知识点掌握度
 """
 import html
@@ -20,7 +20,7 @@ from ctypes import wintypes
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame, QSizePolicy, QStackedWidget,
                              QProgressBar, QApplication, QShortcut, QScrollArea,
-                             QLineEdit, QTextBrowser)
+                             QLineEdit, QTextBrowser, QRadioButton, QButtonGroup)
 from PyQt5.QtCore import Qt, QTimer, QRectF, QPoint, pyqtSignal
 from PyQt5.QtGui import QFont, QCursor, QPainter, QPainterPath, QColor, QBrush, QPen, QKeySequence, QPixmap
 
@@ -146,7 +146,8 @@ class FloatingWindow(QWidget):
         self._ask = None             # 断点追问会话（LessonAsk）
         self._ask_buf = ""
         self._prac_item = None       # 当前在练的错题
-        self._prac_qs, self._prac_i = [], 0
+        self._prac_qs, self._prac_cards = [], []
+        self._prac_submitted = False
         self._drag_pos = None
         self._page = LISTEN
 
@@ -865,37 +866,19 @@ class FloatingWindow(QWidget):
         lay.addWidget(self.prac_loading)
 
         self.prac_body = QWidget()
-        pb = QVBoxLayout(self.prac_body)
-        pb.setContentsMargins(0, 0, 0, 0)
-        pb.setSpacing(Spacing.SM)
-        self.prac_q = _label("", f"color: {Colors.TEXT_PRIMARY}; font-size: 15px;"
-                                 "font-weight: 600; line-height: 150%;", wrap=True)
-        pb.addWidget(self.prac_q)
-        self.prac_opts = _label("", f"color: {Colors.TEXT_PRIMARY}; font-size: 13px;"
-                                    "line-height: 180%;", wrap=True)
-        pb.addWidget(self.prac_opts)
-        self.prac_answer = QFrame()
-        self.prac_answer.setObjectName("PracAnswer")
-        self.prac_answer.setStyleSheet(f"QFrame#PracAnswer {{ background: {Colors.CODE_BG};"
-                                       f"border-left: 2px solid {Colors.ACCENT}; border-radius: 4px; }}")
-        pa = QVBoxLayout(self.prac_answer)
-        pa.setContentsMargins(Spacing.MD, Spacing.SM, Spacing.MD, Spacing.SM)
-        pa.setSpacing(4)
-        self.prac_a = _label("", f"color: {Colors.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;", wrap=True)
-        pa.addWidget(self.prac_a)
-        self.prac_e = _label("", f"color: {Colors.TEXT_SECONDARY}; font-size: 12px; line-height: 160%;", wrap=True)
-        pa.addWidget(self.prac_e)
-        self.prac_answer.hide()
-        pb.addWidget(self.prac_answer)
-        lay.addWidget(self.prac_body)
+        self.prac_body_lay = QVBoxLayout(self.prac_body)
+        self.prac_body_lay.setContentsMargins(0, 0, 0, 0)
+        self.prac_body_lay.setSpacing(Spacing.SM)
+        lay.addWidget(self.prac_body, 1)
 
-        row = QHBoxLayout()
-        row.setSpacing(Spacing.SM)
-        self.btn_prac_show = _btn("看答案", "Quiet", self._prac_show_answer)
-        self.btn_prac_next = _btn("下一题", "Accent", self._prac_next)
-        row.addWidget(self.btn_prac_show)
-        row.addWidget(self.btn_prac_next)
-        lay.addLayout(row)
+        self.btn_prac_submit = _btn("交卷", "Accent", self._prac_submit,
+                                    "全部作答后交卷，看答案比对和订正")
+        self.btn_prac_submit.setMinimumHeight(42)
+        lay.addWidget(self.btn_prac_submit)
+
+        self.prac_score = _label("", f"color: {Colors.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;")
+        self.prac_score.hide()
+        lay.addWidget(self.prac_score)
 
         row2 = QHBoxLayout()
         row2.addWidget(_btn("✓ 这个我会了", "Link", self._prac_mastered))
@@ -915,15 +898,15 @@ class FloatingWindow(QWidget):
     def _practice_item(self, item):
         """针对某一个错题让 AI 出题（后台线程，结果经信号回主线程）。"""
         self._prac_item = item
-        self._prac_qs, self._prac_i = [], 0
+        self._prac_qs, self._prac_cards = [], []
+        self._prac_submitted = False
         self.prac_sub.setText(f"针对：{item.get('topic', '')}")
         self.prac_loading_lbl.setText("AI 正在照着你的错题出题…")
         self.prac_dots.start()
         self.prac_loading.show()
         self.prac_body.hide()
-        self.prac_answer.hide()
-        self.btn_prac_show.setEnabled(False)
-        self.btn_prac_next.setEnabled(False)
+        self.prac_score.hide()
+        self.btn_prac_submit.setEnabled(False)
         self._show_page(PRACTICE)
         from echo.backend import practice
         practice.generate(item, 3,
@@ -933,57 +916,185 @@ class FloatingWindow(QWidget):
     def _on_prac_done(self, qs):
         self.prac_dots.stop()
         self.prac_loading.hide()
-        self._prac_qs, self._prac_i = list(qs or []), 0
+        self._prac_qs = list(qs or [])
         if not self._prac_qs:
             self._on_prac_err("这次没出出题来，待会儿再试试")
             return
         self.prac_body.show()
-        self.btn_prac_show.setEnabled(True)
-        self.btn_prac_next.setEnabled(True)
-        self._render_question()
+        self._render_paper()
 
     def _on_prac_err(self, msg):
         self.prac_dots.stop()
         self.prac_loading_lbl.setText(msg)
         self.prac_loading.show()
         self.prac_body.hide()
-        self.btn_prac_show.setEnabled(False)
-        self.btn_prac_next.setEnabled(False)
+        self.btn_prac_submit.setEnabled(False)
         self._fit()
 
-    def _render_question(self):
-        q = self._prac_qs[self._prac_i]
-        total = len(self._prac_qs)
+    def _render_paper(self):
+        """把整套题铺成一张卷子：每道题一张卡，选项是选择按钮。"""
+        while self.prac_body_lay.count():
+            w = self.prac_body_lay.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        self._prac_cards = []
+        self._prac_submitted = False
+        for i, q in enumerate(self._prac_qs):
+            card = self._prac_card(i, q)
+            self._prac_cards.append(card)
+            self.prac_body_lay.addWidget(card)
         topic = (self._prac_item or {}).get("topic", "")
-        self.prac_sub.setText(f"针对：{topic}　第 {self._prac_i + 1} / {total} 题")
-        self.prac_q.setText(str(q.get("question", "")))
-        opts = [str(o) for o in (q.get("options") or [])]
-        self.prac_opts.setText("\n".join(opts))
-        self.prac_opts.setVisible(bool(opts))
-        self.prac_answer.hide()
-        self.btn_prac_show.setEnabled(True)
-        self.btn_prac_next.setText("下一题" if self._prac_i + 1 < total else "练完了")
+        self.prac_sub.setText(f"针对：{topic}　共 {len(self._prac_qs)} 题")
+        self.prac_score.hide()
+        self.btn_prac_submit.setEnabled(True)
         self._fit()
 
-    def _prac_show_answer(self):
-        if not self._prac_qs:
-            return
-        q = self._prac_qs[self._prac_i]
-        self.prac_a.setText(f"答案：{q.get('answer', '')}")
-        self.prac_e.setText(str(q.get("explain", "")))
-        self.prac_e.setVisible(bool(q.get("explain")))
-        self.prac_answer.show()
-        self.btn_prac_show.setEnabled(False)
-        self._fit()
+    def _prac_card(self, idx, q):
+        """一道题一张卡：题干 + 选择按钮（选择题）/ 输入框（简答题）+ 隐藏的答案比对区。"""
+        radio_qss = (
+            f"QRadioButton {{ color: {Colors.TEXT_PRIMARY}; font-size: 13px; spacing: 8px; background: transparent; }}"
+            f"QRadioButton::indicator {{ width: 16px; height: 16px; border-radius: 9px;"
+            f"border: 2px solid {Colors.BORDER_STRONG}; background: {Colors.SURFACE}; }}"
+            f"QRadioButton::indicator:checked {{ border: 2px solid {Colors.ACCENT}; background: {Colors.ACCENT}; }}"
+        )
+        card = QFrame()
+        card.setObjectName("PracCard")
+        card.setStyleSheet(f"QFrame#PracCard {{ background: {Colors.SURFACE};"
+                           f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.MD}px; }}")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        v.setSpacing(8)
 
-    def _prac_next(self):
-        if not self._prac_qs:
-            return
-        if self._prac_i + 1 < len(self._prac_qs):
-            self._prac_i += 1
-            self._render_question()
+        v.addWidget(_label(f"第 {idx + 1} 题",
+                           f"color: {Colors.ACCENT}; font-size: 11px; font-weight: 700;"))
+        v.addWidget(_label(str(q.get("question", "")),
+                           f"color: {Colors.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;"
+                           "line-height: 150%;", wrap=True))
+
+        opts = [str(o).strip() for o in (q.get("options") or []) if str(o).strip()]
+        group = QButtonGroup(card)
+        group.setExclusive(True)
+        radios = []
+        edit = None
+        if opts:
+            for o in opts:
+                r = QRadioButton(o)
+                r.setStyleSheet(radio_qss)
+                r.setCursor(QCursor(Qt.PointingHandCursor))
+                group.addButton(r)
+                v.addWidget(r)
+                radios.append(r)
         else:
-            self._show_home()
+            # 简答题：没有选项，让学生把答案写出来，交卷后与参考答案比对
+            edit = QLineEdit()
+            edit.setPlaceholderText("把你的答案写在这里…")
+            edit.setStyleSheet(
+                f"QLineEdit {{ background: {Colors.SURFACE}; color: {Colors.TEXT_PRIMARY};"
+                f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.SM}px; padding: 7px 10px;"
+                "font-size: 13px; }"
+                f"QLineEdit:focus {{ border-color: {Colors.ACCENT}; }}")
+            v.addWidget(edit)
+
+        result = QFrame()
+        result.setStyleSheet("background: transparent; border: none;")
+        rv = QVBoxLayout(result)
+        rv.setContentsMargins(0, 4, 0, 0)
+        rv.setSpacing(3)
+        verdict = _label("", "font-size: 13px; font-weight: 700;")
+        rv.addWidget(verdict)
+        compare = _label("", "font-size: 12px; line-height: 150%;", wrap=True)
+        rv.addWidget(compare)
+        explain = _label("", "font-size: 12px; line-height: 160%;", wrap=True)
+        rv.addWidget(explain)
+        result.hide()
+        v.addWidget(result)
+
+        card._group = group
+        card._radios = radios
+        card._edit = edit
+        card._result = result
+        card._verdict = verdict
+        card._compare = compare
+        card._explain = explain
+        return card
+
+    @staticmethod
+    def _opt_letter(text):
+        """从选项文字里取 A/B/C/D 字母（「A. …」「B、…」「B」都行），取不到返回空。"""
+        text = (text or "").strip()
+        m = re.match(r"([A-Za-z])\s*[.、:：)\]]", text)
+        if m:
+            return m.group(1).upper()
+        if re.fullmatch(r"[A-Za-z]", text):
+            return text.upper()
+        return ""
+
+    def _prac_submit(self):
+        """交卷：比对每道题的答案，原地显示对错 + 订正解析。"""
+        if self._prac_submitted or not self._prac_qs:
+            return
+        self._prac_submitted = True
+        correct = 0
+        mc_total = 0
+        has_free = False
+        for card, q in zip(self._prac_cards, self._prac_qs):
+            verdict, compare, ok = self._grade(card, q)
+            is_mc = bool(card._radios)
+            if is_mc:
+                mc_total += 1
+                if ok:
+                    correct += 1
+            else:
+                has_free = True
+            if ok:
+                color = Colors.OK_FG
+            elif verdict.startswith("简答"):
+                color = Colors.ACCENT
+            elif verdict == "未作答":
+                color = Colors.TEXT_DISABLED
+            else:
+                color = Colors.DANGER
+            card._verdict.setText(verdict)
+            card._verdict.setStyleSheet(
+                f"color: {color}; font-size: 13px; font-weight: 700; background: transparent;")
+            card._compare.setText(compare)
+            card._compare.setVisible(bool(compare))
+            card._explain.setText(str(q.get("explain") or ""))
+            card._explain.setVisible(bool(q.get("explain")))
+            card._result.show()
+            for r in card._radios:
+                r.setEnabled(False)
+            if card._edit:
+                card._edit.setEnabled(False)
+
+        if has_free:
+            self.prac_score.setText(f"选择题答对 {correct} / {mc_total} 题，简答题对照参考答案订正")
+        else:
+            self.prac_score.setText(f"答对 {correct} / {mc_total} 题" +
+                                    ("，全对 👍" if correct == mc_total else "，错的看下面订正"))
+        self.prac_score.show()
+        self.btn_prac_submit.setEnabled(False)
+        self._fit()
+
+    def _grade(self, card, q):
+        """给一道题判分：返回 (verdict 文案, 比对文案, 是否答对)。"""
+        answer = str(q.get("answer") or "").strip()
+        radios = card._radios
+        if radios:
+            chosen = next((r.text() for r in radios if r.isChecked()), "")
+            if not chosen:
+                return "未作答", f"正确答案：{answer}", False
+            if self._opt_letter(chosen) and self._opt_letter(answer):
+                ok = self._opt_letter(chosen) == self._opt_letter(answer)
+            else:
+                ok = chosen == answer
+            if ok:
+                return "✓ 答对了", f"你的答案：{chosen}", True
+            return "✗ 答错了", f"你的答案：{chosen}\n正确答案：{answer}", False
+        yours = (card._edit.text().strip() if card._edit else "")
+        if not yours:
+            return "未作答", f"参考答案：{answer}", False
+        return "简答题 · 自行比对", f"你的答案：{yours}\n参考答案：{answer}", False
 
     def _prac_mastered(self):
         topic = (getattr(self, "_prac_item", None) or {}).get("topic", "")
