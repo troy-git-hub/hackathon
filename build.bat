@@ -5,7 +5,12 @@ REM  需要先：pip install pyinstaller
 REM ============================================================
 setlocal
 
+REM 环境里同时装了 PyQt5 和 PyQt6 时，PyInstaller 会直接中止打包，
+REM 必须显式排除没用到的 Qt 绑定。
 pyinstaller --noconfirm --clean --windowed --name Echo --icon assets\echo.ico ^
+  --exclude-module PyQt6 ^
+  --exclude-module PySide2 ^
+  --exclude-module PySide6 ^
   --add-data "assets;assets" ^
   --add-data "echo\backend\demo_lesson.txt;echo\backend" ^
   --add-data ".env.example;." ^
