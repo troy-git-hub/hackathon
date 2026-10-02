@@ -871,7 +871,11 @@ class FloatingWindow(QWidget):
 
     def _save_review(self):
         try:
-            store.add(store.from_breakpoints(self.echo.engine))
+            engine = self.echo.engine
+            # 必须在 add 之前问：add 之后所有断点都进错题本了，就分不出
+            # 哪些是「本来就在里面」的，也就判不出复发。
+            relapsed = engine.relapse_topics()
+            store.add(store.from_breakpoints(engine), relapse=bool(relapsed))
         except Exception:
             pass
 

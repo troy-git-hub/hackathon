@@ -209,6 +209,42 @@ store._write([])
 check("空错题本的卡片不崩", store.due_summary(now=T0)["count"] == 0)
 check("空错题本的今日任务是空的", store.due_items(now=T0) == [])
 
+section("H. 端到端：下课时又在同一个知识点掉队")
+from echo.backend.engine import EchoEngine          # noqa: E402
+from echo.mock_data import BreakPoint               # noqa: E402
+
+store._write([])
+store.add([{"topic": "极限", "missing": "第一次掉队"}])
+store.grade("极限", store.CLEAR, now=T0)
+store.grade("极限", store.CLEAR, now=T0)
+check("先攒到 level 2", store.load()[0]["level"] == 2, str(store.load()[0]["level"]))
+
+eng = EchoEngine(use_llm=False)
+with eng._lock:
+    eng.breakpoints = [BreakPoint("12:00", "极限", "为什么是无限逼近？", "老师跳过了推导", "讲解…")]
+check("认得出这是复发", eng.relapse_topics() == ["极限"], str(eng.relapse_topics()))
+
+# 这段就是 floating_window._save_review 干的事：先问复发，再 add
+store.add(store.from_breakpoints(eng), relapse=bool(eng.relapse_topics()))
+after = next(it for it in store.load() if it["topic"] == "极限")
+check("复发 → 进度清零", after["level"] == 0, str(after["level"]))
+check("复发 → 回到今天的清单", after["due"] <= time.time() + 1, str(after.get("due")))
+check("复发 → 描述更新成这次的",
+      after.get("missing") == "为什么是无限逼近？", after.get("missing"))
+
+# 全新的知识点不该被牵连（错题本里本来没有 prev）
+store.add(store.from_breakpoints(eng), relapse=True)
+new = next(it for it in store.load() if it["topic"] == "极限")
+check("同一个知识点再存一次仍然清零", new["level"] == 0)
+
+# 概念为空的断点不能拿空串去匹配
+eng2 = EchoEngine(use_llm=False)
+with eng2._lock:
+    eng2.breakpoints = [BreakPoint("01:00", "", "x", "y", "z")]
+check("concept 为空的断点被跳过", eng2.relapse_topics() == [], str(eng2.relapse_topics()))
+eng.shutdown()
+eng2.shutdown()
+
 print("\n" + "=" * 56)
 if FAILED:
     print(f"失败 {len(FAILED)} 项：" + "、".join(FAILED))
