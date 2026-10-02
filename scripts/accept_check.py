@@ -24,6 +24,7 @@ def suite(with_tray, with_ai):
         ("课程隔离（重开课程不串课）", ["session_check.py"], "不需要网络"),
         ("课堂抽问（触发 / 判分 / 入错题本）", ["checkin_check.py"], "不需要网络"),
         ("间隔重复复习（三档自评 / 到期调度）", ["review_check.py"], "不需要网络"),
+        ("讲给 Echo 听（掌握验证 / 共同根源）", ["recall_check.py"], "不需要网络"),
         ("离线 UI 冒烟（页面切换 / 主按钮）", ["smoke_ui.py"], "offscreen"),
         ("主题回归（深色 + 浅色）", ["theme_check.py"], "off-screen 逐页取色"),
         ("右键菜单（样式 / 对比度 / 真渲染）", ["menu_check.py"], "offscreen"),

@@ -177,6 +177,21 @@ def due_items(now: float = None) -> list:
     return out
 
 
+def later_items(now: float = None) -> list:
+    """还没到期、过几天要再确认一次的知识点，按到期时间由近到远。
+
+    复习不是「过一遍就消失」——答完之后它下一次还会回来，这里就是那个「还没到时候」的列表。
+    """
+    now = time.time() if now is None else now
+    out = []
+    for it in load():
+        _schedule(it, now)
+        if it.get("due", 0) > now:
+            out.append(it)
+    out.sort(key=lambda it: it.get("due", 0))
+    return out
+
+
 def due_summary(now: float = None) -> dict:
     """首页「今天该回响」卡片要的那几个数。
 

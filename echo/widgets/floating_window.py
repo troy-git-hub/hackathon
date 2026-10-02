@@ -48,15 +48,15 @@ from echo.components.pet import EMOTION_FILES, ASSETS_DIR
 from echo.i18n import tr
 from echo.widgets.checkin import CheckinCard
 from echo.widgets.mindmap import MindMapPage
-from echo.backend import mindmap
+from echo.backend import mindmap, recall
 
 SHADOW = 14
 WAIT_HINT = tr("播放网课后，Echo 会自动开始听", "Play your course and Echo will start listening automatically")
-LISTEN, MINI, BREAK, LESSON, ECHO, REVIEW, HOME, PRACTICE, DETAIL, MINDMAP, COURSES = range(11)
+LISTEN, MINI, BREAK, LESSON, ECHO, REVIEW, HOME, PRACTICE, DETAIL, MINDMAP, COURSES, RECALL = range(12)
 # 各页内容区宽度（不含阴影与内边距）
 PAGE_WIDTH = {LISTEN: 340, MINI: 300, BREAK: 380, LESSON: 400, ECHO: 380,
               REVIEW: 380, HOME: 360, PRACTICE: 400, DETAIL: 380, MINDMAP: 480,
-              COURSES: 420}
+              COURSES: 420, RECALL: 400}
 
 
 def _label(text="", style="", wrap=False):
@@ -141,6 +141,9 @@ class FloatingWindow(QWidget):
     _ask_err = pyqtSignal(str)
     _prac_done = pyqtSignal(object)
     _prac_err = pyqtSignal(str)
+    # 掌握验证：出题和判断都走 AI（后台线程），结果经信号回主线程
+    _recall_planned = pyqtSignal(object)
+    _recall_judged = pyqtSignal(object)
 
     def __init__(self):
         super().__init__()
@@ -165,7 +168,14 @@ class FloatingWindow(QWidget):
         self._prac_back_label = ""
         self._last_report = None     # 最近一次回响（回响页「知识地图」用）
         self._detail_lesson = {}     # 当前正在看的这节历史课
-        self._review_due_only = False   # 复习页是在过「今天到期的」还是整本错题
+        # 「讲给 Echo 听」这一轮的状态
+        self._recall_items = []      # 本轮聊到的知识点
+        self._recall_root = ""       # 它们的共同根源（有的话）
+        self._recall_plan = {}       # {opening, questions}
+        self._recall_answers = []    # 学生答过的 [{question, answer}]
+        self._recall_results = []    # AI 的判断
+        self._recall_step = 0
+        self._recall_busy = False
         self._detail_ts = 0
         self._mindmap_lesson = {}    # 知识地图页正在看的那节课
         self._drag_pos = None
@@ -175,6 +185,8 @@ class FloatingWindow(QWidget):
 
         self._build_ui()
         self._prac_done.connect(self._on_prac_done)
+        self._recall_planned.connect(self._on_recall_planned)
+        self._recall_judged.connect(self._on_recall_judged)
         self._prac_err.connect(self._on_prac_err)
         self._show_home()
 
@@ -228,6 +240,7 @@ class FloatingWindow(QWidget):
         self.mindmap_page = MindMapPage()
         self.stack.addWidget(self.mindmap_page)      # 9
         self.stack.addWidget(self._build_courses())  # 10
+        self.stack.addWidget(self._build_recall())   # 11
         self.body_scroll = QScrollArea()
         self.body_scroll.setWidgetResizable(True)
         self.body_scroll.setFrameShape(QFrame.NoFrame)
@@ -693,8 +706,7 @@ class FloatingWindow(QWidget):
         return page
 
     def _show_review(self):
-        """整本错题（所有没过的），不限今天到期。"""
-        self._review_due_only = False
+        """错题复习页：今天该复习的 + 过几天再复习的。"""
         self._render_review()
         self._show_page(REVIEW)
 
@@ -709,28 +721,70 @@ class FloatingWindow(QWidget):
             item = {"topic": (topic or "").strip()}
         self._practice_item(item)
 
+    def _section_label(self, text: str) -> QLabel:
+        lbl = _label(text, f"color: {Colors.TEXT_SECONDARY}; font-size: 11px; font-weight: 600;")
+        return lbl
+
     def _render_review(self):
+        """复习页分两个区域：今天该复习的（可以直接聊）和过几天再复习的。
+
+        答完的知识点不会消失 —— 它会落到下面那个区里，带着下次的日期。
+        「复习一次就没了」是错的：掌握是慢慢确认出来的。
+        """
         while self.review_list_lay.count():
             w = self.review_list_lay.takeAt(0).widget()
             if w:
                 w.deleteLater()
-        if getattr(self, "_review_due_only", False):
-            items = store.due_items()
-            self.review_title.setText(tr("今天的回响", "Today's recall"))
-            self.review_sub.setText(
-                tr(f"今天要确认 {len(items)} 个知识点", f"{len(items)} points to confirm today")
-                if items else tr("今天的都过完了，好样的 🎉", "Done for today — nice work 🎉"))
-        else:
-            items = [it for it in store.load() if not it.get("reviewed")]
-            self.review_title.setText(tr("错题复习", "Review mistakes"))
-            self.review_sub.setText(
-                tr(f"还有 {len(items)} 个知识点要回看", f"{len(items)} knowledge points left to review")
-                if items else tr("都复习过了，好样的 🎉", "All reviewed — nice work 🎉"))
-        self.review_empty.setVisible(not items)
-        for it in items:
-            self.review_list_lay.addWidget(self._review_card(it))
+        try:
+            due = store.due_items()
+            later = store.later_items()
+        except Exception:
+            due, later = [], []
 
-    def _review_card(self, item):
+        self.review_title.setText(tr("错题复习", "Review mistakes"))
+        self.review_sub.setText(
+            tr(f"今天该复习 {len(due)} 个 · 过几天再复习 {len(later)} 个",
+               f"{len(due)} due today · {len(later)} scheduled later")
+            if (due or later) else tr("还没有错题。听课时点「我掉队了」就会收进来",
+                                      "No mistakes yet — tap \"I fell behind\" during a lesson"))
+
+        if due:
+            self.review_list_lay.addWidget(self._section_label(
+                tr(f"今天该复习 · {len(due)} 个", f"Due today · {len(due)}")))
+            self.review_list_lay.addWidget(self._recall_cta(len(due)))
+            for it in due:
+                self.review_list_lay.addWidget(self._review_card(it, due=True))
+        if later:
+            self.review_list_lay.addWidget(self._section_label(
+                tr(f"过几天再复习 · {len(later)} 个", f"Coming up · {len(later)}")))
+            for it in later:
+                self.review_list_lay.addWidget(self._review_card(it, due=False))
+
+        self.review_empty.setVisible(not (due or later))
+
+    def _recall_cta(self, n: int) -> QFrame:
+        """「讲给 Echo 听」的入口卡：不做题，讲一遍就够了。"""
+        card = QFrame()
+        card.setObjectName("RecallCta")
+        card.setStyleSheet(
+            f"QFrame#RecallCta {{ background: {Colors.ACCENT_SOFT};"
+            f"border: 1px solid {Colors.ACCENT_BORDER}; border-radius: {Radius.MD}px; }}")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        v.setSpacing(4)
+        v.addWidget(_label(tr("讲给 Echo 听", "Talk it through with Echo"),
+                           f"color: {Colors.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;"))
+        v.addWidget(_label(tr(f"{n} 个知识点一起聊，你先用自己的话讲一遍，再换个场景用一次",
+                              f"Chat through all {n} — explain them in your own words, "
+                              "then use one in a new setting"),
+                           f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;", wrap=True))
+        row = QHBoxLayout()
+        row.addStretch()
+        row.addWidget(_btn(tr("开始", "Start"), "Accent", self._show_recall_session))
+        v.addLayout(row)
+        return card
+
+    def _review_card(self, item, due: bool = True):
         card = QFrame()
         card.setObjectName("ReviewCard")
         card.setStyleSheet(f"QFrame#ReviewCard {{ background: {Colors.SURFACE};"
@@ -747,6 +801,11 @@ class FloatingWindow(QWidget):
                     f"color: {Colors.ACCENT}; font-size: 13px;")
         ml.setWordWrap(True)
         v.addWidget(ml)
+        # 老师当时讲到哪儿 —— 想回去看录像时有个抓手
+        tc = (item.get("timecode") or "").strip()
+        if tc:
+            v.addWidget(_label(tr(f"老师讲到 {tc}", f"Teacher covered it at {tc}"),
+                               f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"))
         lesson = (item.get("micro_lesson") or "").strip()
         if lesson:
             lb = _label(lesson, f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;")
@@ -754,22 +813,27 @@ class FloatingWindow(QWidget):
             v.addWidget(lb)
 
         topic_name = item.get("topic", "")
-        v.addWidget(_label(tr("想起来了吗？", "How well do you remember it?"),
-                           f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"))
-        # 三档自评决定下次什么时候再问。没有「永久掌握」这个终态：
-        # 答得越稳，Echo 把下次确认推得越远；答崩了明天就回来。
-        # 三个按钮一律用同一种样式 —— 把「记得很清楚」做得更醒目会诱导学生选它，
-        # 而这个功能的全部价值就建立在自评是诚实的之上。
-        grades = QHBoxLayout()
-        grades.setSpacing(Spacing.SM)
-        for result, zh, en in ((store.AGAIN, "还是没懂", "Still lost"),
-                               (store.FUZZY, "有点模糊", "A bit fuzzy"),
-                               (store.CLEAR, "记得很清楚", "I remember it")):
-            b = _btn(tr(zh, en), "Quiet",
-                     lambda t=topic_name, r=result: self._grade_review(t, r),
-                     self._next_due_tip(item, result))
-            grades.addWidget(b)
-        v.addLayout(grades)
+        if not due:
+            # 还没到时候：只告诉他下次什么时候来，不给按钮（不该现在就刷）
+            v.addWidget(_label(self._next_review_text(item),
+                               f"color: {Colors.OK_FG}; font-size: 11px;"))
+        else:
+            v.addWidget(_label(tr("想起来了吗？", "How well do you remember it?"),
+                               f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"))
+            # 三档自评决定下次什么时候再问。没有「永久掌握」这个终态：
+            # 答得越稳，Echo 把下次确认推得越远；答崩了明天就回来。
+            # 三个按钮一律用同一种样式 —— 把「记得很清楚」做得更醒目会诱导学生选它，
+            # 而这个功能的全部价值就建立在自评是诚实的之上。
+            grades = QHBoxLayout()
+            grades.setSpacing(Spacing.SM)
+            for result, zh, en in ((store.AGAIN, "还是没懂", "Still lost"),
+                                   (store.FUZZY, "有点模糊", "A bit fuzzy"),
+                                   (store.CLEAR, "记得很清楚", "I remember it")):
+                b = _btn(tr(zh, en), "Quiet",
+                         lambda t=topic_name, r=result: self._grade_review(t, r),
+                         self._next_due_tip(item, result))
+                grades.addWidget(b)
+            v.addLayout(grades)
 
         row = QHBoxLayout()
         row.addStretch()
@@ -777,6 +841,11 @@ class FloatingWindow(QWidget):
                            lambda it=item: self._practice_item(it)))
         v.addLayout(row)
         return card
+
+    @staticmethod
+    def _next_review_text(item) -> str:
+        days = max(1, round((item.get("due", 0) - time.time()) / store.DAY))
+        return tr(f"{days} 天后再确认一次", f"Check again in {days} days")
 
     @staticmethod
     def _next_due_tip(item, result) -> str:
@@ -884,10 +953,10 @@ class FloatingWindow(QWidget):
 
         row = QHBoxLayout()
         row.addStretch()
-        self.btn_recall = _btn(tr("看看我还记不记得", "See what I still remember"), "Accent",
-                               self._show_recall,
-                               tr("只过今天到期的知识点，答完 Echo 会安排下次复习时间",
-                                  "Go through today's due points — Echo schedules the next check for you"))
+        self.btn_recall = _btn(tr("讲给 Echo 听", "Talk it through with Echo"), "Accent",
+                               self._show_recall_session,
+                               tr("不做题，用你自己的话讲一遍，Echo 听你说完给判断",
+                                  "No quiz — explain it in your own words and Echo will judge"))
         self.btn_recall.setMinimumHeight(40)
         row.addWidget(self.btn_recall)
         v.addLayout(row)
@@ -1178,12 +1247,6 @@ class FloatingWindow(QWidget):
         self.recall_hint.setVisible(bool(hint))
         self.recall_time.setText(
             tr(f"预计 {s.get('minutes', n)} 分钟", f"About {s.get('minutes', n)} min"))
-
-    def _show_recall(self):
-        """「看看我还记不记得」：只过今天到期的那几个，不是整本错题。"""
-        self._review_due_only = True
-        self._render_review()
-        self._show_page(REVIEW)
 
     def _start_today(self):
         """给这节课命名并开课。"""
@@ -1511,6 +1574,271 @@ class FloatingWindow(QWidget):
         self._show_page(PRACTICE)
         self.echo.make_lesson_quiz(lesson, 4)
 
+    # ----- 11 讲给 Echo 听（掌握验证）-----
+    def _build_recall(self) -> QWidget:
+        """对话式的掌握验证：没有选项按钮，学生用自己的话讲，Echo 接着问、最后判。"""
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(Spacing.SM)
+
+        head = QVBoxLayout()
+        head.setSpacing(2)
+        head.addWidget(_label(tr("讲给 Echo 听", "Talk it through with Echo"), TITLE))
+        self.recall_sub = _label("", CAPTION, wrap=True)
+        head.addWidget(self.recall_sub)
+        lay.addLayout(head)
+
+        self.recall_box = QWidget()
+        self.recall_box_lay = QVBoxLayout(self.recall_box)
+        self.recall_box_lay.setContentsMargins(0, 0, 0, 0)
+        self.recall_box_lay.setSpacing(Spacing.SM)
+        lay.addWidget(self.recall_box)
+
+        # Echo 在想 → 一句话 + 呼吸点，别让界面看起来卡住
+        self.recall_loading = QFrame()
+        rl = QHBoxLayout(self.recall_loading)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(Spacing.SM)
+        self.recall_dots = PulseDots(Colors.ACCENT)
+        rl.addWidget(self.recall_dots, 0, Qt.AlignVCenter)
+        self.recall_loading_lbl = _label(tr("Echo 在想…", "Echo is thinking…"),
+                                         f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;")
+        rl.addWidget(self.recall_loading_lbl, 1)
+        self.recall_loading.hide()
+        lay.addWidget(self.recall_loading)
+
+        row = QHBoxLayout()
+        row.setSpacing(Spacing.SM)
+        self.recall_input = QLineEdit()
+        self.recall_input.setPlaceholderText(tr("用你自己的话讲…", "Say it in your own words…"))
+        self.recall_input.setStyleSheet(
+            f"QLineEdit {{ background: {Colors.SURFACE}; color: {Colors.TEXT_PRIMARY};"
+            f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.SM}px; padding: 7px 10px;"
+            "font-size: 13px; }"
+            f"QLineEdit:focus {{ border-color: {Colors.ACCENT}; }}")
+        self.recall_input.returnPressed.connect(self._send_recall)
+        row.addWidget(self.recall_input, 1)
+        self.recall_send = _btn(tr("发送", "Send"), "Accent", self._send_recall)
+        row.addWidget(self.recall_send)
+        lay.addLayout(row)
+        return page
+
+    def _recall_bubble(self, text: str, who: str, tone: str = ""):
+        """一条对话气泡。who: echo / me / note。"""
+        f = QFrame()
+        f.setObjectName("RecallBubble")
+        if who == "me":
+            bg, border = Colors.SURFACE, Colors.BORDER
+        elif who == "note":
+            bg, border = Colors.CODE_BG, Colors.BORDER
+        else:
+            bg, border = Colors.ACCENT_SOFT, Colors.ACCENT_BORDER
+        if tone == "ok":
+            border = Colors.OK_FG
+        elif tone == "warn":
+            border = Colors.DANGER
+        f.setStyleSheet(f"QFrame#RecallBubble {{ background: {bg};"
+                        f"border: 1px solid {border}; border-radius: {Radius.MD}px; }}")
+        v = QVBoxLayout(f)
+        v.setContentsMargins(Spacing.MD, Spacing.SM + 2, Spacing.MD, Spacing.SM + 2)
+        v.setSpacing(3)
+        if who in ("echo", "me"):
+            tag = _label(tr("Echo", "Echo") if who == "echo" else tr("你", "You"),
+                         f"color: {Colors.TEXT_SECONDARY}; font-size: 10px; font-weight: 600;")
+            v.addWidget(tag)
+        body = _label(text, f"color: {Colors.TEXT_PRIMARY}; font-size: 13px; line-height: 150%;",
+                      wrap=True)
+        v.addWidget(body)
+        self.recall_box_lay.addWidget(f)
+        return f
+
+    def _recall_clear(self):
+        while self.recall_box_lay.count():
+            w = self.recall_box_lay.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+
+    def _show_recall_session(self):
+        """从复习页/首页进来：挑今天到期的几个，开始这一段对话。"""
+        items = store.due_items()
+        if not items:
+            self._recall_clear()
+            self.recall_sub.setText(tr("今天没有要确认的知识点", "Nothing to confirm today"))
+            self._recall_bubble(tr("今天没有到期的知识点，去上课吧～",
+                                   "Nothing due today — go enjoy your lesson."), "echo")
+            self._show_page(RECALL)
+            return
+
+        chosen, root = recall.pick(items, n=3)
+        self._recall_items = chosen
+        self._recall_root = root
+        self._recall_answers = []
+        self._recall_results = []
+        self._recall_step = 0
+        self._recall_plan = {}
+        self._recall_clear()
+        self.recall_sub.setText(self._recall_subtitle(chosen, root))
+        self._show_page(RECALL)
+
+        self._set_recall_busy(True, tr("Echo 在想怎么问你…", "Echo is thinking how to ask…"))
+        from echo.backend import recall as _r
+        def done(plan):
+            self._recall_planned.emit(plan)
+        _r.plan_async(chosen, root, on_done=done, on_error=lambda _m: self._recall_planned.emit({}))
+
+    @staticmethod
+    def _recall_subtitle(items, root) -> str:
+        names = "、".join((it.get("topic") or "") for it in items)
+        if root and len(items) > 1:
+            return tr(f"这一轮聊 {len(items)} 个知识点，它们都卡在「{root}」上",
+                      f"{len(items)} points this round — all rooted in \"{root}\"")
+        return tr(f"这一轮聊 {len(items)} 个知识点：{names}", f"This round: {names}")
+
+    def _on_recall_planned(self, plan):
+        self._set_recall_busy(False)
+        self._recall_plan = plan or {}
+        opening = (plan or {}).get("opening") or ""
+        if opening:
+            self._recall_bubble(opening, "echo")
+        self._ask_next_recall()
+
+    def _ask_next_recall(self):
+        """把下一道题抛出来。题问完了就等学生答完再判。"""
+        qs = self._recall_plan.get("questions") or []
+        i = self._recall_step
+        if i >= len(qs):
+            return
+        q = qs[i]
+        kind = tr("讲给 Echo 听", "Talk it through") if q.get("kind") != "transfer" \
+            else tr("换个场景试试", "Try it in a new setting")
+        self._recall_bubble(f"{kind}\n{q.get('question', '')}", "echo")
+        self.recall_input.setPlaceholderText(
+            tr("用你自己的话讲…", "Say it in your own words…")
+            if q.get("kind") != "transfer" else tr("试着用一下…", "Try applying it…"))
+        self.recall_input.setFocus()
+
+    def _send_recall(self):
+        text = self.recall_input.text().strip()
+        if not text or self._recall_busy:
+            return
+        self.recall_input.clear()
+        self._recall_bubble(text, "me")
+        qs = self._recall_plan.get("questions") or []
+        q = qs[self._recall_step] if self._recall_step < len(qs) else {}
+        self._recall_answers.append({"question": q.get("question", ""), "answer": text})
+        self._recall_step += 1
+        self._fit()
+        if self._recall_step < len(qs):
+            self._ask_next_recall()
+            return
+        self._judge_recall()
+
+    def _judge_recall(self):
+        self._set_recall_busy(True, tr("Echo 在想你说的对不对…", "Echo is thinking about your answer…"))
+        from echo.backend import recall as _r
+        items, answers = self._recall_items, self._recall_answers
+        _r.judge_async(items, answers,
+                       on_done=lambda res: self._recall_judged.emit(res),
+                       on_error=lambda _m: self._recall_judged.emit({}))
+
+    def _on_recall_judged(self, res):
+        self._set_recall_busy(False)
+        res = res or {}
+        results = res.get("results") or []
+        pinned = dict(self._recall_plan)
+        pinned["qas"] = list(self._recall_answers)
+        self._recall_pinned = pinned
+        if not results:
+            # 没判出来（没配 key / 调用失败 / 离线）：不假装判过，把决定权交回学生
+            self._recall_bubble(tr("这次连不上 AI，我判断不了。你自己说说看，哪个档次更像你？",
+                                   "I can't reach the AI to judge this time. "
+                                   "Which of these feels right to you?"), "note")
+            self._render_manual_grade(self._recall_items)
+            self._recall_results = []
+            self._fit()
+            return
+        self._recall_results = results
+        if res.get("review"):
+            self._recall_bubble(res["review"], "echo")
+        self._render_verdicts(results)
+        self._fit()
+
+    def _render_verdicts(self, results):
+        """把判断结果摊开：每个知识点一档 + 缺的关键点 + 一句反馈。"""
+        self._recall_bubble(tr("我听完了，说说我的判断：", "Here's what I made of it:"), "echo")
+        for r in results:
+            v = r.get("verdict")
+            tone = "ok" if v == "clear" else ("warn" if v == "unclear" else "")
+            bits = [f"{r.get('topic', '')}　{recall.VERDICT_LABEL.get(v, '')}"]
+            if r.get("feedback"):
+                bits.append(r["feedback"])
+            if r.get("missing"):
+                bits.append(tr(f"还没说到的：{r['missing']}", f"Still missing: {r['missing']}"))
+            self._recall_bubble("\n".join(bits), "note", tone)
+        # 判定写进调度；学生觉得不准可以改
+        recall.apply_results(results)
+        self._render_manual_grade(results, override=True)
+        self._sync_recall_after()
+
+    def _render_manual_grade(self, results, override: bool = False):
+        """「判断不准确？」—— 让学生自己改。一次 AI 判定不该给人贴标签。"""
+        cards = QFrame()
+        cards.setStyleSheet("background: transparent; border: none;")
+        v = QVBoxLayout(cards)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(Spacing.SM)
+        who = {r.get("topic"): r.get("verdict") for r in (results or [])}
+        for it in self._recall_items:
+            topic = it.get("topic") or ""
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            row.addWidget(_label(tr(f"{topic}：", f"{topic}: "),
+                                 f"color: {Colors.TEXT_PRIMARY}; font-size: 12px;"))
+            row.addStretch()
+            for key, zh in recall.MANUAL_CHOICES:
+                label = tr(zh, {"clear": "Clear", "fuzzy": "Fuzzy", "unclear": "Lost"}[key])
+                if who.get(topic) == key:
+                    label = "● " + label
+                row.addWidget(_btn(label, "Quiet",
+                                   lambda t=topic, k=key: self._override_verdict(t, k),
+                                   tr("改成这一档", "Set this instead")))
+            v.addLayout(row)
+        if override:
+            hint = _label(tr("我判得不准？点一下自己改，下次复习时间跟着变。",
+                             "Got it wrong? Tap to set it yourself — the next review follows your call."),
+                          f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;", wrap=True)
+            v.addWidget(hint)
+        self.recall_box_lay.addWidget(cards)
+
+    def _override_verdict(self, topic, verdict):
+        recall.apply_results([{"topic": topic, "verdict": verdict}])
+        self._recall_bubble(tr(f"好，那「{topic}」按你说的记。", f"OK — noting \"{topic}\" as you said."),
+                            "echo")
+        self._sync_recall_after()
+
+    def _sync_recall_after(self):
+        """判完/改完之后收拾界面：更新首页计数，并把对话收个尾。"""
+        self._render_recall_card()
+        self.recall_sub.setText(tr("记下了，下次到期我再来问你",
+                                   "Noted — I'll ask again when it's due"))
+        self.recall_input.setEnabled(False)
+        self.recall_send.setEnabled(False)
+        self._fit()
+
+    def _set_recall_busy(self, busy: bool, msg: str = ""):
+        self._recall_busy = busy
+        if busy:
+            self.recall_loading_lbl.setText(msg)
+            self.recall_dots.start()
+            self.recall_loading.show()
+        else:
+            self.recall_dots.stop()
+            self.recall_loading.hide()
+        self.recall_input.setEnabled(not busy)
+        self.recall_send.setEnabled(not busy)
+        self._fit()
+
     def _on_quiz_ready(self, questions):
         lesson = getattr(self, "_detail_lesson", {}) or {}
         self._prac_item = {"topic": self._lesson_name(lesson)}
@@ -1641,11 +1969,15 @@ class FloatingWindow(QWidget):
 
         mini = idx == MINI
         self.header.setVisible(not mini)
-        self.back_btn.setVisible(idx in (BREAK, LESSON, REVIEW, PRACTICE, DETAIL, MINDMAP, COURSES))
+        self.back_btn.setVisible(idx in (BREAK, LESSON, REVIEW, PRACTICE, DETAIL, MINDMAP,
+                                         COURSES, RECALL))
         back_label = tr("← 主页", "← Home")
         if idx == PRACTICE and self._prac_back_label:
             back_label = self._prac_back_label     # 从地图/回顾进来的，返回到那儿
-        self.back_btn.setText(back_label if idx in (REVIEW, PRACTICE, DETAIL, MINDMAP, COURSES)
+        elif idx == RECALL:
+            back_label = tr("← 错题复习", "← Review")
+        self.back_btn.setText(back_label if idx in (REVIEW, PRACTICE, DETAIL, MINDMAP,
+                                                    COURSES, RECALL)
                               else tr("← 回到课堂", "← Back to class"))
         self.home_btn.setVisible(idx in (LISTEN, ECHO))
         self.end_btn.setVisible(idx == LISTEN)
@@ -1746,6 +2078,9 @@ class FloatingWindow(QWidget):
             back, self._prac_back = self._prac_back, None
             self._prac_back_label = ""
             back()
+            return
+        if self._page == RECALL:
+            self._show_review()          # 讲完回错题复习，进度一眼能看见
             return
         if self._page in (REVIEW, PRACTICE, DETAIL, MINDMAP, COURSES):
             self._show_home()

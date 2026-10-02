@@ -351,58 +351,88 @@ assert seen and seen[0] == ["删除", "取消"], \
     f"确认框按钮应该是中文的「删除/取消」，实际 {seen[0] if seen else None}"
 assert seen and "知道了" in seen[1], f"提示框按钮不对：{seen[1] if len(seen) > 1 else None}"
 
-# 2.0「今天该回响」：首页卡片 → 只过今天到期的 → 三档自评改下次复习时间
+# 2.0「今天该回响」：首页卡片 → 讲给 Echo 听 → 三档自评 / 过几天再复习
 import time as _t                                   # noqa: E402
+
+from echo.backend import recall                     # noqa: E402
 
 store._write([])
 store.add([{"topic": "导数定义", "missing": "为什么是极限？", "time": _t.time() - 86400,
             "review_chain": ["导数", "极限"]},
-           {"topic": "链式法则", "missing": "为什么连乘？", "time": _t.time() - 86400}])
+           {"topic": "链式法则", "missing": "为什么连乘？", "time": _t.time() - 86400,
+            "review_chain": ["链式法则", "极限"]}])
 window._show_home()
 app.processEvents()
 assert window.home_recall_card.isVisible(), "有到期的知识点，首页却没弹「今天该回响」卡"
 assert "2" in window.recall_title.text(), f"卡片没数对：{window.recall_title.text()}"
 assert window.recall_hint.text().strip(), "卡片没给出掉队位置的提示"
 
+# 两个知识点都挂在「极限」上 → 应该认出这个共同根源，一起聊
+chosen, root = recall.pick(store.due_items(), n=3)
+assert len(chosen) == 2 and root == "极限", f"没认出共同根源：chosen={len(chosen)} root={root!r}"
+
+# 讲给 Echo 听：对话式，不是答题页
 QTest.mouseClick(window.btn_recall, Qt.LeftButton)
+for _ in range(40):
+    app.processEvents()
+    if window._recall_plan:
+        break
+    QTest.qWait(30)
+assert window._page == ui.RECALL, "点「讲给 Echo 听」没进对话页"
+assert window._recall_plan.get("questions"), "没生成问题"
+assert "极限" in window.recall_sub.text() or "2 个知识点" in window.recall_sub.text(), \
+    f"副标题没说清这一轮聊什么：{window.recall_sub.text()}"
+
+n_bubbles = window.recall_box_lay.count()
+assert n_bubbles >= 2, f"开场白 + 第一问至少两条气泡，实际 {n_bubbles}"
+
+# 答完两道题 → 出判断（离线没 key，应退回让学生自己选，而不是假装判过）
+for _ in range(5):
+    if window.recall_input.isEnabled():
+        break
+    QTest.qWait(30)
+window.recall_input.setText("就是曲线的斜率。")
+QTest.mouseClick(window.recall_send, Qt.LeftButton)
 app.processEvents()
-assert window._page == ui.REVIEW, "点「看看我还记不记得」没进复习页"
-assert window.review_title.text() == "今天的回响", \
-    f"回响模式标题应和整本错题区分开：{window.review_title.text()}"
-assert window.review_list_lay.count() == 2, f"今天该过 2 个，实际 {window.review_list_lay.count()}"
+assert window.recall_box_lay.count() > n_bubbles, "学生的话没出现在对话里"
+assert len(window._recall_answers) == 1, "没记下第一次回答"
 
-grade_btns = [b for b in window.review_list.findChildren(QPushButton)
-              if b.text() in ("还是没懂", "有点模糊", "记得很清楚")]
-assert len(grade_btns) == 6, f"每张卡应有三档自评，实际共 {len(grade_btns)} 个按钮"
-# 三档必须等重：把「记得很清楚」做成强调色会诱导学生谎报，调度就失真了
-styles = {b.text(): b.objectName() for b in grade_btns}
-assert len(set(styles.values())) == 1, f"三档按钮样式不一致，会诱导选择：{styles}"
+window.recall_input.setText("把范围一直缩小。")
+QTest.mouseClick(window.recall_send, Qt.LeftButton)
+for _ in range(40):
+    app.processEvents()
+    if not window._recall_busy and len(window._recall_answers) >= 2:
+        break
+    QTest.qWait(30)
+assert len(window._recall_answers) == 2, "没记下第二次回答"
+manual = [b for b in window.recall_box.findChildren(QPushButton)
+          if b.text().replace("● ", "") in ("清楚", "模糊", "没理解")]
+assert manual, "没判出来时应让学生自己选，界面上没有手动档位"
 
-clear_btn = next(b for b in grade_btns if b.text() == "记得很清楚")
-QTest.mouseClick(clear_btn, Qt.LeftButton)
+# 手动改一档 → 调度跟着变
+next(b for b in manual if b.text().replace("● ", "") == "清楚").click()
 app.processEvents()
-assert window.review_list_lay.count() == 1, "答完「记得很清楚」后该从今天的列表里消失"
-
 rec = next(it for it in store.load() if it.get("level"))
 assert rec["level"] == 1 and rec["due"] > _t.time() + 6 * 86400, \
-    f"「记得很清楚」应推到 7 天后：level={rec.get('level')}"
+    f"手动判「清楚」应推到 7 天后：level={rec.get('level')}"
 
-window._show_home()
-app.processEvents()
-assert "1" in window.recall_title.text(), f"首页计数没跟着减：{window.recall_title.text()}"
-
-window._grade_review("链式法则", store.AGAIN)
-window._show_home()
-app.processEvents()
-assert not window.home_recall_card.isVisible(), "今天的都过完了，卡片该收起来"
-again = next(it for it in store.load() if it["topic"] == "链式法则")
-assert again["level"] == 0 and again["due"] < _t.time() + 2 * 86400, \
-    "「还是没懂」应该明天就回来"
-
-# 整本错题入口不受影响，仍然看全部没过的
+# 复习页两个区域：答完的不消失，落到「过几天再复习」
 window._show_review()
 app.processEvents()
 assert window.review_title.text() == "错题复习", window.review_title.text()
+lab = [w.text() for w in window.review_list.findChildren(QLabel) if "过几天再复习" in w.text()]
+assert lab, f"答完的知识点应该落到「过几天再复习」，实际标题：{lab}"
+assert window.review_list_lay.count() >= 3, \
+    f"应收起/今天/过几天三段，实际 {window.review_list_lay.count()} 项"
+
+# 「还是没懂」→ 明天就回来
+window._grade_review("链式法则", store.AGAIN)
+again = next(it for it in store.load() if it["topic"] == "链式法则")
+assert again["level"] == 0 and again["due"] < _t.time() + 2 * 86400, \
+    "「还是没懂」应该明天就回来"
+window._show_home()
+app.processEvents()
+assert "1" in window.recall_title.text(), f"首页计数没跟着变：{window.recall_title.text()}"
 store._write([])
 
 window.close()
