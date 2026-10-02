@@ -20,7 +20,8 @@ from ctypes import wintypes
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame, QSizePolicy, QStackedWidget,
                              QProgressBar, QApplication, QShortcut, QScrollArea,
-                             QLineEdit, QTextBrowser, QRadioButton, QButtonGroup)
+                             QLineEdit, QTextBrowser, QRadioButton, QButtonGroup,
+                             QCheckBox, QInputDialog, QMessageBox)
 from PyQt5.QtCore import Qt, QTimer, QRectF, QPoint, pyqtSignal
 from PyQt5.QtGui import QFont, QCursor, QPainter, QPainterPath, QColor, QBrush, QPen, QKeySequence, QPixmap
 
@@ -48,10 +49,11 @@ from echo.backend import mindmap
 
 SHADOW = 14
 WAIT_HINT = "播放网课后，Echo 会自动开始听"
-LISTEN, MINI, BREAK, LESSON, ECHO, REVIEW, HOME, PRACTICE, DETAIL, MINDMAP = range(10)
+LISTEN, MINI, BREAK, LESSON, ECHO, REVIEW, HOME, PRACTICE, DETAIL, MINDMAP, COURSES = range(11)
 # 各页内容区宽度（不含阴影与内边距）
 PAGE_WIDTH = {LISTEN: 340, MINI: 300, BREAK: 380, LESSON: 400, ECHO: 380,
-              REVIEW: 380, HOME: 360, PRACTICE: 400, DETAIL: 380, MINDMAP: 480}
+              REVIEW: 380, HOME: 360, PRACTICE: 400, DETAIL: 380, MINDMAP: 480,
+              COURSES: 420}
 
 
 def _label(text="", style="", wrap=False):
@@ -213,6 +215,7 @@ class FloatingWindow(QWidget):
         self.stack.addWidget(self._build_detail())   # 8
         self.mindmap_page = MindMapPage()
         self.stack.addWidget(self.mindmap_page)      # 9
+        self.stack.addWidget(self._build_courses())  # 10
         self.body_scroll = QScrollArea()
         self.body_scroll.setWidgetResizable(True)
         self.body_scroll.setFrameShape(QFrame.NoFrame)
@@ -726,7 +729,7 @@ class FloatingWindow(QWidget):
         # 开课前先给这节课起个名，下课后在历史里一眼能认出来
         lay.addWidget(_label("这节课叫什么？", CAPTION))
         self.title_edit = QLineEdit()
-        self.title_edit.setPlaceholderText("例如：初二数学 · 正比例函数（留空就用第一个知识点）")
+        self.title_edit.setPlaceholderText("例如：初二数学 · 正比例函数（留空默认用开课时间命名）")
         self.title_edit.setStyleSheet(
             f"QLineEdit {{ background: {Colors.SURFACE}; color: {Colors.TEXT_PRIMARY};"
             f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.SM}px; padding: 7px 10px;"
@@ -746,17 +749,9 @@ class FloatingWindow(QWidget):
         self.home_practice_card = self._home_card(
             "AI 出题练习", "让 AI 按你的错题出题，真的练一下", "开始练", self._start_practice)
         lay.addWidget(self.home_practice_card)
-
-        self.home_recent_cap = _label("历史课程", CAPTION)
-        lay.addWidget(self.home_recent_cap)
-        self.home_recent = QWidget()
-        self.home_recent_lay = QVBoxLayout(self.home_recent)
-        self.home_recent_lay.setContentsMargins(0, 0, 0, 0)
-        self.home_recent_lay.setSpacing(Spacing.SM)
-        lay.addWidget(self.home_recent)
-        self.home_empty = _label("还没有上过课。起个名字，点上面的按钮就能开始。",
-                                 f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;", wrap=True)
-        lay.addWidget(self.home_empty)
+        self.home_courses_card = self._home_card(
+            "课程管理", "回看、搜索、重命名、批量管理历史课程", "管理", self._show_courses)
+        lay.addWidget(self.home_courses_card)
         return page
 
     def _home_card(self, title, desc, action, slot):
@@ -781,19 +776,110 @@ class FloatingWindow(QWidget):
         card.sub_lbl, card.btn = d, b
         return card
 
-    def _lesson_row(self, ls):
-        """历史课程的一行：点进去看详情。"""
+    # ----- 课程管理（历史课程列表 + 搜索 + 批量操作）-----
+    def _build_courses(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(Spacing.MD)
+
+        head = QVBoxLayout()
+        head.setSpacing(2)
+        head.addWidget(_label("课程管理", TITLE))
+        self.courses_sub = _label("", CAPTION)
+        head.addWidget(self.courses_sub)
+        lay.addLayout(head)
+
+        self.courses_search = QLineEdit()
+        self.courses_search.setPlaceholderText("搜索课程名或日期，例如「数学」或「10-02」…")
+        self.courses_search.setStyleSheet(
+            f"QLineEdit {{ background: {Colors.SURFACE}; color: {Colors.TEXT_PRIMARY};"
+            f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.SM}px; padding: 7px 10px;"
+            "font-size: 13px; }"
+            f"QLineEdit:focus {{ border-color: {Colors.ACCENT}; }}")
+        self.courses_search.textChanged.connect(self._render_courses)
+        lay.addWidget(self.courses_search)
+
+        bar = QHBoxLayout()
+        bar.setSpacing(Spacing.SM)
+        self.courses_sel_btn = _btn("全选", "Quiet", self._courses_toggle_all)
+        bar.addWidget(self.courses_sel_btn)
+        self.courses_del_btn = _btn("批量删除", "Quiet", self._courses_delete_selected,
+                                    "删除勾选的课程（不可恢复）")
+        bar.addWidget(self.courses_del_btn)
+        self.courses_ren_btn = _btn("批量重命名", "Quiet", self._courses_rename_selected,
+                                    "给勾选的课程统一改名")
+        bar.addWidget(self.courses_ren_btn)
+        bar.addStretch()
+        lay.addLayout(bar)
+
+        self.courses_list = QWidget()
+        self.courses_list_lay = QVBoxLayout(self.courses_list)
+        self.courses_list_lay.setContentsMargins(0, 0, 0, 0)
+        self.courses_list_lay.setSpacing(Spacing.SM)
+        lay.addWidget(self.courses_list, 1)
+
+        self.courses_empty = _label("还没有上过课。", f"color: {Colors.TEXT_SECONDARY};"
+                                   "font-size: 12px;", wrap=True)
+        lay.addWidget(self.courses_empty)
+        return page
+
+    def _show_courses(self):
+        self._render_courses()
+        self._show_page(COURSES)
+
+    def _render_courses(self, _query=None):
+        """列出全部课程，按搜索词过滤；勾选状态每次重建。"""
+        try:
+            all_lessons = store.list_lessons(limit=None)
+        except Exception:
+            all_lessons = []
+        query = (self.courses_search.text() or "").strip()
+        q = query.lower()
+        shown = [ls for ls in all_lessons
+                 if not q or q in (ls.get("title") or "").lower() or q in (ls.get("date") or "").lower()]
+
+        self.courses_sub.setText(f"共 {len(all_lessons)} 节课" + (f" · 匹配 {len(shown)} 节" if q else ""))
+
+        while self.courses_list_lay.count():
+            w = self.courses_list_lay.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        self._course_cards = []
+        for ls in shown:
+            card = self._courses_row(ls)
+            self._course_cards.append(card)
+            self.courses_list_lay.addWidget(card)
+        self.courses_empty.setVisible(not shown)
+        if getattr(self, "_page", None) == COURSES:
+            self._fit()
+
+    def _courses_row(self, ls):
+        """一节历史课一行：勾选框 + 名称/日期 + 重命名 + 看回顾。"""
         card = QFrame()
-        card.setObjectName("LessonRow")
-        card.setStyleSheet(f"QFrame#LessonRow {{ background: {Colors.SURFACE};"
+        card.setObjectName("CoursesRow")
+        card.setStyleSheet(f"QFrame#CoursesRow {{ background: {Colors.SURFACE};"
                            f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.MD}px; }}")
         h = QHBoxLayout(card)
-        h.setContentsMargins(Spacing.LG, Spacing.SM, Spacing.MD, Spacing.SM)
+        h.setContentsMargins(Spacing.MD, Spacing.SM, Spacing.MD, Spacing.SM)
         h.setSpacing(Spacing.SM)
+
+        chk = QCheckBox()
+        chk.setCursor(QCursor(Qt.PointingHandCursor))
+        chk.setStyleSheet(
+            "QCheckBox { background: transparent; }"
+            f"QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 4px;"
+            f"border: 2px solid {Colors.BORDER_STRONG}; background: {Colors.SURFACE}; }}"
+            f"QCheckBox::indicator:checked {{ border: 2px solid {Colors.ACCENT};"
+            f"background: {Colors.ACCENT}; }}")
+        h.addWidget(chk, 0, Qt.AlignVCenter)
+
         col = QVBoxLayout()
         col.setSpacing(2)
-        col.addWidget(_label(ls.get("title", "一节课"),
-                             f"color: {Colors.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"))
+        title = _label(ls.get("title", "一节课"),
+                       f"color: {Colors.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;")
+        title.setWordWrap(True)
+        col.addWidget(title)
         mins = int((ls.get("duration") or 0) // 60)
         bits = [ls.get("date", ""), f"{ls.get('total', 0)} 个知识点"]
         if mins:
@@ -803,9 +889,66 @@ class FloatingWindow(QWidget):
         col.addWidget(_label(" · ".join(b for b in bits if b),
                              f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"))
         h.addLayout(col, 1)
+        h.addWidget(_btn("重命名", "Link", lambda t=ls.get("time", 0): self._course_rename(t)))
         h.addWidget(_btn("看回顾", "Quiet", lambda t=ls.get("time", 0): self._show_detail(t)),
                     0, Qt.AlignVCenter)
+
+        card._chk = chk
+        card._ts = ls.get("time", 0)
         return card
+
+    def _courses_selected(self):
+        """当前课程列表里勾选的时间戳。"""
+        return [c._ts for c in getattr(self, "_course_cards", []) if c._chk.isChecked()]
+
+    def _courses_toggle_all(self):
+        cards = getattr(self, "_course_cards", [])
+        if not cards:
+            return
+        target = not all(c._chk.isChecked() for c in cards)
+        for c in cards:
+            c._chk.setChecked(target)
+
+    def _courses_delete_selected(self):
+        ts_list = self._courses_selected()
+        if not ts_list:
+            QMessageBox.information(self, "批量删除", "先勾选要删除的课程。")
+            return
+        n = len(ts_list)
+        ret = QMessageBox.question(self, "批量删除", f"确定删除选中的 {n} 节课吗？删除后不可恢复。",
+                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if ret != QMessageBox.Yes:
+            return
+        store.delete_lessons(ts_list)
+        self._render_courses()
+
+    def _courses_rename_selected(self):
+        ts_list = self._courses_selected()
+        if not ts_list:
+            QMessageBox.information(self, "批量重命名", "先勾选要重命名的课程。")
+            return
+        default = store.get_lesson(ts_list[0]).get("title", "") if len(ts_list) == 1 else ""
+        name, ok = QInputDialog.getText(self, "重命名", "新的课程名：",
+                                        QLineEdit.Normal, default)
+        name = (name or "").strip()
+        if not ok or not name:
+            return
+        if len(ts_list) == 1:
+            store.rename_lesson(ts_list[0], name)
+        else:
+            for i, ts in enumerate(ts_list, 1):
+                store.rename_lesson(ts, f"{name}（{i}）")
+        self._render_courses()
+
+    def _course_rename(self, ts):
+        """单节课程重命名。"""
+        cur = store.get_lesson(ts).get("title", "")
+        name, ok = QInputDialog.getText(self, "重命名", "新的课程名：",
+                                        QLineEdit.Normal, cur)
+        name = (name or "").strip()
+        if ok and name:
+            store.rename_lesson(ts, name)
+            self._render_courses()
 
     def _show_home(self):
         self._render_home()
@@ -814,9 +957,8 @@ class FloatingWindow(QWidget):
     def _render_home(self):
         try:
             st = store.stats()
-            lessons = store.list_lessons(5)
         except Exception:
-            st, lessons = {"lessons": 0, "pending": 0, "mastered": 0}, []
+            st = {"lessons": 0, "pending": 0, "mastered": 0}
         pending, mastered, n_lesson = st.get("pending", 0), st.get("mastered", 0), st.get("lessons", 0)
 
         bits = []
@@ -831,17 +973,8 @@ class FloatingWindow(QWidget):
             f"{pending} 个掉队过的知识点等你回看" if pending else "暂时没有错题，听课时点「我掉队了」就会收进来")
         self.home_practice_card.sub_lbl.setText(
             f"让 AI 照着这 {pending} 个错题出题，真的练一下" if pending else "有错题之后，AI 就能照着出题")
-
-        while self.home_recent_lay.count():
-            w = self.home_recent_lay.takeAt(0).widget()
-            if w:
-                w.deleteLater()
-        for ls in lessons:
-            self.home_recent_lay.addWidget(self._lesson_row(ls))
-        has = bool(lessons)
-        self.home_recent_cap.setVisible(has)
-        self.home_recent.setVisible(has)
-        self.home_empty.setVisible(not has)
+        self.home_courses_card.sub_lbl.setText(
+            f"{n_lesson} 节历史课，可搜索、重命名、批量删除" if n_lesson else "还没有历史课，开一节就有了")
 
     def _start_today(self):
         """给这节课命名并开课。"""
@@ -1261,8 +1394,8 @@ class FloatingWindow(QWidget):
 
         mini = idx == MINI
         self.header.setVisible(not mini)
-        self.back_btn.setVisible(idx in (BREAK, LESSON, REVIEW, PRACTICE, DETAIL, MINDMAP))
-        self.back_btn.setText("← 主页" if idx in (REVIEW, PRACTICE, DETAIL, MINDMAP) else "← 回到课堂")
+        self.back_btn.setVisible(idx in (BREAK, LESSON, REVIEW, PRACTICE, DETAIL, MINDMAP, COURSES))
+        self.back_btn.setText("← 主页" if idx in (REVIEW, PRACTICE, DETAIL, MINDMAP, COURSES) else "← 回到课堂")
         self.home_btn.setVisible(idx in (LISTEN, ECHO))
         self.end_btn.setVisible(idx == LISTEN)
         self.fold_btn.setVisible(idx == LISTEN)
@@ -1353,8 +1486,8 @@ class FloatingWindow(QWidget):
         self._show_page(LISTEN)
 
     def _back(self):
-        """← 按钮：复习/练习/回顾页回主页，断点/补课页回课堂。"""
-        if self._page in (REVIEW, PRACTICE, DETAIL, MINDMAP):
+        """← 按钮：复习/练习/回顾/课程页回主页，断点/补课页回课堂。"""
+        if self._page in (REVIEW, PRACTICE, DETAIL, MINDMAP, COURSES):
             self._show_home()
         else:
             self._show_page(LISTEN)
@@ -1638,12 +1771,9 @@ class FloatingWindow(QWidget):
         return " · ".join(bits)
 
     def _save_lesson(self, report):
-        """把这节课存进历史，主页「历史课程」里能看到。"""
+        """把这节课存进历史，主页「课程管理」里能看到。没起名时 store 会用开课时间命名。"""
         try:
             title = (getattr(self.echo, "title", "") or "").strip()
-            if not title:
-                cs = self.echo.engine.concepts()
-                title = cs[0].topic if cs else (report.skills[0].name if report.skills else "一节课")
             store.save_lesson(title, report.skills, report.review_chain, report.suggestion,
                               summary=getattr(report, "summary", ""),
                               highlights=getattr(report, "highlights", []),

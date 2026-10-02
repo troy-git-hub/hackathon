@@ -155,11 +155,12 @@ ts = store.save_lesson(
     highlights=["贝叶斯公式 P(A|B)=P(B|A)P(A)/P(B)"],
     graph={"nodes": ["条件概率定义", "贝叶斯公式"],
            "edges": [["条件概率定义", "贝叶斯公式"]]})
-window._show_home()
+window._show_courses()
 app.processEvents()
-rows = [b for b in window.home_recent.findChildren(QPushButton)
+assert window._page == ui.COURSES, "「课程管理」页打不开"
+rows = [b for b in window.findChildren(QPushButton)
         if b.text() == "看回顾" and b.isVisible()]
-assert rows, "主页最近课程里没有「看回顾」按钮"
+assert rows, "课程管理页里没有「看回顾」按钮"
 # 这一步必须真的点按钮：_btn 曾经把 clicked 的 checked=False 喂进 lambda 的默认参数，
 # 时间戳变成 0、课程查不到 —— 回顾页打开是空的，知识地图和出题按钮跟着一起失效。
 QTest.mouseClick(rows[0], Qt.LeftButton)
@@ -203,6 +204,21 @@ app.processEvents()
 assert window._page == ui.MINDMAP, "老课程打不开知识地图"
 assert len(window.mindmap_page.canvas._nodes) == 2, "老课程没画出知识点"
 assert window.mindmap_page.lesson_summary.text(), "老课程没显示课程摘要"
+
+# 课程管理：搜索过滤 + 重命名 + 批量删除（对话框在 offscreen 下会阻塞，这里只测非交互路径）
+window._show_courses()
+app.processEvents()
+assert window._page == ui.COURSES, "「课程管理」页打不开"
+window.courses_search.setText("贝叶斯")
+app.processEvents()
+assert len(window._course_cards) == 1, f"搜索「贝叶斯」应只剩 1 节，实际 {len(window._course_cards)}"
+window.courses_search.setText("")
+app.processEvents()
+assert len(window._course_cards) >= 2, "清空搜索后课程列表应恢复全部"
+assert store.rename_lesson(ts, "贝叶斯统计（改名）"), "重命名失败"
+assert store.get_lesson(ts)["title"] == "贝叶斯统计（改名）", "重命名没生效"
+assert store.delete_lessons([ts]) == 1, "批量删除失败"
+assert not store.get_lesson(ts), "删除后仍能查到这节课"
 
 window.close()
 print("UI smoke passed: one window, avatar and primary flow work")

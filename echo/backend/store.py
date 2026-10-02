@@ -165,7 +165,7 @@ def save_lesson(title: str, skills: list, review_chain: list, suggestion: str = 
     now = time.time()
     record = {
         "time": now,
-        "title": title or "未命名课程",
+        "title": title or time.strftime("%Y年%m月%d日 %H时%M分%S秒", time.localtime(now)),
         "date": time.strftime("%Y-%m-%d", time.localtime(now)),
         "total": total,
         "ok": ok,
@@ -200,11 +200,48 @@ def get_lesson(ts: float) -> dict:
     return {}
 
 
-def list_lessons(limit: int = 5) -> list:
-    """最近的课，新 → 旧。"""
+def list_lessons(limit: int = None) -> list:
+    """最近的课，新 → 旧。limit=None 时返回全部。"""
     cur = _load_lessons()
     cur.sort(key=lambda it: it.get("time", 0), reverse=True)
-    return cur[:limit]
+    return cur if limit is None else cur[:limit]
+
+
+def _same_time(a, b) -> bool:
+    """两条记录是否同一节课（time 是 float，留一点浮点误差）。"""
+    try:
+        return abs(float(a) - float(b)) < 0.001
+    except (TypeError, ValueError):
+        return False
+
+
+def delete_lessons(ts_list) -> int:
+    """按时间戳批量删除课程归档，返回删掉的条数。"""
+    if not ts_list:
+        return 0
+    cur = _load_lessons()
+    kept = [it for it in cur if not any(_same_time(it.get("time", 0), t) for t in ts_list)]
+    removed = len(cur) - len(kept)
+    if removed:
+        _write_json(_lessons_path(), kept)
+    return removed
+
+
+def rename_lesson(ts, new_title: str) -> bool:
+    """重命名一节历史课。返回是否改到。"""
+    new_title = (new_title or "").strip()
+    if not new_title:
+        return False
+    cur = _load_lessons()
+    changed = False
+    for it in cur:
+        if _same_time(it.get("time", 0), ts):
+            it["title"] = new_title
+            changed = True
+            break
+    if changed:
+        _write_json(_lessons_path(), cur)
+    return changed
 
 
 def stats() -> dict:
