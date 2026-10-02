@@ -38,6 +38,13 @@ pyinstaller --noconfirm --clean --windowed --name Echo --icon assets\echo.ico ^
   --exclude-module sphinx ^
   --exclude-module docutils ^
   --exclude-module pyarrow ^
+  --exclude-module imageio_ffmpeg ^
+  --exclude-module imageio ^
+  --exclude-module boto3 ^
+  --exclude-module botocore ^
+  --exclude-module s3transfer ^
+  --exclude-module grpc ^
+  --exclude-module lxml ^
   --add-data "assets;assets" ^
   --add-data ".env.example;." ^
   --hidden-import openai ^
