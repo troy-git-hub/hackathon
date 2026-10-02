@@ -21,6 +21,7 @@ from PyQt5.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QSizePoli
                              QVBoxLayout, QWidget)
 
 from echo.backend import mindmap
+from echo.i18n import tr
 from echo.theme import Colors, Radius, Spacing, font
 
 NODE_W, NODE_H = 118, 54
@@ -334,7 +335,7 @@ class MindMapPage(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(Spacing.SM)
 
-        title = QLabel("知识地图")
+        title = QLabel(tr("知识地图", "Knowledge map"))
         title.setFont(font(14, 600))
         self.sub = QLabel("")
         self.sub.setFont(font(11))
@@ -370,20 +371,22 @@ class MindMapPage(QWidget):
         root.addWidget(self.canvas, 1)
         tools = QHBoxLayout()
         tools.setSpacing(Spacing.SM)
-        self.legend = QLabel("● 待回看   ● 补上了   ○ 已跟上   ⋯ 建议先看")
+        self.legend = QLabel(tr("● 待回看   ● 补上了   ○ 已跟上   ⋯ 建议先看",
+                                "● To review   ● Caught up   ○ Kept up   ⋯ Start here"))
         self.legend.setFont(font(10))
         self.legend.setStyleSheet(f"color:{Colors.TEXT_SECONDARY};")
         tools.addWidget(self.legend)
         tools.addStretch(1)
-        self.reset_btn = QPushButton("重置视图")
+        self.reset_btn = QPushButton(tr("重置视图", "Reset view"))
         self.reset_btn.setObjectName("MapTool")
         self.reset_btn.setCursor(Qt.PointingHandCursor)
-        self.reset_btn.setToolTip("回到自动排布的位置")
+        self.reset_btn.setToolTip(tr("回到自动排布的位置", "Back to the automatic layout"))
         self.reset_btn.clicked.connect(lambda: self.canvas.reset_view())
         tools.addWidget(self.reset_btn)
         root.addLayout(tools)
 
-        hint = QLabel("拖动空白处平移 · 滚轮缩放 · 点节点看讲解 · 节点也能直接拖走")
+        hint = QLabel(tr("拖动空白处平移 · 滚轮缩放 · 点节点看讲解 · 节点也能直接拖走",
+                         "Drag to pan · scroll to zoom · click a node for the explanation · nodes can be dragged too"))
         hint.setFont(font(10))
         hint.setStyleSheet(f"color:{Colors.TEXT_DISABLED};")
         hint.setWordWrap(True)
@@ -393,7 +396,9 @@ class MindMapPage(QWidget):
         self.detail.practice_requested.connect(self.practice_requested.emit)
         root.addWidget(self.detail)
 
-        self.empty = QLabel("这节课还没有知识点记录。上完一节课，这里会长出知识地图。")
+        self.empty = QLabel(tr("这节课还没有知识点记录。上完一节课，这里会长出知识地图。",
+                               "No knowledge points recorded for this lesson yet. "
+                               "Finish a lesson and the map grows here."))
         self.empty.setWordWrap(True)
         self.empty.setFont(font(12))
         self.empty.setStyleSheet(f"color:{Colors.TEXT_SECONDARY};")
@@ -438,19 +443,21 @@ class MindMapPage(QWidget):
         review = sum(1 for n in nodes if n["status"] == mindmap.STATUS_REVIEW)
         fixed = sum(1 for n in nodes if n["status"] == mindmap.STATUS_FIXED)
         if nodes:
-            bits = [f"{len(nodes)} 个知识点"]
+            bits = [tr(f"{len(nodes)} 个知识点", f"{len(nodes)} knowledge points")]
             if review:
-                bits.append(f"{review} 个待回看")
+                bits.append(tr(f"{review} 个待回看", f"{review} to review"))
             if fixed:
-                bits.append(f"{fixed} 个已补上")
+                bits.append(tr(f"{fixed} 个已补上", f"{fixed} caught up"))
             if not review:
-                bits.append("都跟上了")
+                bits.append(tr("都跟上了", "all kept up"))
             self.sub.setText(" · ".join(bits))
             self.empty.setText("")
         else:
-            self.sub.setText("这节课没有留下知识点记录")
-            self.empty.setText("知识点没记下来，上面是这节课的内容回顾。"
-                               if self.content_box.isVisible() else "这节课还没有内容记录。")
+            self.sub.setText(tr("这节课没有留下知识点记录", "No knowledge points recorded for this lesson"))
+            self.empty.setText(tr("知识点没记下来，上面是这节课的内容回顾。",
+                                  "Knowledge points weren't captured — the lesson recap is above.")
+                               if self.content_box.isVisible()
+                               else tr("这节课还没有内容记录。", "No notes for this lesson yet."))
 
         self.empty.setVisible(not nodes)
         self.canvas.setVisible(bool(nodes))
@@ -518,7 +525,7 @@ class _DetailPanel(QFrame):
         self.quiz_box.setSpacing(4)
         root.addLayout(self.quiz_box)
 
-        self.practice_btn = QPushButton("出题练一练")
+        self.practice_btn = QPushButton(tr("出题练一练", "Practise this"))
         self.practice_btn.setCursor(Qt.PointingHandCursor)
         self.practice_btn.clicked.connect(lambda: self.practice_requested.emit(self._topic))
         row = QHBoxLayout()
@@ -546,7 +553,8 @@ class _DetailPanel(QFrame):
         self._topic = ""
         self.topic_lbl.setText("")
         self.status_lbl.setText("")
-        self.body_lbl.setText("点上面的知识点，这里显示讲解和题目。")
+        self.body_lbl.setText(tr("点上面的知识点，这里显示讲解和题目。",
+                                 "Click a knowledge point above to see its explanation and questions."))
         self.body_lbl.setStyleSheet(f"color:{Colors.TEXT_SECONDARY};")
         self.miss_lbl.setVisible(False)
         self._clear_quiz()
@@ -555,9 +563,9 @@ class _DetailPanel(QFrame):
         self._topic = detail.get("topic") or ""
         self.topic_lbl.setText(self._topic)
         status = detail.get("status")
-        label = {mindmap.STATUS_REVIEW: "待回看",
-                 mindmap.STATUS_FIXED: "已补上",
-                 mindmap.STATUS_OK: "已跟上"}.get(status, "")
+        label = {mindmap.STATUS_REVIEW: tr("待回看", "To review"),
+                 mindmap.STATUS_FIXED: tr("已补上", "Caught up"),
+                 mindmap.STATUS_OK: tr("已跟上", "Kept up")}.get(status, "")
         color = {mindmap.STATUS_REVIEW: Colors.DANGER,
                  mindmap.STATUS_FIXED: Colors.ACCENT,
                  mindmap.STATUS_OK: Colors.OK_FG}.get(status, Colors.TEXT_SECONDARY)
@@ -567,34 +575,37 @@ class _DetailPanel(QFrame):
         taught = (detail.get("taught") or "").strip()
         tc = (detail.get("timecode") or "").strip()
         if tc:
-            taught = f"老师讲到 {tc}　{taught}".strip()
-        self.body_lbl.setText(taught or "这节课没有留下这个知识点的讲解记录。")
+            taught = tr(f"老师讲到 {tc}　{taught}", f"Teacher covered this at {tc}　{taught}").strip()
+        self.body_lbl.setText(taught or tr("这节课没有留下这个知识点的讲解记录。",
+                                           "No explanation was recorded for this knowledge point."))
         self.body_lbl.setStyleSheet("")
 
         # 不懂的话，把它缺的那一步说清楚
         miss_bits = []
         if detail.get("review_first"):
-            miss_bits.append("建议先补这个 —— 复习链追到的最根源概念。")
+            miss_bits.append(tr("建议先补这个 —— 复习链追到的最根源概念。",
+                                "Start here — this is the root concept the review chain leads back to."))
         if detail.get("missing"):
-            miss_bits.append("你可能卡在：" + detail["missing"])
+            miss_bits.append(tr("你可能卡在：", "You probably got stuck on: ") + detail["missing"])
         if detail.get("known"):
-            miss_bits.append("先确认你已经知道的：" + detail["known"])
+            miss_bits.append(tr("先确认你已经知道的：", "First, confirm what you already know: ") + detail["known"])
         if detail.get("step"):
-            miss_bits.append("漏掉的那一步：" + detail["step"])
+            miss_bits.append(tr("漏掉的那一步：", "The step you missed: ") + detail["step"])
         if detail.get("micro_lesson"):
             miss_bits.append(detail["micro_lesson"])
         if miss_bits:
             self.miss_lbl.setText("\n".join(miss_bits))
             self.miss_lbl.setStyleSheet("")
         else:
-            self.miss_lbl.setText("这个知识点没掉队过，可以直接出题确认一下。")
+            self.miss_lbl.setText(tr("这个知识点没掉队过，可以直接出题确认一下。",
+                                     "You never fell behind here — try a question to confirm."))
             self.miss_lbl.setStyleSheet(f"color:{Colors.TEXT_SECONDARY};")
         self.miss_lbl.setVisible(True)
         self.content_changed.emit()
 
     def load_questions(self, lesson: dict, topic: str, mistakes: list = None):
         self._clear_quiz()
-        asking = QLabel("正在准备这道题…")
+        asking = QLabel(tr("正在准备这道题…", "Preparing a question…"))
         asking.setFont(font(11))
         asking.setStyleSheet(f"color:{Colors.TEXT_SECONDARY};")
         self.quiz_box.addWidget(asking)
@@ -618,7 +629,7 @@ class _DetailPanel(QFrame):
             box = QVBoxLayout(card)
             box.setContentsMargins(Spacing.SM + 2, Spacing.SM, Spacing.SM + 2, Spacing.SM)
             box.setSpacing(3)
-            head = QLabel(f"第 {i} 题")
+            head = QLabel(tr(f"第 {i} 题", f"Question {i}"))
             head.setFont(font(10, 600))
             head.setStyleSheet(f"color:{Colors.TEXT_SECONDARY}; background: transparent;")
             box.addWidget(head)
@@ -633,13 +644,13 @@ class _DetailPanel(QFrame):
                 ol.setFont(font(11))
                 ol.setStyleSheet(f"color:{Colors.TEXT_SECONDARY}; background: transparent;")
                 box.addWidget(ol)
-            ans = QLabel("答案：" + (q.get("answer") or "见解析"))
+            ans = QLabel(tr("答案：", "Answer: ") + (q.get("answer") or tr("见解析", "see explanation")))
             ans.setWordWrap(True)
             ans.setFont(font(11, 600))
             ans.setStyleSheet(f"color:{Colors.OK_FG}; background: transparent;")
             box.addWidget(ans)
             if q.get("explain"):
-                ex = QLabel("解析：" + q["explain"])
+                ex = QLabel(tr("解析：", "Explanation: ") + q["explain"])
                 ex.setWordWrap(True)
                 ex.setFont(font(11))
                 ex.setStyleSheet(f"color:{Colors.TEXT_SECONDARY}; background: transparent;")

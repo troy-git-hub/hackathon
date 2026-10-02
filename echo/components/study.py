@@ -13,7 +13,18 @@ from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer, pyqtSignal
 from PyQt5.QtGui import QCursor
 from PyQt5.QtGui import QPainter, QPainterPath, QColor, QPen, QBrush, QFont
 
+from echo.i18n import tr
 from echo.theme import Colors, Radius, Spacing, font
+
+
+def _role_label(style: dict, key: str):
+    """下面两个角色表的值是 (中文, English, 颜色名)。
+
+    标签在构造控件时才取，所以 tr() 要在这里调 —— 表本身是模块级常量，
+    导入期求值会把语言写死。
+    """
+    zh, en, color_key = style[key]
+    return tr(zh, en), color_key
 
 
 # ======================= 猫头像 =======================
@@ -168,9 +179,9 @@ class CatAvatar(QWidget):
 
 # ======================= 断点页三节点 =======================
 ROLE_STYLE = {
-    "known": ("刚才会的", "OK_FG"),
-    "break": ("掉队的那一步", "ACCENT"),
-    "now":   ("老师讲到这里", "NOW_FG"),
+    "known": ("刚才会的", "What you knew", "OK_FG"),
+    "break": ("掉队的那一步", "The step you lost", "ACCENT"),
+    "now":   ("老师讲到这里", "Where the teacher is now", "NOW_FG"),
 }
 RAIL_X = 11
 NODE_R = 7
@@ -181,7 +192,7 @@ class _PathNode(QWidget):
     def __init__(self, role, concept, note="", first=False, last=False, parent=None):
         super().__init__(parent)
         self.role, self.first, self.last = role, first, last
-        label, color_key = ROLE_STYLE[role]
+        label, color_key = _role_label(ROLE_STYLE, role)
         self.color = QColor(getattr(Colors, color_key))
         is_bp = role == "break"
 
@@ -296,9 +307,9 @@ class BreakPath(QWidget):
 
 # ======================= 补课三段式 =======================
 STEP_STYLE = {
-    "known": ("你已经知道", "OK_FG"),
-    "step":  ("中间漏了这一步", "ACCENT"),
-    "now":   ("所以现在你能听懂", "NOW_FG"),
+    "known": ("你已经知道", "What you already know", "OK_FG"),
+    "step":  ("中间漏了这一步", "The step you missed", "ACCENT"),
+    "now":   ("所以现在你能听懂", "So now you can follow", "NOW_FG"),
 }
 
 
@@ -306,7 +317,7 @@ class LessonStep(QWidget):
     def __init__(self, kind, parent=None):
         super().__init__(parent)
         self.kind = kind
-        label, ck = STEP_STYLE[kind]
+        label, ck = _role_label(STEP_STYLE, kind)
         self.color = QColor(getattr(Colors, ck))
         self.last = kind == "now"
         main = kind == "step"
@@ -509,30 +520,30 @@ class ReviewChain(QFrame):
             return True
 
         cap = f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"
-        self._add("你的掉队点", f"color: {Colors.ACCENT}; font-size: 11px; font-weight: 700;")
+        self._add(tr("你的掉队点", "Where you fell behind"), f"color: {Colors.ACCENT}; font-size: 11px; font-weight: 700;")
         self._add(items[0], f"color: {Colors.TEXT_PRIMARY}; font-size: 17px; font-weight: 700;")
         for mid in items[1:-1]:
             self._arrow()
-            self._add("前置", cap)
+            self._add(tr("前置", "Requires"), cap)
             self._add(mid, f"color: {Colors.TEXT_PRIMARY}; font-size: 14px;")
         root = items[-1] if len(items) > 1 else None
         self._arrow()
         if root:
-            self._add(f"建议复习：{root}",
+            self._add(tr(f"建议复习：{root}", f"Review: {root}"),
                       f"color: {Colors.ACCENT}; font-size: 16px; font-weight: 700;")
             if suggestion and not (suggestion.startswith("建议复习") and root in suggestion):
                 self._lay.addSpacing(6)
                 self._add(suggestion, f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;")
         else:
-            self._add(suggestion or f"建议复习：{items[0]}",
+            self._add(suggestion or tr(f"建议复习：{items[0]}", f"Review: {items[0]}"),
                       f"color: {Colors.ACCENT}; font-size: 16px; font-weight: 700;")
         # 「去复习」：针对最该复习的根源概念，一键跳到练习
         self._review_topic = root or items[0]
-        btn = QPushButton("去复习")
+        btn = QPushButton(tr("去复习", "Practise now"))
         btn.setObjectName("Accent")
         btn.setCursor(QCursor(Qt.PointingHandCursor))
         btn.setMinimumHeight(40)
-        btn.setToolTip(f"去复习：{self._review_topic}")
+        btn.setToolTip(tr(f"去复习：{self._review_topic}", f"Practise: {self._review_topic}"))
         btn.clicked.connect(self._on_review)
         self._lay.addSpacing(8)
         self._lay.addWidget(btn)
