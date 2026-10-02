@@ -43,13 +43,15 @@ from echo.backend.qt_bridge import EchoBridge
 from echo.backend import store
 from echo.components.pet import EMOTION_FILES, ASSETS_DIR
 from echo.widgets.checkin import CheckinCard
+from echo.widgets.mindmap import MindMapPage
+from echo.backend import mindmap
 
 SHADOW = 14
 WAIT_HINT = "播放网课后，Echo 会自动开始听"
-LISTEN, MINI, BREAK, LESSON, ECHO, REVIEW, HOME, PRACTICE, DETAIL = range(9)
+LISTEN, MINI, BREAK, LESSON, ECHO, REVIEW, HOME, PRACTICE, DETAIL, MINDMAP = range(10)
 # 各页内容区宽度（不含阴影与内边距）
 PAGE_WIDTH = {LISTEN: 340, MINI: 300, BREAK: 380, LESSON: 400, ECHO: 380,
-              REVIEW: 380, HOME: 360, PRACTICE: 400, DETAIL: 380}
+              REVIEW: 380, HOME: 360, PRACTICE: 400, DETAIL: 380, MINDMAP: 480}
 
 
 def _label(text="", style="", wrap=False):
@@ -148,6 +150,8 @@ class FloatingWindow(QWidget):
         self._prac_item = None       # 当前在练的错题
         self._prac_qs, self._prac_cards = [], []
         self._prac_submitted = False
+        self._last_report = None     # 最近一次回响（回响页「知识地图」用）
+        self._detail_lesson = {}     # 当前正在看的这节历史课
         self._drag_pos = None
         self._page = LISTEN
 
@@ -175,6 +179,7 @@ class FloatingWindow(QWidget):
             self.checkin_card.skipped.connect(self.echo.skip_checkin)
         if hasattr(self.echo, "quiz_ready"):
             self.echo.quiz_ready.connect(self._on_quiz_ready)
+        self.mindmap_page.practice_requested.connect(self._go_practice)
         # 注意：不在这里 echo.start()。启动停在主页，等用户点「开始今天的学习」才真正开课+抓音频。
 
         # 现场兜底快捷键（Echo 窗口在前台时有效）
@@ -200,6 +205,8 @@ class FloatingWindow(QWidget):
         self.stack.addWidget(self._build_home())     # 6
         self.stack.addWidget(self._build_practice()) # 7
         self.stack.addWidget(self._build_detail())   # 8
+        self.mindmap_page = MindMapPage()
+        self.stack.addWidget(self.mindmap_page)      # 9
         self.body_scroll = QScrollArea()
         self.body_scroll.setWidgetResizable(True)
         self.body_scroll.setFrameShape(QFrame.NoFrame)
@@ -552,8 +559,9 @@ class FloatingWindow(QWidget):
         lay.addWidget(self.review_card)
 
         row = QHBoxLayout()
-        row.addWidget(_btn("错题复习", "Quiet", self._show_review))
+        row.addWidget(_btn("知识地图", "Accent", self._show_mindmap_report))
         row.addStretch()
+        row.addWidget(_btn("错题复习", "Quiet", self._show_review))
         row.addWidget(_btn("回到主页", "Link", self._show_home))
         lay.addLayout(row)
         return page
@@ -1156,6 +1164,7 @@ class FloatingWindow(QWidget):
         lay.addWidget(self.det_review)
 
         row = QHBoxLayout()
+        row.addWidget(_btn("知识地图", "Quiet", self._show_mindmap_lesson))
         row.addWidget(_btn("出几道题练练", "Accent", self._make_detail_quiz))
         row.addStretch()
         row.addWidget(_btn("回到主页", "Link", self._show_home))
@@ -1191,6 +1200,37 @@ class FloatingWindow(QWidget):
             self.det_review.set_chain(ls.get("review_chain") or [], ls.get("suggestion", "")))
         self._show_page(DETAIL)
 
+    # ----- 9 知识地图 -----
+    def _show_mindmap_report(self):
+        """回响页 → 知识地图：刚下课，用这节的报告画图。"""
+        report = getattr(self, "_last_report", None)
+        if report is None:
+            return
+        title = (getattr(self.echo, "title", "") or "").strip()
+        self._show_mindmap(mindmap.from_report(report, title=title))
+
+    def _show_mindmap_lesson(self):
+        """历史课回顾 → 知识地图。"""
+        lesson = getattr(self, "_detail_lesson", {}) or {}
+        if not lesson:
+            return
+        self._show_mindmap(lesson)
+
+    def _show_mindmap(self, lesson):
+        self.mindmap_page.show_lesson(lesson, store.load())
+        self._show_page(MINDMAP)
+
+    def _go_practice(self, topic):
+        """思维导图里点「出题练一练」→ 针对这个知识点去练习页。"""
+        topic = (topic or "").strip()
+        if not topic:
+            return
+        item = next((it for it in store.load() if it.get("topic") == topic), None)
+        if item is None:
+            item = {"topic": topic, "missing": "", "reason": "", "micro_lesson": "",
+                    "known": "", "step": "", "now": "", "status": "review", "reviewed": False}
+        self._practice_item(item)
+
     # ================= 页面切换 / 尺寸 =================
     def _show_page(self, idx):
         self._page = idx
@@ -1201,8 +1241,8 @@ class FloatingWindow(QWidget):
 
         mini = idx == MINI
         self.header.setVisible(not mini)
-        self.back_btn.setVisible(idx in (BREAK, LESSON, REVIEW, PRACTICE, DETAIL))
-        self.back_btn.setText("← 主页" if idx in (REVIEW, PRACTICE, DETAIL) else "← 回到课堂")
+        self.back_btn.setVisible(idx in (BREAK, LESSON, REVIEW, PRACTICE, DETAIL, MINDMAP))
+        self.back_btn.setText("← 主页" if idx in (REVIEW, PRACTICE, DETAIL, MINDMAP) else "← 回到课堂")
         self.home_btn.setVisible(idx in (LISTEN, ECHO))
         self.end_btn.setVisible(idx == LISTEN)
         self.fold_btn.setVisible(idx == LISTEN)
@@ -1278,7 +1318,7 @@ class FloatingWindow(QWidget):
 
     def _back(self):
         """← 按钮：复习/练习/回顾页回主页，断点/补课页回课堂。"""
-        if self._page in (REVIEW, PRACTICE, DETAIL):
+        if self._page in (REVIEW, PRACTICE, DETAIL, MINDMAP):
             self._show_home()
         else:
             self._show_page(LISTEN)
@@ -1504,6 +1544,7 @@ class FloatingWindow(QWidget):
         self.step_now.setText(rich(now_txt))
 
     def _on_echo(self, report):
+        self._last_report = report
         self.echo_dots.stop()
         self.echo_loading.hide()
 
@@ -1572,7 +1613,8 @@ class FloatingWindow(QWidget):
                               highlights=getattr(report, "highlights", []),
                               duration=getattr(report, "duration", 0.0),
                               line_count=getattr(report, "line_count", 0),
-                              char_count=getattr(report, "char_count", 0))
+                              char_count=getattr(report, "char_count", 0),
+                              graph=getattr(report, "graph", None))
         except Exception:
             pass
 
