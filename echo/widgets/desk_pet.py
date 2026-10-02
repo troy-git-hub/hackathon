@@ -17,7 +17,7 @@ import os
 import random
 import time
 
-from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QPointF, QRectF, QSettings, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
 from PyQt5.QtWidgets import QApplication, QMenu, QWidget
 
@@ -87,6 +87,7 @@ class DeskPet(QWidget):
     }
     # 收起后挂在屏幕侧边的「加速球」直径
     ORB = 48
+    DOCK_H = 112
     DOCK_MARGIN = 40
 
     def __init__(self, win=None, tray=None):
@@ -121,6 +122,9 @@ class DeskPet(QWidget):
         self._vbar = [0.05] * self.VN
         self.docked = False          # True = 收起成侧边加速球
         self.dock_side = ""          # "left" / "right"
+        self.skin = QSettings("Echo", "Echo").value("desktop_pet_skin", "cartoon")
+        if self.skin not in ("cartoon", "line"):
+            self.skin = "cartoon"
         self.setFixedSize(self.W, self.H)
 
         # 展开态用 assets/emojis 下的表情包图；收起态用矢量 CatAvatar（自动眨眼）。
@@ -180,6 +184,14 @@ class DeskPet(QWidget):
     def _sync_cat_emotion(self):
         self.cat.set_emotion(self._MOOD_EMO.get(self.mood, "idle"))
 
+    def set_skin(self, skin):
+        if skin not in ("cartoon", "line"):
+            return
+        self.skin = skin
+        QSettings("Echo", "Echo").setValue("desktop_pet_skin", skin)
+        self._layout_cat()
+        self.update()
+
     def place_default(self):
         g = QApplication.primaryScreen().availableGeometry()
         x = g.right() - self.width() - 12
@@ -189,24 +201,25 @@ class DeskPet(QWidget):
 
     # ================= 侧边收起（360 加速球式吸附） =================
     def _layout_cat(self):
-        """收起态显示矢量猫头小球；展开态用 emojis 图，隐藏矢量猫头。"""
+        """桌面态和磁吸态始终使用同一皮肤。"""
         if self.docked:
-            s = int(self.ORB * 0.8)
+            s = 32
             self.cat.setFixedSize(s, s)
-            self.cat.move((self.ORB - s) // 2, (self.ORB - s) // 2)
-            self.cat.show()
+            self.cat.move((self.ORB - s) // 2, 76)
         else:
-            self.cat.hide()
+            self.cat.setFixedSize(self.CAT, self.CAT)
+            self.cat.move(4, self.H - self.CAT - 6)
+        self.cat.setVisible(self.skin == "line")
 
     def _orb_rect(self) -> QRectF:
-        return QRectF(2, 2, self.ORB - 4, self.ORB - 4)
+        return QRectF(2, 2, self.ORB - 4, self.DOCK_H - 4)
 
     def _set_docked(self, docked, side=""):
         """切换收起 / 展开；side ∈ {"left", "right"}。"""
         self.docked = docked
         self.dock_side = side if docked else ""
         self.setFixedSize(self.ORB if docked else self.W,
-                          self.ORB if docked else self.H)
+                          self.DOCK_H if docked else self.H)
         self._layout_cat()
         self.update()
 
@@ -306,6 +319,11 @@ class DeskPet(QWidget):
         m.addAction("收起 Echo 面板" if visible else "打开 Echo 面板", self._toggle_panel)
         if self.tray is not None:
             m.addAction("设置…", self.tray.open_settings)
+        skins = m.addMenu("桌宠皮肤")
+        for skin, label in (("cartoon", "原版卡通猫"), ("line", "线稿猫")):
+            action = skins.addAction(label, lambda checked=False, choice=skin: self.set_skin(choice))
+            action.setCheckable(True)
+            action.setChecked(self.skin == skin)
         m.addAction("先藏起来（托盘里能叫回）", self.hide)
         m.exec_(pos)
 
@@ -399,14 +417,20 @@ class DeskPet(QWidget):
             self._draw_full(p, now)
 
     def _draw_orb(self, p):
-        """收起态：屏幕侧边的小球（加速球样式），猫头由子控件画在球上。"""
+        """磁吸态：上方实时音量、下方当前皮肤的小猫。"""
         r = self._orb_rect()
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor(0, 0, 0, 50))
-        p.drawEllipse(QRectF(r.center().x() - r.width() * 0.42, r.bottom() - 1, r.width() * 0.84, 7))
-        p.setPen(QPen(QColor(Colors.BORDER_STRONG), 1.5))
+        p.setPen(QPen(QColor(Colors.BORDER_STRONG), 1))
         p.setBrush(QColor(Colors.SURFACE))
-        p.drawEllipse(r)
+        p.drawRoundedRect(r, 18, 18)
+        for i, v in enumerate(self._vbar):
+            length = 4 + 26 * v
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(Colors.ACCENT))
+            p.drawRoundedRect(QRectF(24 - length / 2, 10 + i * 7, length, 3), 1.5, 1.5)
+        if self.skin == "cartoon":
+            pm = self.faces.get(self.mood) or self.faces.get("idle")
+            if pm is not None:
+                p.drawPixmap(QRectF(7, 74, 34, 34), pm, QRectF(pm.rect()))
         if self.badge:
             br = QRectF(r.right() - 15, r.top() + 1, 18, 18)
             p.setBrush(QColor(Colors.ACCENT))
@@ -433,7 +457,8 @@ class DeskPet(QWidget):
         if st < 0.45:
             dx = 4 * math.sin(st * 60) * (1 - st / 0.45)
 
-        self._draw_classic(p, cat, breathe, dy, dx)
+        if self.skin == "cartoon":
+            self._draw_classic(p, cat, breathe, dy, dx)
         self._draw_voice(p, self._voice_rect())
 
         if self.badge:

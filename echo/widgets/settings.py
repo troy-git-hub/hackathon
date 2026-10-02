@@ -6,9 +6,9 @@ Echo - 设置
 """
 import os
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QSettings
 from PyQt5.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel,
-                             QLineEdit, QVBoxLayout, QWidget)
+                             QLineEdit, QVBoxLayout, QWidget, QApplication)
 
 from echo.backend import paths
 from echo.theme import Colors, font
@@ -116,6 +116,13 @@ class SettingsDialog(QDialog):
             form.addRow(f"{label}：", cb)
             self.combos[key] = cb
 
+        self.pet_skin = QComboBox()
+        self.pet_skin.addItem("原版圆脸卡通猫（桌面＋磁吸）", "cartoon")
+        self.pet_skin.addItem("线稿猫（桌面＋磁吸）", "line")
+        current_skin = QSettings("Echo", "Echo").value("desktop_pet_skin", "cartoon")
+        self.pet_skin.setCurrentIndex(1 if current_skin == "line" else 0)
+        form.addRow("桌宠皮肤：", self.pet_skin)
+
         root.addLayout(form)
 
         btns = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
@@ -156,6 +163,12 @@ class SettingsDialog(QDialog):
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.warning(self, "保存失败", f"写 .env 失败：{e}")
             return
+        skin = self.pet_skin.currentData()
+        QSettings("Echo", "Echo").setValue("desktop_pet_skin", skin)
+        from echo.widgets.desk_pet import DeskPet
+        for widget in QApplication.topLevelWidgets():
+            if isinstance(widget, DeskPet):
+                widget.set_skin(skin)
         self.accept()
 
 
