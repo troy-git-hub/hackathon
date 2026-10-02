@@ -344,3 +344,53 @@ QPushButton#IconBtn:hover {{ background: {Colors.HOVER_OVERLAY}; color: {Colors.
 def apply_theme(app):
     app.setStyleSheet(GLOBAL_QSS)
     app.setFont(font(12))
+
+
+def menu_qss() -> str:
+    """右键菜单样式。
+
+    必须显式给菜单设颜色：全局 QSS 里的 `* { color: TEXT_PRIMARY }` 会渗进菜单，
+    深色主题下文字被染成白色，而菜单背景仍是系统浅色 —— 变成白字白底看不见。
+    """
+    return f"""
+    QMenu {{
+        background-color: {Colors.SURFACE};
+        border: 1px solid {Colors.BORDER_STRONG};
+        border-radius: {Radius.MD}px;
+        padding: 5px;
+    }}
+    QMenu::item {{
+        padding: 7px 30px 7px 14px;
+        border-radius: 5px;
+        color: {Colors.TEXT_PRIMARY};
+        background: transparent;
+    }}
+    QMenu::item:selected {{
+        background-color: {Colors.SURFACE_HOVER};
+    }}
+    QMenu::item:disabled {{
+        color: {Colors.TEXT_DISABLED};
+    }}
+    QMenu::separator {{
+        height: 1px;
+        background: {Colors.BORDER};
+        margin: 4px 8px;
+    }}
+    QMenu::indicator {{
+        width: 14px; height: 14px; margin-left: 6px;
+    }}
+    QMenu::indicator:checked {{
+        background-color: {Colors.ACCENT};
+        border-radius: 3px;
+        border: 1px solid {Colors.ACCENT};
+    }}
+    """
+
+
+def style_menu(menu):
+    """把右键菜单调成和托盘菜单一样的风格（跟随深浅色、圆角、悬浮高亮）。"""
+    menu.setStyleSheet(menu_qss())
+    # 圆角要生效得去掉系统边框和阴影，用 QSS 的圆角代替
+    menu.setWindowFlags(menu.windowFlags() | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
+    menu.setAttribute(Qt.WA_TranslucentBackground, True)
+    return menu

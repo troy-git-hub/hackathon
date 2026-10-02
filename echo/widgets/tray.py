@@ -21,6 +21,7 @@ from PyQt5.QtCore import Qt, QObject, QEvent, QAbstractNativeEventFilter, QRectF
 from PyQt5.QtGui import QIcon, QPixmap, QPainter, QPainterPath, QPen, QColor
 from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction, QApplication
 
+from echo import theme
 from echo.theme import Colors
 
 log = logging.getLogger("echo.tray")
@@ -100,44 +101,6 @@ class _HotkeyFilter(QAbstractNativeEventFilter):
         return False, 0
 
 
-def _menu_qss() -> str:
-    """Win11 风格右键菜单：跟随深浅色、圆角、悬浮高亮。"""
-    hover = Colors.ACCENT_SOFT if hasattr(Colors, "ACCENT_SOFT") else Colors.SURFACE_HOVER
-    return f"""
-    QMenu {{
-        background-color: {Colors.SURFACE};
-        border: 1px solid {Colors.BORDER_STRONG};
-        border-radius: 8px;
-        padding: 5px;
-    }}
-    QMenu::item {{
-        padding: 7px 30px 7px 14px;
-        border-radius: 5px;
-        color: {Colors.TEXT_PRIMARY};
-        background: transparent;
-    }}
-    QMenu::item:selected {{
-        background-color: {Colors.SURFACE_HOVER};
-    }}
-    QMenu::item:disabled {{
-        color: {Colors.TEXT_DISABLED};
-    }}
-    QMenu::separator {{
-        height: 1px;
-        background: {Colors.BORDER};
-        margin: 4px 8px;
-    }}
-    QMenu::indicator {{
-        width: 14px; height: 14px; margin-left: 6px;
-    }}
-    QMenu::indicator:checked {{
-        background-color: {Colors.ACCENT};
-        border-radius: 3px;
-        border: 1px solid {Colors.ACCENT};
-    }}
-    """
-
-
 class EchoTray(QObject):
     def __init__(self, app: QApplication, win):
         super().__init__(win)
@@ -180,11 +143,7 @@ class EchoTray(QObject):
 
     # ---------------- 菜单 ----------------
     def _build_menu(self):
-        m = QMenu()
-        m.setStyleSheet(_menu_qss())
-        # 圆角需要无边框 + 透明底；去掉系统阴影，用 QSS 圆角代替
-        m.setWindowFlags(m.windowFlags() | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
-        m.setAttribute(Qt.WA_TranslucentBackground, True)
+        m = theme.style_menu(QMenu())
         self.act_toggle = m.addAction("显示 / 隐藏 Echo", self.toggle_window)
         m.addSeparator()
         m.addAction("⌂  主页", self.home)

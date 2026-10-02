@@ -20,7 +20,7 @@ from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
 from PyQt5.QtWidgets import QApplication, QMenu, QWidget
 
-from echo.theme import Colors, font
+from echo.theme import Colors, font, style_menu
 
 ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                       "assets", "emojis")
@@ -231,7 +231,7 @@ class DeskPet(QWidget):
         self.say("收到，继续加油！" if kind == "ok" else "记下了，有点懵就圈出来问我", 2500, kind)
 
     def _menu(self, pos):
-        m = QMenu(self)
+        m = style_menu(QMenu(self))
         key = getattr(self.tray, "keys", {}).get(3, "") if self.tray is not None else ""
         m.addAction(f"✏️  圈一下问 AI    {key}".rstrip(), self.circle_ask.emit)
         m.addSeparator()
