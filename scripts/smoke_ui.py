@@ -1,11 +1,17 @@
 """离线检查窗口数量、页面切换和主要按钮，不启动音频或调用 API。"""
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root))
+
+# 这套自检要用到课程/错题记录，指到临时目录，别动用户真实的 review.json / lessons.json
+from echo.backend import paths          # noqa: E402
+_SMOKE_DIR = tempfile.mkdtemp(prefix="echo-smoke-")
+paths.config_dir = lambda: _SMOKE_DIR
 
 # 当前机器的 PyQt5 Python 包与 Qt DLL 分开安装时，可显式指定本地运行库。
 runtime = os.getenv("ECHO_QT_RUNTIME")
@@ -123,6 +129,52 @@ assert window._page == ui.REVIEW, "错题复习页打不开"
 window._show_detail(0)          # 不存在的归档：应安全退化，不崩
 app.processEvents()
 assert window._page == ui.DETAIL, "历史课程回顾页打不开"
+
+# 主页「AI 出题练习」：没有错题时要进练习页说清楚，不能默默弹回主页
+window._show_home()
+app.processEvents()
+QTest.mouseClick(window.home_practice_card.btn, Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.PRACTICE, "没有错题时点「开始练」应该进练习页说明，而不是弹回主页"
+assert window.prac_loading_lbl.text().strip(), "练习页没有给出说明文案"
+
+# 历史课回顾 → 知识地图：要能进得去，图上有节点，并且显示课程内容
+from echo.backend import store                     # noqa: E402
+ts = store.save_lesson(
+    "贝叶斯统计",
+    [{"name": "条件概率定义", "mastery": 0.9, "status": "ok"},
+     {"name": "贝叶斯公式", "mastery": 0.3, "status": "review"}],
+    ["贝叶斯公式", "条件概率定义"], "多练贝叶斯公式",
+    summary="从条件概率讲到贝叶斯公式。",
+    highlights=["贝叶斯公式 P(A|B)=P(B|A)P(A)/P(B)"],
+    graph={"nodes": ["条件概率定义", "贝叶斯公式"],
+           "edges": [["条件概率定义", "贝叶斯公式"]]})
+window._show_detail(ts)
+app.processEvents()
+map_btns = [b for b in window.findChildren(type(window.back_btn))
+            if b.text() == "知识地图" and b.isVisible()]
+assert map_btns, "历史课回顾页上没有可见的「知识地图」按钮"
+QTest.mouseClick(map_btns[0], Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.MINDMAP, "点「知识地图」没有打开地图页"
+assert len(window.mindmap_page.canvas._nodes) == 2, "知识地图上没有画出知识点"
+assert window.mindmap_page.lesson_title.text(), "知识地图页没有显示课程标题"
+assert window.mindmap_page.lesson_points.text(), "知识地图页没有显示课程要点"
+
+# 没有 graph 的老课程也要能画（退回按复习链 + 讲课顺序推导）
+ts2 = store.save_lesson("老课程", [{"name": "甲", "mastery": 0.5, "status": "review"},
+                                   {"name": "乙", "mastery": 0.5, "status": "ok"}],
+                        ["乙", "甲"], summary="老数据，没有 graph")
+window._show_detail(ts2)
+app.processEvents()
+map_btns = [b for b in window.findChildren(type(window.back_btn))
+            if b.text() == "知识地图" and b.isVisible()]
+assert map_btns, "老课程的回顾页上没有「知识地图」按钮"
+QTest.mouseClick(map_btns[0], Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.MINDMAP, "老课程打不开知识地图"
+assert len(window.mindmap_page.canvas._nodes) == 2, "老课程没画出知识点"
+assert window.mindmap_page.lesson_summary.text(), "老课程没显示课程摘要"
 
 window.close()
 print("UI smoke passed: one window, avatar and primary flow work")

@@ -899,9 +899,22 @@ class FloatingWindow(QWidget):
         """挑第一个待复习的错题，让 AI 出题。"""
         pending = [it for it in store.load() if not it.get("reviewed")]
         if not pending:
-            self._show_home()
+            self._show_practice_empty()
             return
         self._practice_item(pending[0])
+
+    def _show_practice_empty(self):
+        """没有错题时也要进练习页说明白。
+
+        原来这里直接 _show_home() 弹回主页，点下去什么也没发生 —— 用户会以为按钮坏了。
+        """
+        self._prac_item = {}
+        self._prac_qs, self._prac_cards = [], []
+        self._prac_submitted = False
+        self.prac_sub.setText("还没有可以出题的错题")
+        self._show_page(PRACTICE)
+        self._on_prac_err("听课时点「我掉队了」，Echo 找到的知识断点会收进错题本，"
+                          "这里就能照着它出题了。")
 
     def _practice_item(self, item):
         """针对某一个错题让 AI 出题（后台线程，结果经信号回主线程）。"""

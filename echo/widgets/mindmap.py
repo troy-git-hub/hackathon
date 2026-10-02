@@ -314,10 +314,29 @@ class MindMapPage(QWidget):
         head.addWidget(self.sub)
         root.addLayout(head)
 
+        # 课程内容：光有图不够，历史课进来也得能一眼看到这节课讲了什么
+        self.lesson_title = QLabel("")
+        self.lesson_title.setFont(font(13, 600))
+        self.lesson_title.setWordWrap(True)
+        self.lesson_summary = QLabel("")
+        self.lesson_summary.setWordWrap(True)
+        self.lesson_summary.setFont(font(11))
+        self.lesson_summary.setStyleSheet(f"color:{Colors.TEXT_SECONDARY};")
+        self.lesson_points = QLabel("")
+        self.lesson_points.setWordWrap(True)
+        self.lesson_points.setFont(font(11))
+        self.content_box = QWidget()
+        cb = QVBoxLayout(self.content_box)
+        cb.setContentsMargins(0, 0, 0, 0)
+        cb.setSpacing(3)
+        cb.addWidget(self.lesson_title)
+        cb.addWidget(self.lesson_summary)
+        cb.addWidget(self.lesson_points)
+        root.addWidget(self.content_box)
+
         self.canvas = _Canvas()
         self.canvas.node_clicked.connect(self._on_node)
         root.addWidget(self.canvas, 1)
-
         tools = QHBoxLayout()
         tools.setSpacing(Spacing.SM)
         self.legend = QLabel("● 待回看   ● 补上了   ○ 已跟上")
@@ -370,17 +389,35 @@ class MindMapPage(QWidget):
         self._mistakes = mistakes if mistakes is not None else []
         self._graph = mindmap.build(self._lesson, self._mistakes)
 
+        # 课程内容
+        title = (self._lesson.get("title") or "").strip()
+        summary = (self._lesson.get("summary") or "").strip()
+        points = [str(h).strip() for h in (self._lesson.get("highlights") or []) if str(h).strip()]
+        self.lesson_title.setText(title)
+        self.lesson_title.setVisible(bool(title))
+        self.lesson_summary.setText(summary)
+        self.lesson_summary.setVisible(bool(summary))
+        self.lesson_points.setText("\n".join("· " + p for p in points[:4]))
+        self.lesson_points.setVisible(bool(points))
+        self.content_box.setVisible(bool(title or summary or points))
+
         nodes = self._graph["nodes"]
         review = sum(1 for n in nodes if n["status"] == mindmap.STATUS_REVIEW)
         fixed = sum(1 for n in nodes if n["status"] == mindmap.STATUS_FIXED)
-        bits = [f"{len(nodes)} 个知识点"]
-        if review:
-            bits.append(f"{review} 个待回看")
-        if fixed:
-            bits.append(f"{fixed} 个已补上")
-        if not review and nodes:
-            bits.append("都跟上了")
-        self.sub.setText(" · ".join(bits))
+        if nodes:
+            bits = [f"{len(nodes)} 个知识点"]
+            if review:
+                bits.append(f"{review} 个待回看")
+            if fixed:
+                bits.append(f"{fixed} 个已补上")
+            if not review:
+                bits.append("都跟上了")
+            self.sub.setText(" · ".join(bits))
+            self.empty.setText("")
+        else:
+            self.sub.setText("这节课没有留下知识点记录")
+            self.empty.setText("知识点没记下来，上面是这节课的内容回顾。"
+                               if self.content_box.isVisible() else "这节课还没有内容记录。")
 
         self.empty.setVisible(not nodes)
         self.canvas.setVisible(bool(nodes))
