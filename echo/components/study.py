@@ -38,6 +38,7 @@ class CatAvatar(QWidget):
         self.setFixedSize(size, size)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.StrongFocus)
         self._pressed = False
         self._emotion = "idle"
         self._blink = False
@@ -63,6 +64,14 @@ class CatAvatar(QWidget):
                 self.clicked.emit()
         else:
             super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            if not event.isAutoRepeat():
+                self.clicked.emit()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
     def set_emotion(self, emotion, hold_ms=0):
         """hold_ms > 0 时，过一会儿自动回到 idle。"""

@@ -167,6 +167,8 @@ class FloatingWindow(QWidget):
         self._mindmap_lesson = {}    # 知识地图页正在看的那节课
         self._drag_pos = None
         self._page = LISTEN
+        self._analysis_pending = False   # 掉队分析进行中，防重复触发
+        self._break_failed = False       # 本次掉队分析失败，可重试
 
         self._build_ui()
         self._prac_done.connect(self._on_prac_done)
@@ -391,6 +393,12 @@ class FloatingWindow(QWidget):
                                "Ask Echo for a quick question on what the teacher just covered"))
         row.addWidget(self.btn_ask)
         lay.addLayout(row)
+
+        # 掉队分析出结果后，从这里一键回到刚才那节补课
+        self.resume_btn = _btn(tr("继续查看刚才的补课  ↗", "Resume the catch-up lesson  ↗"),
+                               "Link", self._go_lesson)
+        self.resume_btn.hide()
+        lay.addWidget(self.resume_btn)
         return page
 
     def _ask_checkin_now(self):
@@ -522,6 +530,12 @@ class FloatingWindow(QWidget):
         self.btn_self.setMinimumHeight(44)
         row.addWidget(self.btn_self, 2)
         lay.addLayout(row)
+
+        # 分析失败时显示「重新分析」，不用退回听课页再点一次
+        self.retry_btn = _btn(tr("重新分析", "Retry analysis"), "Quiet", self._on_lost)
+        self.retry_btn.setMinimumHeight(40)
+        self.retry_btn.hide()
+        lay.addWidget(self.retry_btn)
         return page
 
     # ----- 3 补课三段式 -----
@@ -1669,6 +1683,10 @@ class FloatingWindow(QWidget):
         self._self_look.clear()
         self._ask = None
         self._ask_buf = ""
+        self._analysis_pending = False
+        self._break_failed = False
+        self.resume_btn.hide()
+        self.retry_btn.hide()
         self.topic_lbl.setText(tr("等待老师开讲…", "Waiting for the teacher to start…"))
         self.mini_topic.setText(tr("等待老师开讲…", "Waiting for the teacher to start…"))
         self.summary_lbl.setText(WAIT_HINT)
@@ -1696,6 +1714,12 @@ class FloatingWindow(QWidget):
 
     def _on_lost(self):
         # 核心：Break Point Engine（异步，结果见 _on_breakpoint）
+        if self._analysis_pending:      # 已经在分析，别重复触发
+            self._show_page(BREAK)
+            return
+        self._analysis_pending = True
+        self._break_failed = False
+        self.retry_btn.hide()
         self._cat("lost")
         self.echo.feedback("lost")
         self.break_cap.setText(tr("Echo 正在找你掉队的地方", "Echo is looking for where you lost track"))
@@ -1713,6 +1737,7 @@ class FloatingWindow(QWidget):
         if hasattr(self.echo, "mark_fixed"):
             self.echo.mark_fixed()
         self._cat("fixed", 2500)
+        self.resume_btn.hide()
         self._show_page(LISTEN)
 
     def _on_self_look(self):
@@ -1723,6 +1748,7 @@ class FloatingWindow(QWidget):
                 self.echo.mark_self()
         self.bp_dots.stop()
         self._cat("ok", 1500)
+        self.resume_btn.hide()
         self._show_page(LISTEN)
 
     # ================= 断点追问 =================
@@ -1807,6 +1833,7 @@ class FloatingWindow(QWidget):
             self._fit()
 
     def _on_breakpoint(self, bp, concepts):
+        self._analysis_pending = False
         self.last_bp = bp
         self.last_bp_concepts = list(concepts or [])
         self._ask = None             # 新断点 = 新一轮追问
@@ -1826,6 +1853,7 @@ class FloatingWindow(QWidget):
         self.miss_card.show()
         self.btn_fill.setEnabled(True)
         self._fill_lesson(bp)
+        self.resume_btn.show()      # 回听课页后还能一键跳回这节补课
         if self._page in (BREAK, LESSON):
             self._fit()
 
@@ -1998,14 +2026,15 @@ class FloatingWindow(QWidget):
         self._fit()
 
     def _on_error(self, msg):
+        self._analysis_pending = False   # 分析失败/出错，允许重试
         self.status_lbl.setText(tr("网络或 AI 出错", "Network or AI error"))
         self.status_lbl.setToolTip(msg)
         self.status_dot.setStyleSheet(f"color: {Colors.ACCENT}; font-size: 8px; background: transparent;")
         if self._page == BREAK and not self.btn_fill.isEnabled():
+            self._break_failed = True
             self.bp_dots.stop()
-            self.bp_loading_lbl.setText(
-                tr("这次没分析出来，回到课堂再点一次「我掉队了」试试",
-                   "Couldn't analyze it this time — go back to class and tap \"I fell behind\" again"))
+            self.bp_loading_lbl.setText(tr("这次没分析出来，可以直接重试", "That didn't work — you can retry"))
+            self.retry_btn.show()
             self._fit()
         if self._page == ECHO and self.echo_loading.isVisible():
             self.echo_dots.stop()
