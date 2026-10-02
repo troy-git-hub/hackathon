@@ -65,6 +65,28 @@ def _btn(text, obj, slot, tip=""):
 CAPTION = f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;"
 TITLE = f"color: {Colors.TEXT_PRIMARY}; font-size: 17px; font-weight: 700;"
 
+
+class _DraggableHeader(QWidget):
+    """可拖动标题栏：点击 QLabel/空白区域可拖动窗口；按钮正常工作（事件不冒泡）"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._drag_pos = None
+        self.setCursor(Qt.SizeAllCursor)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._drag_pos = e.globalPos() - self.window().frameGeometry().topLeft()
+            e.accept()
+
+    def mouseMoveEvent(self, e):
+        if self._drag_pos is not None and e.buttons() & Qt.LeftButton:
+            self.window().move(e.globalPos() - self._drag_pos)
+            e.accept()
+
+    def mouseReleaseEvent(self, e):
+        self._drag_pos = None
+        super().mouseReleaseEvent(e)
+
 _FORMULA = re.compile(r"((?:[A-Za-z]\([^()（）]{1,24}\)|[A-Za-z]\b)"
                       r"(?:[\s·*/+\-=×÷^|∩∪A-Za-z0-9().]|&#x27;|乘|除以)*"
                       r"[A-Za-z0-9)])")
@@ -170,7 +192,7 @@ class FloatingWindow(QWidget):
         root.addWidget(self.body_scroll)
 
     def _build_header(self) -> QWidget:
-        bar = QWidget()
+        bar = _DraggableHeader()
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(Spacing.SM)
@@ -470,7 +492,7 @@ class FloatingWindow(QWidget):
         self._fit()
 
     def _fit(self):
-        """按当前页内容算窗口大小；窗口在屏幕下半部时保持底边不动（往上长），不跑出屏幕。"""
+        """按当前页内容算窗口大小；扩展时尽量保持窗口中心不动，不跑出屏幕。"""
         def do():
             idx = self.stack.currentIndex()
             pl = self.stack.currentWidget().layout()
@@ -499,16 +521,34 @@ class FloatingWindow(QWidget):
             scr = (self.screen() or QApplication.primaryScreen()).availableGeometry()
             x, y = old.x(), old.y()
             if self.isVisible():
-                if old.center().y() > scr.center().y():
-                    y = old.bottom() + 1 - H
-                if old.center().x() > scr.center().x():
+                # 默认保持窗口中心不动（居中扩展）；窗口贴近视边缘时改贴该边
+                cx, cy = old.center().x(), old.center().y()
+                # 距离各边小于阈值 → 贴边
+                near_right = old.right() > scr.right() - 40
+                near_bottom = old.bottom() > scr.bottom() - 40
+                near_left = old.left() < scr.left() + 40
+                near_top = old.top() < scr.top() + 40
+                if near_right and not near_left:
                     x = old.right() + 1 - W
+                elif near_left and not near_right:
+                    x = old.x()
+                else:
+                    x = cx - W // 2
+                if near_bottom and not near_top:
+                    y = old.bottom() + 1 - H
+                elif near_top and not near_bottom:
+                    y = old.y()
+                else:
+                    y = cy - H // 2
+                # 不跑出屏幕
                 x = max(scr.left() - SHADOW, min(x, scr.right() + SHADOW - W))
                 y = max(scr.top() - SHADOW, min(y, scr.bottom() + SHADOW - H))
-            self.setMinimumSize(W, H)
-            self.resize(W, H)
-            if self.isVisible() and (x, y) != (old.x(), old.y()):
-                self.move(x, y)
+                # 用 setGeometry 原子地设置位置+大小，避免 resize 先向右下长再 move 的闪烁/边界问题
+                self.setMinimumSize(W, H)
+                self.setGeometry(x, y, W, H)
+            else:
+                self.setMinimumSize(W, H)
+                self.resize(W, H)
         do()
         QTimer.singleShot(0, do)   # 换行文本需要一轮事件循环后才能算准高度
         self.update()
@@ -818,23 +858,29 @@ class FloatingWindow(QWidget):
             y -= rect.top
             bw = max(1, round(6 * self.devicePixelRatioF()))
             w, h = rect.right - rect.left, rect.bottom - rect.top
+            # 鼠标在窗口外 → 默认处理
             if not (0 <= x < w and 0 <= y < h):
                 return super().nativeEvent(eventType, message)
-            if x < bw and y < bw:
+            # 只在边缘 bw 内返回缩放 hit code
+            at_left = x < bw
+            at_right = x >= w - bw
+            at_top = y < bw
+            at_bottom = y >= h - bw
+            if at_left and at_top:
                 return True, HTTOPLEFT
-            if x > w - bw and y < bw:
+            if at_right and at_top:
                 return True, HTTOPRIGHT
-            if x < bw and y > h - bw:
+            if at_left and at_bottom:
                 return True, HTBOTTOMLEFT
-            if x > w - bw and y > h - bw:
+            if at_right and at_bottom:
                 return True, HTBOTTOMRIGHT
-            if x < bw:
+            if at_left:
                 return True, HTLEFT
-            if x > w - bw:
+            if at_right:
                 return True, HTRIGHT
-            if y < bw:
+            if at_top:
                 return True, HTTOP
-            if y > h - bw:
+            if at_bottom:
                 return True, HTBOTTOM
         return super().nativeEvent(eventType, message)
 
@@ -842,13 +888,9 @@ class FloatingWindow(QWidget):
         self.echo.shutdown()
         super().closeEvent(e)
 
-    # ================= 拖动：整张卡片任意空白处都能拖 =================
+    # ================= 拖动：header 由 _DraggableHeader 接管；阴影边距走手动 fallback =================
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
-            h = self.windowHandle()
-            if h is not None and hasattr(h, "startSystemMove") and h.startSystemMove():
-                e.accept()
-                return
             self._drag_pos = e.globalPos() - self.frameGeometry().topLeft()
             e.accept()
 

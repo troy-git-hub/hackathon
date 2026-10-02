@@ -26,9 +26,10 @@ def main():
     apply_theme(app)
 
     win = FloatingWindow()
-    # 定位到屏幕右下角偏上
+    # 定位到屏幕中央
     screen = app.primaryScreen().availableGeometry()
-    win.move(screen.right() - win.width() - 8, screen.bottom() - win.height() - 8)
+    win.move(screen.center().x() - win.width() // 2,
+             screen.center().y() - win.height() // 2)
     win.show()
     tray = EchoTray(app, win)   # 托盘 + 关闭到托盘 + 全局快捷键（Ctrl+Alt+L 掉队 / Ctrl+Alt+E 显示隐藏）
 
