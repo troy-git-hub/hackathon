@@ -547,6 +547,7 @@ class FloatingWindow(QWidget):
         lay.addWidget(self.echo_path)
 
         self.review_card = ReviewChain()
+        self.review_card.review_requested.connect(self._review_root)
         lay.addWidget(self.review_card)
 
         row = QHBoxLayout()
@@ -627,6 +628,17 @@ class FloatingWindow(QWidget):
     def _show_review(self):
         self._render_review()
         self._show_page(REVIEW)
+
+    def _review_root(self, topic):
+        """回响页点「去复习」：针对最该复习的根源概念，让 AI 出题练一下。"""
+        item = None
+        for it in store.load():
+            if (it.get("topic") or "").strip() == (topic or "").strip():
+                item = it
+                break
+        if item is None:
+            item = {"topic": (topic or "").strip()}
+        self._practice_item(item)
 
     def _render_review(self):
         while self.review_list_lay.count():

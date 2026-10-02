@@ -8,8 +8,9 @@ Echo - 学习工具风格组件
 """
 import math
 
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton
 from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer, pyqtSignal
+from PyQt5.QtGui import QCursor
 from PyQt5.QtGui import QPainter, QPainterPath, QColor, QPen, QBrush, QFont
 
 from echo.theme import Colors, Radius, Spacing, font
@@ -467,6 +468,8 @@ class SkillRow(QWidget):
 class ReviewChain(QFrame):
     """你的掉队点 ↓ 前置 ↓ 建议复习：根源。chain 为「掉队点 → … → 根源」。"""
 
+    review_requested = pyqtSignal(str)   # 点「去复习」时发出该复习的根源概念
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("ReviewChain")
@@ -523,4 +526,19 @@ class ReviewChain(QFrame):
         else:
             self._add(suggestion or f"建议复习：{items[0]}",
                       f"color: {Colors.ACCENT}; font-size: 16px; font-weight: 700;")
+        # 「去复习」：针对最该复习的根源概念，一键跳到练习
+        self._review_topic = root or items[0]
+        btn = QPushButton("去复习")
+        btn.setObjectName("Accent")
+        btn.setCursor(QCursor(Qt.PointingHandCursor))
+        btn.setMinimumHeight(40)
+        btn.setToolTip(f"去复习：{self._review_topic}")
+        btn.clicked.connect(self._on_review)
+        self._lay.addSpacing(8)
+        self._lay.addWidget(btn)
         return True
+
+    def _on_review(self):
+        topic = getattr(self, "_review_topic", "")
+        if topic:
+            self.review_requested.emit(topic)
