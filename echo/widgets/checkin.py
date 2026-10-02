@@ -16,6 +16,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton,
                              QSizePolicy, QVBoxLayout, QWidget)
 
+from echo.i18n import tr
 from echo.theme import Colors, Radius, Spacing, font
 
 
@@ -42,7 +43,7 @@ class CheckinCard(QFrame):
 
         head = QHBoxLayout()
         head.setSpacing(Spacing.SM)
-        self.tag = QLabel("课堂抽查")
+        self.tag = QLabel(tr("课堂抽查", "Quick check"))
         self.tag.setObjectName("CheckinTag")
         self.tag.setFont(font(11, 600))
         self.topic = QLabel("")
@@ -54,7 +55,7 @@ class CheckinCard(QFrame):
         self.close_btn.setObjectName("CheckinClose")
         self.close_btn.setFixedSize(20, 20)
         self.close_btn.setCursor(Qt.PointingHandCursor)
-        self.close_btn.setToolTip("知道了，继续听课")
+        self.close_btn.setToolTip(tr("知道了，继续听课", "Got it, back to class"))
         self.close_btn.clicked.connect(self._on_skip)
         head.addWidget(self.close_btn)
         root.addLayout(head)
@@ -141,18 +142,19 @@ class CheckinCard(QFrame):
         """是否正等着学生作答（宿主可用来判断要不要拦别的交互）。"""
         return self.isVisible() and not self._locked
 
-    def preparing(self, text: str = "Echo 正在看老师刚讲了什么…"):
+    def preparing(self, text: str = ""):
         """学生自己按了「考考我」：先把卡片亮出来，题目回来再填进去。
 
         否则点了按钮要等好几秒才出东西，学生会以为没反应。
         """
+        text = text or tr("Echo 正在看老师刚讲了什么…", "Echo is checking what the teacher just covered…")
         self._question = {}
         self._locked = True
         self.topic.setText("")
         self.question_lbl.setText(text)
         self.result_box.hide()
         self._clear_options()
-        hint = QLabel("出题中…")
+        hint = QLabel(tr("出题中…", "Writing a question…"))
         hint.setObjectName("CheckinHint")
         hint.setFont(font(11))
         self.options_box.addWidget(hint)
@@ -177,7 +179,7 @@ class CheckinCard(QFrame):
             self.options_box.addWidget(btn)
             self._option_buttons.append(btn)
         if not options:      # 兜底：没有选项时给一个「知道了」
-            btn = QPushButton("知道了")
+            btn = QPushButton(tr("知道了", "Got it"))
             btn.setObjectName("CheckinOption")
             btn.clicked.connect(lambda: self._on_answer(0))
             self.options_box.addWidget(btn)
@@ -207,17 +209,18 @@ class CheckinCard(QFrame):
             btn.style().polish(btn)
 
         if result == "right":
-            self.verdict.setText("✓ 跟上了")
+            self.verdict.setText(tr("✓ 跟上了", "✓  Got it"))
             self.verdict.setStyleSheet(f"color:{Colors.OK_FG};")
         elif result == "unsure":
-            self.verdict.setText("≈ 有点模糊")
+            self.verdict.setText(tr("≈ 有点模糊", "≈  A bit fuzzy"))
             self.verdict.setStyleSheet(f"color:{Colors.ACCENT};")
         else:
-            self.verdict.setText("✗ 这里没跟上")
+            self.verdict.setText(tr("✗ 这里没跟上", "✗  Lost track here"))
             self.verdict.setStyleSheet(f"color:{Colors.DANGER};")
 
         answer = record.get("answer_text") or ""
-        self.answer_lbl.setText(f"正确答案：{answer}" if answer and result != "right" else "")
+        self.answer_lbl.setText(tr(f"正确答案：{answer}", f"Correct answer: {answer}")
+                                if answer and result != "right" else "")
         self.answer_lbl.setVisible(bool(self.answer_lbl.text()))
         explain = record.get("explain") or ""
         self.explain_lbl.setText(explain)
@@ -225,7 +228,8 @@ class CheckinCard(QFrame):
         if result == "right":
             self.note_lbl.setText("")
         else:
-            self.note_lbl.setText("已记进错题本，课后复习时会带上它。")
+            self.note_lbl.setText(tr("已记进错题本，课后复习时会带上它。",
+                                     "Saved to your mistakes — it'll come up in review."))
         self.note_lbl.setVisible(bool(self.note_lbl.text()))
         self.result_box.show()
 

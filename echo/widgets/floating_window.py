@@ -253,7 +253,7 @@ class FloatingWindow(QWidget):
         lay.setSpacing(Spacing.SM)
 
         self.cat = CatAvatar(30)
-        self.cat.setToolTip("点击打开听课界面")
+        self.cat.setToolTip(tr("点击打开听课界面", "Open the lesson panel"))
         self.cat.clicked.connect(self._open_from_avatar)
         lay.addWidget(self.cat)
 
@@ -278,15 +278,15 @@ class FloatingWindow(QWidget):
         lay.addWidget(self.home_btn)
         self.end_btn = _btn(tr("下课", "End class"), "Link", self._go_echo, tr("结束这节课，生成回响", "End this lesson and generate the review"))
         lay.addWidget(self.end_btn)
-        self.fold_btn = _btn("–", "IconBtn", lambda: self._show_page(MINI), "折叠")
+        self.fold_btn = _btn("–", "IconBtn", lambda: self._show_page(MINI), tr("折叠", "Collapse"))
         self.fold_btn.setFixedSize(26, 26)
         lay.addWidget(self.fold_btn)
 
         # 最小化按钮
-        self.min_btn = _btn("▾", "IconBtn", self._minimize, "最小化")
+        self.min_btn = _btn("▾", "IconBtn", self._minimize, tr("最小化", "Minimize"))
         self.min_btn.setFixedSize(26, 26)
         lay.addWidget(self.min_btn)
-        close_btn = _btn("×", "IconBtn", self.close, "退出 Echo")
+        close_btn = _btn("×", "IconBtn", self.close, tr("退出 Echo", "Quit Echo"))
         close_btn.setFixedSize(26, 26)
         lay.addWidget(close_btn)
 
@@ -338,7 +338,7 @@ class FloatingWindow(QWidget):
         self.wave_orb = WaveOrb(size=48)
         head.addWidget(self.wave_orb)
         head.addSpacing(Spacing.SM)
-        head.addWidget(_label("老师正在讲", CAPTION))
+        head.addWidget(_label(tr("老师正在讲", "Teacher is speaking"), CAPTION))
         head.addStretch()
         self.tc_lbl = _label("00:00", f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;"
                                       "font-family: Consolas, 'Cascadia Mono', monospace;")
@@ -381,7 +381,7 @@ class FloatingWindow(QWidget):
 
         row = QHBoxLayout()
         row.setSpacing(Spacing.SM)
-        self.btn_ok = _btn("✓  跟上了", "Quiet", self._on_ok)
+        self.btn_ok = _btn(tr("✓  跟上了", "✓  Got it"), "Quiet", self._on_ok)
         self.btn_warn = _btn(tr("?  有点懵", "?  A bit lost"), "Quiet", self._on_warn)
         row.addWidget(self.btn_ok)
         row.addWidget(self.btn_warn)
@@ -411,12 +411,12 @@ class FloatingWindow(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(Spacing.SM)
         self.mini_cat = CatAvatar(28)
-        self.mini_cat.setToolTip("点击展开听课界面")
+        self.mini_cat.setToolTip(tr("点击展开听课界面", "Expand the lesson panel"))
         self.mini_cat.clicked.connect(self._open_from_avatar)
         lay.addWidget(self.mini_cat)
         col = QVBoxLayout()
         col.setSpacing(0)
-        col.addWidget(_label("老师正在讲", f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"))
+        col.addWidget(_label(tr("老师正在讲", "Teacher is speaking"), f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"))
         self.mini_topic = _label(tr("等待老师开讲…", "Waiting for the teacher to start…"), f"color: {Colors.TEXT_PRIMARY}; font-size: 14px;"
                                                 "font-weight: 600;")
         self.mini_topic.setMinimumWidth(10)
@@ -426,7 +426,7 @@ class FloatingWindow(QWidget):
         b = _btn(tr("掉队了", "Fell behind"), "Accent", self._on_lost)
         b.setStyleSheet("font-size: 13px; padding: 6px 12px;")
         lay.addWidget(b)
-        ex = _btn("⌃", "IconBtn", lambda: self._show_page(LISTEN), "展开")
+        ex = _btn("⌃", "IconBtn", lambda: self._show_page(LISTEN), tr("展开", "Expand"))
         ex.setFixedSize(26, 26)
         lay.addWidget(ex)
         # 自适应声纹球：直径跟随 mini 窗口高度，显示在最右端
@@ -441,7 +441,7 @@ class FloatingWindow(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(Spacing.MD)
 
-        self.break_cap = _label("你可能从这里开始掉队", TITLE)
+        self.break_cap = _label(tr("你可能从这里开始掉队", "You probably lost track here"), TITLE)
         lay.addWidget(self.break_cap)
 
         # 加载
@@ -453,7 +453,8 @@ class FloatingWindow(QWidget):
         bl.setContentsMargins(Spacing.LG, Spacing.LG, Spacing.LG, Spacing.LG)
         self.bp_dots = PulseDots(Colors.ACCENT)
         bl.addWidget(self.bp_dots, 0, Qt.AlignVCenter)
-        self.bp_loading_lbl = _label("正在回看最近几分钟的课…", f"color: {Colors.TEXT_PRIMARY}; font-size: 14px;",
+        self.bp_loading_lbl = _label(tr("正在回看最近几分钟的课…", "Reviewing the last few minutes…"),
+                                     f"color: {Colors.TEXT_PRIMARY}; font-size: 14px;",
                                      wrap=True)
         bl.addWidget(self.bp_loading_lbl, 1)
         lay.addWidget(self.bp_loading)
@@ -470,7 +471,8 @@ class FloatingWindow(QWidget):
         ml = QVBoxLayout(self.miss_card)
         ml.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
         ml.setSpacing(6)
-        ml.addWidget(_label("你缺的这一步", f"color: {Colors.ACCENT}; font-size: 12px; font-weight: 700;"))
+        ml.addWidget(_label(tr("你缺的这一步", "The step you're missing"),
+                            f"color: {Colors.ACCENT}; font-size: 12px; font-weight: 700;"))
         self.missing_lbl = _label("", f"color: {Colors.TEXT_PRIMARY}; font-size: 19px; font-weight: 700;",
                                   wrap=True)
         ml.addWidget(self.missing_lbl)
@@ -487,15 +489,17 @@ class FloatingWindow(QWidget):
         al = QVBoxLayout(self.ask_frame)
         al.setContentsMargins(Spacing.MD, Spacing.MD, Spacing.MD, Spacing.MD)
         al.setSpacing(6)
-        al.addWidget(_label("还有哪里不懂？直接问我", f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;"))
+        al.addWidget(_label(tr("还有哪里不懂？直接问我", "Anything else unclear? Just ask"),
+                            f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;"))
         qrow = QHBoxLayout()
         self.ask_input = QLineEdit()
-        self.ask_input.setPlaceholderText("比如：为什么分母是 P(B)？")
+        self.ask_input.setPlaceholderText(tr("比如：为什么分母是 P(B)？",
+                                             "e.g. why is the denominator P(B)?"))
         self.ask_input.setStyleSheet(f"background:{Colors.SURFACE}; color:{Colors.TEXT_PRIMARY};"
                                      f"border:1px solid {Colors.BORDER}; border-radius:6px; padding:7px 10px;")
         self.ask_input.returnPressed.connect(self._ask_breakpoint)
         qrow.addWidget(self.ask_input, 1)
-        self.ask_btn = _btn("问 AI", "Accent", self._ask_breakpoint)
+        self.ask_btn = _btn(tr("问 AI", "Ask AI"), "Accent", self._ask_breakpoint)
         self.ask_btn.setFixedHeight(34)
         qrow.addWidget(self.ask_btn)
         al.addLayout(qrow)
@@ -529,7 +533,7 @@ class FloatingWindow(QWidget):
 
         head = QVBoxLayout()
         head.setSpacing(2)
-        head.addWidget(_label("补上这一步 · 约 30 秒", CAPTION))
+        head.addWidget(_label(tr("补上这一步 · 约 30 秒", "Catch up in one step · ~30s"), CAPTION))
         self.lesson_title = _label("", TITLE, wrap=True)
         head.addWidget(self.lesson_title)
         lay.addLayout(head)
@@ -666,7 +670,7 @@ class FloatingWindow(QWidget):
 
         row = QHBoxLayout()
         row.addStretch()
-        row.addWidget(_btn("回到主页", "Link", self._show_home))
+        row.addWidget(_btn(tr("回到主页", "Back to home"), "Link", self._show_home))
         lay.addLayout(row)
         return page
 
@@ -691,7 +695,9 @@ class FloatingWindow(QWidget):
             if w:
                 w.deleteLater()
         pending = [it for it in store.load() if not it.get("reviewed")]
-        self.review_sub.setText(f"还有 {len(pending)} 个知识点要回看" if pending else "都复习过了，好样的 🎉")
+        self.review_sub.setText(
+            tr(f"还有 {len(pending)} 个知识点要回看", f"{len(pending)} knowledge points left to review")
+            if pending else tr("都复习过了，好样的 🎉", "All reviewed — nice work 🎉"))
         self.review_empty.setVisible(not pending)
         for it in pending:
             self.review_list_lay.addWidget(self._review_card(it))
@@ -704,12 +710,13 @@ class FloatingWindow(QWidget):
         v = QVBoxLayout(card)
         v.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
         v.setSpacing(6)
-        topic = _label(f"✦ {item.get('topic', '知识点')}",
+        topic = _label(tr(f"✦ {item.get('topic', '知识点')}", f"✦ {item.get('topic', 'Knowledge point')}"),
                        f"color: {Colors.TEXT_PRIMARY}; font-size: 15px; font-weight: 600;")
         topic.setWordWrap(True)
         v.addWidget(topic)
-        miss = item.get("missing") or item.get("reason") or "这里没跟上"
-        ml = _label(f"没跟上：{miss}", f"color: {Colors.ACCENT}; font-size: 13px;")
+        miss = item.get("missing") or item.get("reason") or tr("这里没跟上", "Lost track here")
+        ml = _label(tr(f"没跟上：{miss}", f"Missed: {miss}"),
+                    f"color: {Colors.ACCENT}; font-size: 13px;")
         ml.setWordWrap(True)
         v.addWidget(ml)
         lesson = (item.get("micro_lesson") or "").strip()
@@ -720,7 +727,7 @@ class FloatingWindow(QWidget):
         row = QHBoxLayout()
         row.addStretch()
         topic_name = item.get("topic", "")
-        row.addWidget(_btn("AI 出题", "Quiet", lambda it=item: self._practice_item(it)))
+        row.addWidget(_btn(tr("AI 出题", "Generate quiz"), "Quiet", lambda it=item: self._practice_item(it)))
         row.addWidget(_btn(tr("✓ 掌握了", "✓  Mastered"), "Quiet", lambda t=topic_name: self._mark_reviewed(t)))
         v.addLayout(row)
         return card
@@ -755,7 +762,9 @@ class FloatingWindow(QWidget):
         # 开课前先给这节课起个名，下课后在历史里一眼能认出来
         lay.addWidget(_label(tr("这节课叫什么？", "What's this lesson called?"), CAPTION))
         self.title_edit = QLineEdit()
-        self.title_edit.setPlaceholderText("例如：初二数学 · 正比例函数（留空默认用开课时间命名）")
+        self.title_edit.setPlaceholderText(
+            tr("例如：初二数学 · 正比例函数（留空默认用开课时间命名）",
+               "e.g. Grade 8 Math · Direct proportion (leave blank to name by start time)"))
         self.title_edit.setStyleSheet(
             f"QLineEdit {{ background: {Colors.SURFACE}; color: {Colors.TEXT_PRIMARY};"
             f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.SM}px; padding: 7px 10px;"
@@ -814,13 +823,15 @@ class FloatingWindow(QWidget):
 
         head = QVBoxLayout()
         head.setSpacing(2)
-        head.addWidget(_label("课程管理", TITLE))
+        head.addWidget(_label(tr("课程管理", "Course manager"), TITLE))
         self.courses_sub = _label("", CAPTION)
         head.addWidget(self.courses_sub)
         lay.addLayout(head)
 
         self.courses_search = QLineEdit()
-        self.courses_search.setPlaceholderText("搜索课程名或日期，例如「数学」或「10-02」…")
+        self.courses_search.setPlaceholderText(
+            tr("搜索课程名或日期，例如「数学」或「10-02」…",
+               "Search by lesson name or date, e.g. \"Math\" or \"10-02\"…"))
         self.courses_search.setStyleSheet(
             f"QLineEdit {{ background: {Colors.SURFACE}; color: {Colors.TEXT_PRIMARY};"
             f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.SM}px; padding: 7px 10px;"
@@ -831,13 +842,16 @@ class FloatingWindow(QWidget):
 
         bar = QHBoxLayout()
         bar.setSpacing(Spacing.SM)
-        self.courses_sel_btn = _btn("全选", "Quiet", self._courses_toggle_all)
+        self.courses_sel_btn = _btn(tr("全选", "Select all"), "Quiet", self._courses_toggle_all)
         bar.addWidget(self.courses_sel_btn)
-        self.courses_del_btn = _btn("批量删除", "Quiet", self._courses_delete_selected,
-                                    "删除勾选的课程（不可恢复）")
+        self.courses_del_btn = _btn(tr("批量删除", "Delete selected"), "Quiet",
+                                    self._courses_delete_selected,
+                                    tr("删除勾选的课程（不可恢复）",
+                                       "Delete the checked lessons (cannot be undone)"))
         bar.addWidget(self.courses_del_btn)
-        self.courses_ren_btn = _btn("批量重命名", "Quiet", self._courses_rename_selected,
-                                    "给勾选的课程统一改名")
+        self.courses_ren_btn = _btn(tr("批量重命名", "Rename selected"), "Quiet",
+                                    self._courses_rename_selected,
+                                    tr("给勾选的课程统一改名", "Rename all checked lessons at once"))
         bar.addWidget(self.courses_ren_btn)
         bar.addStretch()
         lay.addLayout(bar)
@@ -848,8 +862,9 @@ class FloatingWindow(QWidget):
         self.courses_list_lay.setSpacing(Spacing.SM)
         lay.addWidget(self.courses_list, 1)
 
-        self.courses_empty = _label("还没有上过课。", f"color: {Colors.TEXT_SECONDARY};"
-                                   "font-size: 12px;", wrap=True)
+        self.courses_empty = _label(tr("还没有上过课。", "No lessons yet."),
+                                    f"color: {Colors.TEXT_SECONDARY};"
+                                    "font-size: 12px;", wrap=True)
         lay.addWidget(self.courses_empty)
         return page
 
@@ -871,7 +886,9 @@ class FloatingWindow(QWidget):
                  if not q or q in self._lesson_name(ls).lower()
                  or q in (ls.get("title") or "").lower() or q in (ls.get("date") or "").lower()]
 
-        self.courses_sub.setText(f"共 {len(all_lessons)} 节课" + (f" · 匹配 {len(shown)} 节" if q else ""))
+        self.courses_sub.setText(
+            tr(f"共 {len(all_lessons)} 节课", f"{len(all_lessons)} lessons")
+            + (tr(f" · 匹配 {len(shown)} 节", f" · {len(shown)} matched") if q else ""))
 
         while self.courses_list_lay.count():
             w = self.courses_list_lay.takeAt(0).widget()
@@ -928,16 +945,19 @@ class FloatingWindow(QWidget):
         title.setWordWrap(True)
         col.addWidget(title)
         mins = int((ls.get("duration") or 0) // 60)
-        bits = [ls.get("date", ""), f"{ls.get('total', 0)} 个知识点"]
+        bits = [ls.get("date", ""),
+                tr(f"{ls.get('total', 0)} 个知识点", f"{ls.get('total', 0)} knowledge points")]
         if mins:
-            bits.append(f"{mins} 分钟")
+            bits.append(tr(f"{mins} 分钟", f"{mins} min"))
         if ls.get("review"):
-            bits.append(f"{ls['review']} 个待复习")
+            bits.append(tr(f"{ls['review']} 个待复习", f"{ls['review']} to review"))
         col.addWidget(_label(" · ".join(b for b in bits if b),
                              f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"))
         h.addLayout(col, 1)
-        h.addWidget(_btn("重命名", "Link", lambda t=ls.get("time", 0): self._course_rename(t)))
-        h.addWidget(_btn("看回顾", "Quiet", lambda t=ls.get("time", 0): self._show_detail(t)),
+        h.addWidget(_btn(tr("重命名", "Rename"), "Link",
+                         lambda t=ls.get("time", 0): self._course_rename(t)))
+        h.addWidget(_btn(tr("看回顾", "Review"), "Quiet",
+                         lambda t=ls.get("time", 0): self._show_detail(t)),
                     0, Qt.AlignVCenter)
 
         card._chk = chk
@@ -959,10 +979,13 @@ class FloatingWindow(QWidget):
     def _courses_delete_selected(self):
         ts_list = self._courses_selected()
         if not ts_list:
-            QMessageBox.information(self, "批量删除", "先勾选要删除的课程。")
+            QMessageBox.information(self, tr("批量删除", "Delete selected"),
+                                    tr("先勾选要删除的课程。", "Check the lessons you want to delete first."))
             return
         n = len(ts_list)
-        ret = QMessageBox.question(self, "批量删除", f"确定删除选中的 {n} 节课吗？删除后不可恢复。",
+        ret = QMessageBox.question(self, tr("批量删除", "Delete selected"),
+                                   tr(f"确定删除选中的 {n} 节课吗？删除后不可恢复。",
+                                      f"Delete the {n} selected lessons? This cannot be undone."),
                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if ret != QMessageBox.Yes:
             return
@@ -972,10 +995,12 @@ class FloatingWindow(QWidget):
     def _courses_rename_selected(self):
         ts_list = self._courses_selected()
         if not ts_list:
-            QMessageBox.information(self, "批量重命名", "先勾选要重命名的课程。")
+            QMessageBox.information(self, tr("批量重命名", "Rename selected"),
+                                    tr("先勾选要重命名的课程。", "Check the lessons you want to rename first."))
             return
         default = store.get_lesson(ts_list[0]).get("title", "") if len(ts_list) == 1 else ""
-        name, ok = QInputDialog.getText(self, "重命名", "新的课程名：",
+        name, ok = QInputDialog.getText(self, tr("重命名", "Rename"),
+                                        tr("新的课程名：", "New lesson name:"),
                                         QLineEdit.Normal, default)
         name = (name or "").strip()
         if not ok or not name:
@@ -990,7 +1015,8 @@ class FloatingWindow(QWidget):
     def _course_rename(self, ts):
         """单节课程重命名。"""
         cur = store.get_lesson(ts).get("title", "")
-        name, ok = QInputDialog.getText(self, "重命名", "新的课程名：",
+        name, ok = QInputDialog.getText(self, tr("重命名", "Rename"),
+                                        tr("新的课程名：", "New lesson name:"),
                                         QLineEdit.Normal, cur)
         name = (name or "").strip()
         if ok and name:
@@ -1010,18 +1036,27 @@ class FloatingWindow(QWidget):
 
         bits = []
         if n_lesson:
-            bits.append(f"已经听过 {n_lesson} 节课")
+            bits.append(tr(f"已经听过 {n_lesson} 节课", f"{n_lesson} lessons so far"))
         if mastered:
-            bits.append(f"补上了 {mastered} 个知识点")
-        bits.append(f"还有 {pending} 个错题要复习" if pending else "错题都复习完了 🎉")
+            bits.append(tr(f"补上了 {mastered} 个知识点", f"{mastered} knowledge points caught up"))
+        bits.append(tr(f"还有 {pending} 个错题要复习", f"{pending} mistakes left to review")
+                    if pending else tr("错题都复习完了 🎉", "All mistakes reviewed 🎉"))
         self.home_sub.setText(" · ".join(bits))
 
         self.home_review_card.sub_lbl.setText(
-            f"{pending} 个掉队过的知识点等你回看" if pending else "暂时没有错题，听课时点「我掉队了」就会收进来")
+            tr(f"{pending} 个掉队过的知识点等你回看", f"{pending} knowledge points waiting for review")
+            if pending else tr("暂时没有错题，听课时点「我掉队了」就会收进来",
+                               "No mistakes yet — tap \"I fell behind\" during a lesson and they'll show up here"))
         self.home_practice_card.sub_lbl.setText(
-            f"让 AI 照着这 {pending} 个错题出题，真的练一下" if pending else "有错题之后，AI 就能照着出题")
+            tr(f"让 AI 照着这 {pending} 个错题出题，真的练一下",
+               f"Have AI write questions from these {pending} mistakes and actually practise")
+            if pending else tr("有错题之后，AI 就能照着出题",
+                               "Once you have mistakes, AI can write questions from them"))
         self.home_courses_card.sub_lbl.setText(
-            f"{n_lesson} 节历史课，可搜索、重命名、批量删除" if n_lesson else "还没有历史课，开一节就有了")
+            tr(f"{n_lesson} 节历史课，可搜索、重命名、批量删除",
+               f"{n_lesson} past lessons — search, rename, bulk delete")
+            if n_lesson else tr("还没有历史课，开一节就有了",
+                                "No past lessons yet — start one and it'll appear here"))
 
     def _start_today(self):
         """给这节课命名并开课。"""
@@ -1099,10 +1134,12 @@ class FloatingWindow(QWidget):
         self._prac_back, self._prac_back_label = None, ""
         self._prac_qs, self._prac_cards = [], []
         self._prac_submitted = False
-        self.prac_sub.setText("还没有可以出题的错题")
+        self.prac_sub.setText(tr("还没有可以出题的错题", "No mistakes to build questions from yet"))
         self._show_page(PRACTICE)
-        self._on_prac_err("听课时点「我掉队了」，Echo 找到的知识断点会收进错题本，"
-                          "这里就能照着它出题了。")
+        self._on_prac_err(tr("听课时点「我掉队了」，Echo 找到的知识断点会收进错题本，"
+                             "这里就能照着它出题了。",
+                             "During a lesson, tap \"I fell behind\". Echo files the gap it finds "
+                             "into your mistakes, and this page writes questions from it."))
 
     def _practice_item(self, item, back=None, back_label=""):
         """针对某一个错题让 AI 出题（后台线程，结果经信号回主线程）。
@@ -1113,8 +1150,8 @@ class FloatingWindow(QWidget):
         self._prac_back, self._prac_back_label = back, back_label
         self._prac_qs, self._prac_cards = [], []
         self._prac_submitted = False
-        self.prac_sub.setText(f"针对：{item.get('topic', '')}")
-        self.prac_loading_lbl.setText("AI 正在照着你的错题出题…")
+        self.prac_sub.setText(tr(f"针对：{item.get('topic', '')}", f"On: {item.get('topic', '')}"))
+        self.prac_loading_lbl.setText(tr("AI 正在照着你的错题出题…", "AI is writing questions from your mistakes…"))
         self.prac_dots.start()
         self.prac_loading.show()
         self.prac_body.hide()
@@ -1131,7 +1168,8 @@ class FloatingWindow(QWidget):
         self.prac_loading.hide()
         self._prac_qs = list(qs or [])
         if not self._prac_qs:
-            self._on_prac_err("这次没出出题来，待会儿再试试")
+            self._on_prac_err(tr("这次没出出题来，待会儿再试试",
+                                 "Couldn't write questions this time — try again in a moment"))
             return
         self.prac_body.show()
         self._render_paper()
@@ -1157,7 +1195,8 @@ class FloatingWindow(QWidget):
             self._prac_cards.append(card)
             self.prac_body_lay.addWidget(card)
         topic = (self._prac_item or {}).get("topic", "")
-        self.prac_sub.setText(f"针对：{topic}　共 {len(self._prac_qs)} 题")
+        self.prac_sub.setText(tr(f"针对：{topic}　共 {len(self._prac_qs)} 题",
+                                 f"On: {topic} · {len(self._prac_qs)} questions"))
         self.prac_score.hide()
         self.btn_prac_submit.setEnabled(True)
         self._fit()
@@ -1335,7 +1374,8 @@ class FloatingWindow(QWidget):
         self._prac_back_label = tr("← 课程回顾", "← Lesson review") if ts else ""
         self._prac_qs, self._prac_cards = [], []
         self._prac_submitted = False
-        self.prac_loading_lbl.setText("正在按这节课的要点出题…")
+        self.prac_loading_lbl.setText(tr("正在按这节课的要点出题…",
+                                         "Writing questions from this lesson's key points…"))
         self.prac_dots.start()
         self.prac_loading.show()
         self.prac_body.hide()
@@ -1381,10 +1421,10 @@ class FloatingWindow(QWidget):
         lay.addWidget(self.det_review)
 
         row = QHBoxLayout()
-        row.addWidget(_btn("知识地图", "Quiet", self._show_mindmap_lesson))
-        row.addWidget(_btn("出几道题练练", "Accent", self._make_detail_quiz))
+        row.addWidget(_btn(tr("知识地图", "Knowledge map"), "Quiet", self._show_mindmap_lesson))
+        row.addWidget(_btn(tr("出几道题练练", "Practice a few questions"), "Accent", self._make_detail_quiz))
         row.addStretch()
-        row.addWidget(_btn("回到主页", "Link", self._show_home))
+        row.addWidget(_btn(tr("回到主页", "Back to home"), "Link", self._show_home))
         lay.addLayout(row)
         return page
 
@@ -1398,7 +1438,8 @@ class FloatingWindow(QWidget):
         self._detail_ts = ts
         self.det_title.setText(self._lesson_name(ls))
         self.det_sub.setText(
-            f"{ls.get('date', '')}　✓ 跟上了 {ls.get('ok', 0)} · 待复习 {ls.get('review', 0)}".strip())
+            tr(f"{ls.get('date', '')}　✓ 跟上了 {ls.get('ok', 0)} · 待复习 {ls.get('review', 0)}",
+               f"{ls.get('date', '')}　✓ Kept up {ls.get('ok', 0)} · To review {ls.get('review', 0)}").strip())
         self.det_stat.setText(self._stat_line(ls))
         self._fill_summary(self.det_sum_card, self.det_sum_lbl, self.det_hl_lay,
                            ls.get("summary", ""), ls.get("highlights", []))
@@ -1411,7 +1452,7 @@ class FloatingWindow(QWidget):
         for sk in skills:
             st = echo_status(sk.get("status", "ok"))
             m = sk.get("mastery", 0.0)
-            note = "掉队过 · 已补上" if st == "fixed" else ""
+            note = tr("掉队过 · 已补上", "Fell behind · caught up") if st == "fixed" else ""
             self.det_path_lay.addWidget(SkillRow(sk.get("name", ""), m, echo_mark(st, m), note))
         self.det_path.setVisible(bool(skills))
         self.det_review.setVisible(
@@ -1628,8 +1669,8 @@ class FloatingWindow(QWidget):
         self._self_look.clear()
         self._ask = None
         self._ask_buf = ""
-        self.topic_lbl.setText("等待老师开讲…")
-        self.mini_topic.setText("等待老师开讲…")
+        self.topic_lbl.setText(tr("等待老师开讲…", "Waiting for the teacher to start…"))
+        self.mini_topic.setText(tr("等待老师开讲…", "Waiting for the teacher to start…"))
         self.summary_lbl.setText(WAIT_HINT)
         self.summary_lbl.show()
         self.caption_lbl.hide()
@@ -1657,10 +1698,10 @@ class FloatingWindow(QWidget):
         # 核心：Break Point Engine（异步，结果见 _on_breakpoint）
         self._cat("lost")
         self.echo.feedback("lost")
-        self.break_cap.setText("Echo 正在找你掉队的地方")
+        self.break_cap.setText(tr("Echo 正在找你掉队的地方", "Echo is looking for where you lost track"))
         self.path.clear()
         self.miss_card.hide()
-        self.bp_loading_lbl.setText("正在回看最近几分钟的课…")
+        self.bp_loading_lbl.setText(tr("正在回看最近几分钟的课…", "Reviewing the last few minutes…"))
         self.bp_dots.start()
         self.bp_loading.show()
         self.btn_fill.setEnabled(False)
@@ -1691,7 +1732,8 @@ class FloatingWindow(QWidget):
             return
         self.ask_input.clear()
         self.ask_view.show()
-        self.ask_view.setHtml(f"<span style='color:{Colors.TEXT_SECONDARY}'>Echo 正在想…</span>")
+        self.ask_view.setHtml(f"<span style='color:{Colors.TEXT_SECONDARY}'>"
+                              f"{tr('Echo 正在想…', 'Echo is thinking…')}</span>")
         self.ask_btn.setEnabled(False)
         self._ask_buf = ""
         bp = self.last_bp
@@ -1727,7 +1769,7 @@ class FloatingWindow(QWidget):
         """点击后短暂显示「已记录」，给学生一个确认感。"""
         if getattr(btn, "_orig_text", None) is None:
             btn._orig_text = btn.text()
-        btn.setText("已记录")
+        btn.setText(tr("已记录", "Noted"))
         btn.setEnabled(False)
 
         def restore():
@@ -1747,7 +1789,8 @@ class FloatingWindow(QWidget):
         if total:
             self.progress.setValue(int(1000 * min(1.0, (parse_tc(tc) or 0) / total)))
         if not self.echo.engine.current_concept():
-            self.summary_lbl.setText("正在听，马上识别知识点…")
+            self.summary_lbl.setText(tr("正在听，马上识别知识点…",
+                                        "Listening — spotting knowledge points shortly…"))
         if self._page == LISTEN:   # 字幕行数会变，每句重新算高度
             self._fit()
 
@@ -1775,7 +1818,7 @@ class FloatingWindow(QWidget):
             self.ask_btn.setEnabled(True)
         self.bp_dots.stop()
         self.bp_loading.hide()
-        self.break_cap.setText("你可能从这里开始掉队")
+        self.break_cap.setText(tr("你可能从这里开始掉队", "You probably lost track here"))
         self.path.set_path(self.last_bp_concepts, bp.breakpoint_tc, bp.note)
         self.missing_lbl.setText(bp.missing)
         self.reason_lbl.setText(bp.reason)
@@ -1794,10 +1837,13 @@ class FloatingWindow(QWidget):
         now = cs[-1] if cs else None
 
         known = getattr(bp, "known", "") or (
-            f"{prev.topic}：{prev.summary}" if prev and prev.summary else (prev.topic if prev else "前面的定义和例子"))
+            tr(f"{prev.topic}：{prev.summary}", f"{prev.topic}: {prev.summary}")
+            if prev and prev.summary else (prev.topic if prev else tr("前面的定义和例子", "earlier definitions and examples")))
         step = getattr(bp, "step", "") or bp.micro_lesson
         now_txt = getattr(bp, "now", "") or (
-            f"老师现在讲的「{now.topic}」就是用这一步接着往下推的。" if now else "回到课堂，继续往下听。")
+            tr(f"老师现在讲的「{now.topic}」就是用这一步接着往下推的。",
+               f"What the teacher is covering now (\"{now.topic}\") builds straight on this step.")
+            if now else tr("回到课堂，继续往下听。", "Back to class — keep listening."))
 
         self.lesson_title.setText(bp.missing or bp.concept)
         self.step_known.setText(rich(known))
@@ -1824,9 +1870,9 @@ class FloatingWindow(QWidget):
             if st == "review" and hit(sk.name, self._fixed):
                 st = "fixed"
             if st == "fixed":
-                note = "掉队过 · 已补上"
+                note = tr("掉队过 · 已补上", "Fell behind · caught up")
             elif hit(sk.name, self._self_look):
-                note = "掉队过 · 自己看了"
+                note = tr("掉队过 · 自己看了", "Fell behind · reviewed it alone")
             rows.append((sk.name, sk.mastery, echo_mark(st, sk.mastery), note))
         for name, m, mark, note in rows:
             self.echo_path_lay.addWidget(SkillRow(name, m, mark, note))
@@ -1854,12 +1900,12 @@ class FloatingWindow(QWidget):
         total = get("total", 0) if isinstance(src, dict) else len(getattr(src, "skills", []) or [])
         bits = []
         if mins:
-            bits.append(f"听了 {mins} 分钟")
+            bits.append(tr(f"听了 {mins} 分钟", f"{mins} min listened"))
         if total:
-            bits.append(f"{total} 个知识点")
+            bits.append(tr(f"{total} 个知识点", f"{total} knowledge points"))
         chars = get("char_count", 0) or 0
         if chars:
-            bits.append(f"转写 {chars} 字")
+            bits.append(tr(f"转写 {chars} 字", f"{chars} chars transcribed"))
         return " · ".join(bits)
 
     def _save_lesson(self, report):
@@ -1906,7 +1952,8 @@ class FloatingWindow(QWidget):
             self.mini_wave_orb.stop()
         if not self.echo.engine.current_concept():
             if st == "loading_asr":
-                self.summary_lbl.setText("首次加载约 10 秒，之后会自动开始听")
+                self.summary_lbl.setText(tr("首次加载约 10 秒，之后会自动开始听",
+                                            "First load takes ~10s, then it starts listening automatically"))
             elif st == "listening":
                 self.summary_lbl.setText(WAIT_HINT)
             if self._page == LISTEN:
@@ -1941,9 +1988,9 @@ class FloatingWindow(QWidget):
             self._fit()
 
     def _on_mode(self, kind, offline):
-        tags = ["离线"] if offline else []
+        tags = [tr("离线", "Offline")] if offline else []
         text = " · ".join(tags)
-        tip = "Ctrl+Shift+O 切离线/在线"
+        tip = tr("Ctrl+Shift+O 切离线/在线", "Ctrl+Shift+O toggles offline/online")
         self.mode_lbl.setText(text)
         self.mode_lbl.setProperty("base", text)
         self.mode_lbl.setToolTip(tip)
@@ -1951,16 +1998,19 @@ class FloatingWindow(QWidget):
         self._fit()
 
     def _on_error(self, msg):
-        self.status_lbl.setText("网络或 AI 出错")
+        self.status_lbl.setText(tr("网络或 AI 出错", "Network or AI error"))
         self.status_lbl.setToolTip(msg)
         self.status_dot.setStyleSheet(f"color: {Colors.ACCENT}; font-size: 8px; background: transparent;")
         if self._page == BREAK and not self.btn_fill.isEnabled():
             self.bp_dots.stop()
-            self.bp_loading_lbl.setText("这次没分析出来，回到课堂再点一次「我掉队了」试试")
+            self.bp_loading_lbl.setText(
+                tr("这次没分析出来，回到课堂再点一次「我掉队了」试试",
+                   "Couldn't analyze it this time — go back to class and tap \"I fell behind\" again"))
             self._fit()
         if self._page == ECHO and self.echo_loading.isVisible():
             self.echo_dots.stop()
-            self.echo_loading_lbl.setText("回响生成失败，请检查网络后重试")
+            self.echo_loading_lbl.setText(tr("回响生成失败，请检查网络后重试",
+                                             "Couldn't generate the review — check your connection and try again"))
 
     def _minimize(self):
         hwnd = int(self.winId())
