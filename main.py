@@ -12,6 +12,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication
 from echo.theme import apply_theme
 from echo.widgets.floating_window import FloatingWindow
+from echo.widgets.tray import EchoTray
 
 
 def main():
@@ -29,6 +30,7 @@ def main():
     screen = app.primaryScreen().availableGeometry()
     win.move(screen.right() - win.width() - 8, screen.bottom() - win.height() - 8)
     win.show()
+    tray = EchoTray(app, win)   # 托盘 + 关闭到托盘 + 全局快捷键（Ctrl+Alt+L 掉队 / Ctrl+Alt+E 显示隐藏）
 
     sys.exit(app.exec_())
 
