@@ -37,7 +37,7 @@ class DeskPet(QWidget):
         "warn": "warn", "lost": "lost", "done": "ok",
     }
     # 收起后挂在屏幕侧边的「加速球」直径
-    ORB = 64
+    ORB = 48
     DOCK_MARGIN = 40
 
     def __init__(self, win=None, tray=None):
@@ -129,14 +129,22 @@ class DeskPet(QWidget):
         self.move(max(g.left(), x), g.bottom() - self.height() - 4)
 
     # ================= 侧边收起（360 加速球式吸附） =================
+    # 矢量猫头在 32 基准坐标里的本体范围，用来把猫头缩到跟旧版贴图一样大
+    _HEAD_L, _HEAD_R, _HEAD_T, _HEAD_B = 3.4, 28.6, 4.2, 27.6
+
     def _layout_cat(self):
-        """把矢量猫头放到当前位置：展开时在左下，收起时居中缩成小球。"""
+        """把矢量猫头放到当前位置：展开时对齐旧贴图的猫位，收起时居中缩进小球。"""
         if self.docked:
-            s = int(self.ORB * 0.66)
+            s = int(self.ORB * 0.8)
             x = (self.ORB - s) // 2
             y = (self.ORB - s) // 2
         else:
-            s, x, y = self.CAT, 4, self.H - self.CAT - 6
+            # 猫头本体要跟旧版 88px 贴图一样大：按本体宽算出子控件边长，再对齐到猫区左下
+            scale = self.CAT / (self._HEAD_R - self._HEAD_L)
+            s = int(32 * scale)
+            r = self._cat_rect()
+            x = int(r.left() - self._HEAD_L * scale)
+            y = int(r.bottom() - self._HEAD_B * scale)
         self.cat.setFixedSize(s, s)
         self.cat.move(x, y)
 
