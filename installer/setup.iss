@@ -7,7 +7,7 @@
 #define MyAppExeName "Echo.exe"
 
 [Setup]
-AppId={7C1F9A3E-0E4B-4A5C-9E2D-1B3A5F6C8D9E}
+AppId={{7C1F9A3E-0E4B-4A5C-9E2D-1B3A5F6C8D9E}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
