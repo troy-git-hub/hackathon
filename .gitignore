@@ -20,6 +20,7 @@ Thumbs.db
 
 debug.log
 build.log
+iscc.log
 
 # PyInstaller 产物（几百 MB，不进仓库）
 build/
