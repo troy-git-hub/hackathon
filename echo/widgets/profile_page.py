@@ -13,7 +13,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
                              QPushButton, QVBoxLayout, QWidget)
 
-from echo.backend import profile, store
+from echo.backend import persona, profile, store
 from echo.components.avatar import AvatarView, load_normalized
 from echo.i18n import tr
 from echo.theme import Colors, Radius, Spacing
@@ -116,6 +116,26 @@ class ProfilePage(QWidget):
         self.hint_lbl = _label("", CAPTION, wrap=True)
         root.addWidget(self.hint_lbl)
 
+        # 学习画像：根据复习表现算出来的，不是 AI 猜的——喂给 AI 调整说话口气用
+        persona_head = QHBoxLayout()
+        persona_head.addWidget(_label(tr("学习画像", "Learning profile"), CAPTION))
+        persona_head.addStretch()
+        self.btn_persona_reset = _btn(tr("重置", "Reset"), "Quiet", self._reset_persona,
+                                      tr("清空画像，下次会按最新的复习记录重新算",
+                                         "Clear it — next time it's recomputed from your latest record"))
+        persona_head.addWidget(self.btn_persona_reset)
+        root.addLayout(persona_head)
+        self.persona_card = QFrame()
+        self.persona_card.setObjectName("ProfilePersona")
+        self.persona_card.setStyleSheet(
+            f"QFrame#ProfilePersona {{ background: {Colors.SURFACE};"
+            f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.MD}px; }}")
+        pl = QVBoxLayout(self.persona_card)
+        pl.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        self.persona_lbl = _label("", CAPTION, wrap=True)
+        pl.addWidget(self.persona_lbl)
+        root.addWidget(self.persona_card)
+
         row2 = QHBoxLayout()
         row2.addStretch()
         row2.addWidget(_btn(tr("回到主页", "Back to home"), "Link", self.back_requested.emit))
@@ -175,6 +195,18 @@ class ProfilePage(QWidget):
             has_custom = False
         self.btn_default.setVisible(has_custom)
         self.avatar.refresh()
+
+        try:
+            self.persona_lbl.setText(persona.describe())
+        except Exception:
+            self.persona_lbl.setText(tr("画像暂时算不出来。", "Couldn't compute this right now."))
+
+    def _reset_persona(self):
+        try:
+            persona.reset()
+        except Exception:
+            pass
+        self.refresh()
 
     # ================= 换头像 =================
     def _pick_avatar(self):

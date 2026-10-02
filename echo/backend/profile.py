@@ -14,7 +14,7 @@ import time
 
 from echo.backend import paths
 
-FIELDS = ("name", "nickname", "age", "hobbies", "username")
+FIELDS = ("name", "nickname", "age", "hobbies", "username", "persona")
 # 头像：图片本体单独放配置目录，profile.json 里只记文件名。
 # 记绝对路径的话，换台机器（用户名不同）或换个安装位置就指向不存在的文件了。
 AVATAR_STEM = "avatar"

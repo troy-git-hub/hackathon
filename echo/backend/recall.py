@@ -67,6 +67,8 @@ RECALL_PLAN_USER = """他还记得的错题（每个都有当初掉队的那一�
 
 共同根源概念：{root}
 
+这个学生的情况：{persona}
+
 请出这两个问题。"""
 
 
@@ -101,6 +103,8 @@ RECALL_JUDGE_USER = """这一轮在聊的知识点：
 
 对话记录：
 {dialogue}
+
+这个学生的情况：{persona}
 
 请判断他每个知识点的掌握程度。"""
 
@@ -201,7 +205,9 @@ def plan(items: list, root: str = "", llm=None, use_llm: bool = True) -> dict:
         for it in items)
     try:
         data = llm.json(_system("RECALL_PLAN_SYSTEM"),
-                        RECALL_PLAN_USER.format(items=described, root=root or "（没有共同的，各自问）"),
+                        RECALL_PLAN_USER.format(items=described,
+                                                root=root or "（没有共同的，各自问）",
+                                                persona=_persona_hint()),
                         temperature=0.7, max_tokens=700)
     except Exception as e:
         log.warning("掌握验证出题失败，改用兜底题: %s", e)
@@ -234,6 +240,21 @@ def _dialogue_text(answers: list) -> str:
     return "\n".join(lines)
 
 
+def _persona_hint() -> str:
+    """学生画像的一句话，喂给出题/判断的 prompt，让 AI 的语气跟着这个学生调整。
+
+    没有足够数据（新学生、还没复习过几次）时给个中性占位，不留空——
+    提示词里的 {persona} 槽位总要有内容，免得输出「这个学生的情况：」后面是空的。
+    """
+    try:
+        from echo.backend import persona
+        hint = persona.tone_hint()
+    except Exception as e:
+        log.warning("取学生画像失败: %s", e)
+        hint = ""
+    return hint or "还没有足够的复习记录，按正常节奏讲就好"
+
+
 def judge(items: list, answers: list, llm=None, use_llm: bool = True) -> dict:
     """根据学生的两次回答判断掌握程度。
 
@@ -256,7 +277,8 @@ def judge(items: list, answers: list, llm=None, use_llm: bool = True) -> dict:
                           for it in items)
     try:
         data = llm.json(_system("RECALL_JUDGE_SYSTEM"),
-                        RECALL_JUDGE_USER.format(items=described, dialogue=_dialogue_text(answers)),
+                        RECALL_JUDGE_USER.format(items=described, dialogue=_dialogue_text(answers),
+                                                 persona=_persona_hint()),
                         temperature=0.3, max_tokens=900)
     except Exception as e:
         log.warning("掌握验证判断失败: %s", e)
