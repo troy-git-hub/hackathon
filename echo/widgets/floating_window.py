@@ -1108,13 +1108,14 @@ class FloatingWindow(QWidget):
         if not lesson or not hasattr(self.echo, "make_lesson_quiz"):
             return
         self._prac_item = {"topic": lesson.get("title") or "课后练习"}
+        self._prac_qs, self._prac_cards = [], []
+        self._prac_submitted = False
         self.prac_loading_lbl.setText("正在按这节课的要点出题…")
         self.prac_dots.start()
         self.prac_loading.show()
         self.prac_body.hide()
-        self.prac_answer.hide()
-        self.btn_prac_show.setEnabled(False)
-        self.btn_prac_next.setEnabled(False)
+        self.prac_score.hide()
+        self.btn_prac_submit.setEnabled(False)
         self._show_page(PRACTICE)
         self.echo.make_lesson_quiz(lesson, 4)
 
