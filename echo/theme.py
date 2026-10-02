@@ -3,6 +3,7 @@ Echo - WinUI 风格主题
 参考 Windows 11 Fluent Design / WinUI 3 配色与圆角规范。
 """
 import os
+import sys
 
 from PyQt5.QtGui import QColor, QFont, QPalette
 from PyQt5.QtCore import Qt
@@ -445,3 +446,59 @@ def style_menu(menu):
     menu.setWindowFlags(menu.windowFlags() | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
     menu.setAttribute(Qt.WA_TranslucentBackground, True)
     return menu
+
+
+# ---------- 原生弹窗（QDialog / QMessageBox / QInputDialog）----------
+# 主窗口自己是无边框自绘的，不受系统标题栏影响；但设置窗、首次登录窗、确认/提示框
+# 这些都是普通 QDialog，标题栏是 Windows 画的，深色主题下内容区跟着变黑、
+# 标题栏却还是系统默认的白底黑字——一半黑一半白，很扎眼。
+def apply_native_titlebar(widget):
+    """让这个窗口的系统标题栏跟着当前主题深浅色走（仅 Windows；失败就什么也不做，
+    标题栏保持系统默认样式，不影响功能，不是致命问题）。
+
+    用的是 DWM 的「沉浸式深色模式」开关：
+    · 20 号属性用在 Windows 10 2004 及之后 / Windows 11
+    · 19 号属性用在更早的 1903/1909
+    必须在窗口已经有原生句柄（winId()）之后调用——构造函数里 super().__init__() 跑完、
+    还没 show() 之前调用就行，不用等真的显示出来。
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        hwnd = ctypes.c_void_p(int(widget.winId()))
+        dark = ctypes.c_int(1 if IS_DARK else 0)
+        dwmapi = ctypes.windll.dwmapi
+        for attr in (20, 19):
+            if dwmapi.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(dark), ctypes.sizeof(dark)) == 0:
+                break
+    except Exception:
+        pass
+
+
+def dialog_qss() -> str:
+    """设置窗口 / 首次登录窗 / 确认提示框共用的样式。
+
+    QLabel 给了 min-width：QMessageBox 默认按文字最紧凑的宽度排版，中文一长行挤成
+    很窄一条、整个弹窗显得又小又局促，撑开最小宽度让它跟主界面的卡片观感一致。
+    """
+    return f"""
+        QDialog, QMessageBox {{ background:{Colors.WINDOW_BG}; }}
+        QLabel {{ color:{Colors.TEXT_PRIMARY}; font-size:13px; min-width: 260px; }}
+        QLineEdit, QComboBox, QSpinBox {{
+            background:{Colors.SURFACE}; color:{Colors.TEXT_PRIMARY};
+            border:1px solid {Colors.BORDER}; border-radius:6px; padding:6px 8px;
+        }}
+        QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color:{Colors.ACCENT}; }}
+        QComboBox::drop-down {{ border:none; width:22px; }}
+        QPushButton {{
+            background:{Colors.SURFACE}; color:{Colors.TEXT_PRIMARY};
+            border:1px solid {Colors.BORDER}; border-radius:6px; padding:7px 20px;
+            font-size:13px; min-width: 64px;
+        }}
+        QPushButton:hover {{ border-color:{Colors.BORDER_STRONG}; }}
+        QDialogButtonBox QPushButton:first-child {{
+            background:{Colors.ACCENT}; color:{Colors.ON_ACCENT}; border:none; font-weight:600;
+        }}
+        QDialogButtonBox QPushButton:first-child:hover {{ background:{Colors.ACCENT_HOVER}; }}
+    """

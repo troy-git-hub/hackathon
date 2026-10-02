@@ -15,9 +15,8 @@ from PyQt5.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog, QFormLayout
 from echo.backend import profile
 from echo.components.avatar import AvatarView, load_normalized
 from echo.i18n import tr
-from echo.theme import Colors, font
+from echo.theme import Colors, font, dialog_qss, apply_native_titlebar
 from echo.widgets import dialogs
-from echo.widgets.settings import dialog_qss
 
 
 class ProfileSetupDialog(QDialog):
@@ -25,6 +24,7 @@ class ProfileSetupDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(tr("欢迎使用 Echo", "Welcome to Echo"))
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        apply_native_titlebar(self)
         self._avatar_pm = None        # 预览中的头像（还没落盘；None = 用默认喵喵）
         self._build()
 

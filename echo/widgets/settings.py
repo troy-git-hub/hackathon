@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFormLayout, 
                              QLineEdit, QVBoxLayout, QWidget, QApplication)
 
 from echo.backend import paths, profile
-from echo.theme import Colors, font
+from echo.theme import Colors, font, dialog_qss, apply_native_titlebar
 from echo.i18n import tr, lang, set_lang
 
 # 打包后写到 %APPDATA%\Echo\.env（安装目录在 C:\Program Files 下不可写），开发时写到项目根目录
@@ -74,27 +74,9 @@ def _write_env(updates: dict):
         f.write("\n".join(lines) + "\n")
 
 
-def dialog_qss() -> str:
-    """设置窗口和首次登录窗口共用的样式。"""
-    return f"""
-        QDialog {{ background:{Colors.WINDOW_BG}; }}
-        QLabel {{ color:{Colors.TEXT_PRIMARY}; }}
-        QLineEdit, QComboBox, QSpinBox {{
-            background:{Colors.SURFACE}; color:{Colors.TEXT_PRIMARY};
-            border:1px solid {Colors.BORDER}; border-radius:6px; padding:6px 8px;
-        }}
-        QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color:{Colors.ACCENT}; }}
-        QComboBox::drop-down {{ border:none; width:22px; }}
-        QPushButton {{
-            background:{Colors.SURFACE}; color:{Colors.TEXT_PRIMARY};
-            border:1px solid {Colors.BORDER}; border-radius:6px; padding:6px 18px;
-        }}
-        QPushButton:hover {{ border-color:{Colors.BORDER_STRONG}; }}
-        QDialogButtonBox QPushButton:first-child {{
-            background:{Colors.ACCENT}; color:{Colors.ON_ACCENT}; border:none; font-weight:600;
-        }}
-        QDialogButtonBox QPushButton:first-child:hover {{ background:{Colors.ACCENT_HOVER}; }}
-    """
+# dialog_qss 现在是从 echo.theme 导入进来的（上面那行 import）：设置窗 / 首次登录窗 /
+# 确认提示框都要共用同一份弹窗样式，放主题模块里更合适。这个名字留在本模块命名空间里，
+# profile_setup.py 原来 `from echo.widgets.settings import dialog_qss` 的写法不用跟着改。
 
 
 class SettingsDialog(QDialog):
@@ -102,6 +84,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(tr("Echo 设置", "Echo Settings"))
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        apply_native_titlebar(self)
         self._kv = _read_env()
         self._build()
 
