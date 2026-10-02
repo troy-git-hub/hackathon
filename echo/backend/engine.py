@@ -668,6 +668,10 @@ class EchoEngine:
         """把时间轴上的知识点和它们的前置关系整理成一张图，给课后「知识地图」用。
 
         边只保留两端都在图里的：前置概念如果没在时间轴上出现过，画出来会是个悬空的点。
+
+        前置关系覆盖率有限 —— 一个知识点可能既没有前置、也没被别人当前置，
+        那样它就是孤点，整张图看着只有几个散点。这种按讲课顺序接到前一个知识点上，
+        保证图是一节课完整的知识链，而不是只连了「有依赖关系」的那几个。
         """
         with self._lock:
             entries = list(self.entries)
@@ -684,6 +688,14 @@ class EchoEngine:
                     edge = [hit, topic]
                     if edge not in edges:
                         edges.append(edge)
+
+        linked = {t for edge in edges for t in edge}
+        prev = None
+        for topic in nodes:
+            if prev is not None and topic not in linked:
+                edges.append([prev, topic])
+                linked.add(topic)
+            prev = topic
         return {"nodes": nodes, "edges": edges}
 
     def _heuristic_echo(self) -> EchoReport:

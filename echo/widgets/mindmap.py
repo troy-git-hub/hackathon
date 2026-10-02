@@ -32,12 +32,16 @@ DRAG_SLOP = 4          # 超过这个位移才算拖动，不然算点击
 
 
 def status_style(status: str) -> tuple:
-    """状态 → (描边色, 底色, 文字色)。ok 的弱化处理，一眼扫过去能看出重点。"""
+    """状态 → (描边色, 底色, 文字色)。
+
+    已跟上的也画成正常的节点 —— 它们同样是这节课的知识点，
+    只靠颜色区分「要不要回看」，不能弱到看着像不存在（否则整张图会被看成只有错题）。
+    """
     if status == mindmap.STATUS_REVIEW:
         return Colors.DANGER, Colors.DANGER_BG, Colors.TEXT_PRIMARY
     if status == mindmap.STATUS_FIXED:
         return Colors.ACCENT, Colors.ACCENT_SOFT, Colors.TEXT_PRIMARY
-    return Colors.BORDER, Colors.SURFACE, Colors.TEXT_SECONDARY
+    return Colors.BORDER_STRONG, Colors.SURFACE, Colors.TEXT_PRIMARY
 
 
 class _Canvas(QWidget):
@@ -52,7 +56,7 @@ class _Canvas(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMouseTracking(True)
-        self.setMinimumHeight(240)
+        self.setMinimumHeight(300)      # 太小的话自动缩放会把节点压得看不清
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._nodes = []          # [(topic, status)]
         self._pos = {}            # topic -> QPointF（世界坐标）
@@ -265,10 +269,8 @@ class _Canvas(QWidget):
             p.drawPath(path)
 
             color = QColor(text)
-            if status == mindmap.STATUS_OK and not (selected or hover):
-                color.setAlpha(165)          # 全 ok 的节点弱化，图里一眼看到重点
             p.setPen(QPen(color))
-            p.setFont(font(11, 600 if status != mindmap.STATUS_OK else 400))
+            p.setFont(font(11, 600 if status != mindmap.STATUS_OK else 500))
             fm = QFontMetrics(p.font())
             p.drawText(rect, Qt.AlignCenter,
                        fm.elidedText(topic, Qt.ElideMiddle, int(NODE_W) - 16))
@@ -396,6 +398,8 @@ class MindMapPage(QWidget):
         # 课程内容
         title = (self._lesson.get("title") or "").strip()
         summary = (self._lesson.get("summary") or "").strip()
+        if len(summary) > 90:           # 摘要太长会把地图挤没，留两句就够
+            summary = summary[:90].rstrip() + "…"
         points = [str(h).strip() for h in (self._lesson.get("highlights") or []) if str(h).strip()]
         self.lesson_title.setText(title)
         self.lesson_title.setVisible(bool(title))

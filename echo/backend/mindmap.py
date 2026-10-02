@@ -105,6 +105,24 @@ def _levels(nodes: list, edges: list) -> dict:
     return level
 
 
+def _connect_isolated(nodes: list, edges: list) -> list:
+    """把没有任何连线的知识点按顺序接入链里。
+
+    前置关系覆盖率有限：一个知识点可能既没有前置、也没被别人当前置，那就是孤点，
+    整张图看着只剩几个散点，像「只画了有关系的几个」。按讲课顺序接上前一个，
+    保证图是一节课完整的知识链。
+    """
+    linked = {t for e in edges for t in e}
+    out = list(edges)
+    prev = None
+    for t in nodes:
+        if prev is not None and t not in linked:
+            out.append([prev, t])
+            linked.add(t)
+        prev = t
+    return out
+
+
 def build(lesson: dict, mistakes: list = None) -> dict:
     """把一节课变成可画的图：nodes（含状态/层级）+ edges。
 
@@ -131,7 +149,9 @@ def build(lesson: dict, mistakes: list = None) -> dict:
         if key in seen:
             continue
         seen.add(key)
-        edges.append({"from": a, "to": b})
+        edges.append([a, b])
+    edges = _connect_isolated(nodes_src, edges)
+    edges = [{"from": a, "to": b} for a, b in edges]
 
     levels = _levels(nodes_src, [(e["from"], e["to"]) for e in edges])
     nodes = []

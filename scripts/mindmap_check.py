@@ -101,6 +101,47 @@ check("复习链方向正确（根源在前）",
 check("每个非根节点都有父（图连通）",
       len(gh["edges"]) >= len(gh["nodes"]) - 1, f"{len(gh['edges'])} 边 / {len(gh['nodes'])} 点")
 
+# ---------- K. 连通性 ----------
+section("K. 图必须连通（不能有孤点）")
+
+
+def degrees(graph):
+    deg = {}
+    for e in graph["edges"]:
+        deg[e["from"]] = deg.get(e["from"], 0) + 1
+        deg[e["to"]] = deg.get(e["to"], 0) + 1
+    return deg
+
+
+sparse = mindmap.build({"skills_detail": [{"name": "甲"}, {"name": "乙"}, {"name": "丙"}],
+                        "graph": {"nodes": ["甲", "乙", "丙"],
+                                  "edges": [["甲", "乙"]]}}, [])
+d = degrees(sparse)
+check("存储图里的孤点被接进链里",
+      all(d.get(n["topic"], 0) > 0 for n in sparse["nodes"]), str(sparse["edges"]))
+check("原本的前置边还在", ["甲", "乙"] in [[e["from"], e["to"]] for e in sparse["edges"]])
+
+from echo.backend.engine import EchoEngine, _ConceptEntry   # noqa: E402
+from echo.mock_data import Concept                          # noqa: E402
+
+eng_g = EchoEngine(use_llm=False)
+eng_g.start()
+with eng_g._lock:
+    eng_g.entries = [
+        _ConceptEntry(0, Concept("00:01", "甲", [], [], "")),
+        _ConceptEntry(10, Concept("00:10", "乙", ["甲"], [], "")),
+        _ConceptEntry(20, Concept("00:20", "丙", [], [], "")),      # 孤点
+    ]
+gg = eng_g._concept_graph()
+gd = {t: 0 for t in gg["nodes"]}
+for a, b in gg["edges"]:
+    gd[a] = gd.get(a, 0) + 1
+    gd[b] = gd.get(b, 0) + 1
+check("引擎图里所有知识点都进图了", len(gg["nodes"]) == 3, str(gg["nodes"]))
+check("引擎图里没有孤点", all(v > 0 for v in gd.values()), str(gg["edges"]))
+check("真实前置边保留", ["甲", "乙"] in gg["edges"], str(gg["edges"]))
+eng_g.shutdown()
+
 # ---------- E ----------
 section("E. 知识点详情")
 d = mindmap.node_detail(LESSON, "贝叶斯公式", MISTAKES)
