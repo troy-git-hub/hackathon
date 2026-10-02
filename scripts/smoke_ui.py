@@ -407,6 +407,49 @@ for i in range(n_bubbles):
     assert all(l.height() > 0 for l in w.findChildren(QLabel) if l.text().strip()), \
         f"第 {i} 条气泡的文字高度是 0（没重排）"
 
+# 「讲给 Echo 听」的麦克风：按一下录、再按一下转成文字填进输入框，不自动发
+from echo.backend import voice_input                 # noqa: E402
+
+class _FakeRecorder:
+    def start(self): pass
+    def stop_and_transcribe(self): return "就是曲线的斜率"
+
+assert window.recall_mic.text() == "说", "麦克风按钮初始状态不对"
+_orig_recorder_cls = voice_input.Recorder
+voice_input.Recorder = lambda: _FakeRecorder()
+try:
+    window._toggle_recall_mic()                      # 第一次点：开始录
+    assert window._recall_recording is True, "点麦克风没有进入录音状态"
+    assert window.recall_mic.text() == "●", "录音中按钮没变成提示"
+    window._toggle_recall_mic()                       # 第二次点：停止并转写
+    for _ in range(40):
+        app.processEvents()
+        if window.recall_input.text():
+            break
+        QTest.qWait(10)
+    assert window.recall_input.text() == "就是曲线的斜率", \
+        f"转写结果没填进输入框：{window.recall_input.text()!r}"
+    assert window._recall_recording is False, "转写完没有退出录音状态"
+    assert window.recall_mic.isEnabled(), "转写完麦克风按钮没恢复可点"
+    assert window.recall_send.isEnabled(), "没有自动发送——转写完应该等学生自己点发送"
+finally:
+    voice_input.Recorder = _orig_recorder_cls
+window.recall_input.clear()
+
+# start() 抛异常（没有麦克风设备）时要弹提示，不能崩
+# dialogs.warn() 会 exec_() 一个 QMessageBox——headless 测试里没人点，会卡死，
+# 跟前面「确认框按钮」测试一样，临时顶掉 exec_ 别让它真的阻塞。
+from echo.widgets import dialogs                      # noqa: E402
+_orig_msgbox_exec = dialogs.QMessageBox.exec_
+dialogs.QMessageBox.exec_ = lambda self: 1
+voice_input.Recorder = lambda: (_ for _ in ()).throw(OSError("没有麦克风设备"))
+try:
+    window._toggle_recall_mic()
+    assert window._recall_recording is False, "麦克风打不开时不该进入录音状态"
+finally:
+    voice_input.Recorder = _orig_recorder_cls
+    dialogs.QMessageBox.exec_ = _orig_msgbox_exec
+
 # 课堂抽问卡片收起来后，窗口要缩回去（原来会留一大块空白）
 window._show_page(ui.LISTEN)
 for _ in range(10):        # _fit() 里有个 singleShot(0)，先等它落定再量基准

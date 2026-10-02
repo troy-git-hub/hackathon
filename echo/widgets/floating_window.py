@@ -13,6 +13,7 @@ Echo - 悬浮主窗口（学习工具风格）
   8 detail   历史课程详情：这节课讲了什么 + 要点 + 每个知识点掌握度
 """
 import html
+import logging
 import re
 import time
 import ctypes
@@ -51,6 +52,8 @@ from echo.components.avatar import AvatarView
 from echo.widgets.mindmap import MindMapPage
 from echo.widgets.profile_page import ProfilePage
 from echo.backend import mindmap, profile, recall
+
+log = logging.getLogger("echo.ui")
 
 SHADOW = 14
 WAIT_HINT = tr("播放网课后，Echo 会自动开始听", "Play your course and Echo will start listening automatically")
@@ -147,6 +150,7 @@ class FloatingWindow(QWidget):
     # 掌握验证：出题和判断都走 AI（后台线程），结果经信号回主线程
     _recall_planned = pyqtSignal(object)
     _recall_judged = pyqtSignal(object)
+    _recall_voice_done = pyqtSignal(str)
     # 随时问：回答是流式的，回调在后台线程，经信号回主线程追加文字
     _qa_delta = pyqtSignal(str)
     _qa_done = pyqtSignal(str)
@@ -183,6 +187,8 @@ class FloatingWindow(QWidget):
         self._recall_results = []    # AI 的判断
         self._recall_step = 0
         self._recall_busy = False
+        self._recall_recording = False      # 麦克风按一下开始、再按一下结束
+        self._recall_recorder = None
         # 「答题（随时问）」的状态：对话实例留着，课后回来接着问
         self._qa_chat = None
         self._qa_busy = False
@@ -199,6 +205,7 @@ class FloatingWindow(QWidget):
         self._prac_done.connect(self._on_prac_done)
         self._recall_planned.connect(self._on_recall_planned)
         self._recall_judged.connect(self._on_recall_judged)
+        self._recall_voice_done.connect(self._on_recall_voice_done)
         self._qa_delta.connect(self._on_qa_delta)
         self._qa_done.connect(self._on_qa_done)
         self._qa_err.connect(self._on_qa_err)
@@ -1686,10 +1693,58 @@ class FloatingWindow(QWidget):
             f"QLineEdit:focus {{ border-color: {Colors.ACCENT}; }}")
         self.recall_input.returnPressed.connect(self._send_recall)
         row.addWidget(self.recall_input, 1)
+        # 按一下录音、再按一下转成文字填进输入框——不自动发，学生看一眼再决定
+        # 用文字标签不用 🎤 这种表情符号：这类象形文字在这台机器的字体栈里
+        # 渲不出来，变成个看不懂的方块，跟别的图标按钮（问 AI / 发送）保持一致更稳妥。
+        self.recall_mic = _btn(tr("说", "Speak"), "Quiet", self._toggle_recall_mic,
+                               tr("按一下说话，Echo 把你说的话转成文字（不会自动发送）",
+                                  "Tap to speak — Echo converts it to text (won't send automatically)"))
+        self.recall_mic.setFixedWidth(40)
+        row.addWidget(self.recall_mic)
         self.recall_send = _btn(tr("发送", "Send"), "Accent", self._send_recall)
         row.addWidget(self.recall_send)
         lay.addLayout(row)
         return page
+
+    def _toggle_recall_mic(self):
+        """「讲给 Echo 听」的麦克风：按一下开始录，再按一下结束并转成文字。
+
+        不自动发送——转写不一定准，学生看一眼、改两个字再点「发送」更稳妥。
+        """
+        if getattr(self, "_recall_recording", False):
+            self._recall_recording = False
+            self.recall_mic.setText(tr("说", "Speak"))
+            self.recall_mic.setEnabled(False)
+            self.recall_input.setPlaceholderText(tr("转写中…", "Transcribing…"))
+            from echo.backend import voice_input
+            voice_input.transcribe_async(
+                self._recall_recorder,
+                on_done=lambda text: self._recall_voice_done.emit(text),
+                on_error=lambda msg: self._recall_voice_done.emit(""))
+            return
+        try:
+            from echo.backend import voice_input
+            self._recall_recorder = voice_input.Recorder()
+            self._recall_recorder.start()
+        except Exception as e:
+            log.warning("麦克风打不开: %s", e)
+            dialogs.warn(self, tr("麦克风打不开", "Couldn't open the microphone"),
+                        tr("检查一下有没有麦克风设备、系统有没有给 Echo 麦克风权限。",
+                           "Check that a microphone is connected and Echo has permission to use it."))
+            return
+        self._recall_recording = True
+        self.recall_mic.setText("●")
+        self.recall_input.setPlaceholderText(tr("在听你说…再按一下结束", "Listening… tap again to stop"))
+
+    def _on_recall_voice_done(self, text: str):
+        self.recall_mic.setEnabled(True)
+        self.recall_input.setPlaceholderText(tr("用你自己的话讲…", "Say it in your own words…"))
+        if text:
+            self.recall_input.setText(text)
+            self.recall_input.setFocus()
+        else:
+            self.recall_input.setPlaceholderText(
+                tr("没听清，再说一次，或者直接打字", "Didn't catch that — try again, or just type"))
 
     def _bubble(self, box_lay: QVBoxLayout, box: QWidget, text: str, who: str, tone: str = ""):
         """往对话区放一条气泡，返回正文那个 QLabel（流式回答要往上追加文字）。
