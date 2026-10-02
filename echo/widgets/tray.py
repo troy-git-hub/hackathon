@@ -10,6 +10,8 @@ Echo - 系统托盘
   · 全局快捷键（看全屏网课时也能用），被别的软件占用时自动换下一个候选：
         我掉队了        Ctrl+Alt+L → Ctrl+Alt+K → Ctrl+Alt+J → Ctrl+Shift+F9
         显示 / 隐藏     Ctrl+Alt+E → Ctrl+Alt+H → Ctrl+Shift+F10
+        圈一下问 AI     Ctrl+Alt+Q → Ctrl+Alt+W → Ctrl+Shift+F11
+  · 桌宠（desk_pet.py）由 main.py 挂到 tray.pet 上，退出时一起关掉
 """
 import ctypes
 import logging
@@ -19,19 +21,23 @@ from PyQt5.QtCore import Qt, QObject, QEvent, QAbstractNativeEventFilter, QRectF
 from PyQt5.QtGui import QIcon, QPixmap, QPainter, QPainterPath, QPen, QColor
 from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction, QApplication
 
+from echo.theme import Colors
+
 log = logging.getLogger("echo.tray")
 
 ACCENT = "#F2A93B"
 WM_HOTKEY = 0x0312
 MOD_ALT, MOD_CONTROL, MOD_NOREPEAT = 0x0001, 0x0002, 0x4000
 MOD_SHIFT = 0x0004
-VK_F9, VK_F10 = 0x78, 0x79
+VK_F9, VK_F10, VK_F11 = 0x78, 0x79, 0x7A
 # id: 候选列表 [(修饰键, 虚拟键码, 显示名)]，按顺序取第一个没被占用的
 HOTKEYS = {
     1: [(MOD_CONTROL | MOD_ALT, ord("L"), "Ctrl+Alt+L"), (MOD_CONTROL | MOD_ALT, ord("K"), "Ctrl+Alt+K"),
         (MOD_CONTROL | MOD_ALT, ord("J"), "Ctrl+Alt+J"), (MOD_CONTROL | MOD_SHIFT, VK_F9, "Ctrl+Shift+F9")],
     2: [(MOD_CONTROL | MOD_ALT, ord("E"), "Ctrl+Alt+E"), (MOD_CONTROL | MOD_ALT, ord("H"), "Ctrl+Alt+H"),
         (MOD_CONTROL | MOD_SHIFT, VK_F10, "Ctrl+Shift+F10")],
+    3: [(MOD_CONTROL | MOD_ALT, ord("Q"), "Ctrl+Alt+Q"), (MOD_CONTROL | MOD_ALT, ord("W"), "Ctrl+Alt+W"),
+        (MOD_CONTROL | MOD_SHIFT, VK_F11, "Ctrl+Shift+F11")],
 }
 
 
@@ -94,6 +100,44 @@ class _HotkeyFilter(QAbstractNativeEventFilter):
         return False, 0
 
 
+def _menu_qss() -> str:
+    """Win11 风格右键菜单：跟随深浅色、圆角、悬浮高亮。"""
+    hover = Colors.ACCENT_SOFT if hasattr(Colors, "ACCENT_SOFT") else Colors.SURFACE_HOVER
+    return f"""
+    QMenu {{
+        background-color: {Colors.SURFACE};
+        border: 1px solid {Colors.BORDER_STRONG};
+        border-radius: 8px;
+        padding: 5px;
+    }}
+    QMenu::item {{
+        padding: 7px 30px 7px 14px;
+        border-radius: 5px;
+        color: {Colors.TEXT_PRIMARY};
+        background: transparent;
+    }}
+    QMenu::item:selected {{
+        background-color: {Colors.SURFACE_HOVER};
+    }}
+    QMenu::item:disabled {{
+        color: {Colors.TEXT_DISABLED};
+    }}
+    QMenu::separator {{
+        height: 1px;
+        background: {Colors.BORDER};
+        margin: 4px 8px;
+    }}
+    QMenu::indicator {{
+        width: 14px; height: 14px; margin-left: 6px;
+    }}
+    QMenu::indicator:checked {{
+        background-color: {Colors.ACCENT};
+        border-radius: 3px;
+        border: 1px solid {Colors.ACCENT};
+    }}
+    """
+
+
 class EchoTray(QObject):
     def __init__(self, app: QApplication, win):
         super().__init__(win)
@@ -103,7 +147,8 @@ class EchoTray(QObject):
         self._pending = None          # 窗口隐藏时到达、等用户点开的结果：break / echo
         self._status = "listening"
         self._topic = ""
-        self.keys = {1: "", 2: ""}     # 实际注册成功的快捷键显示名
+        self.keys = {1: "", 2: "", 3: ""}     # 实际注册成功的快捷键显示名
+        self.pet = None               # 桌宠，main.py 里挂上
 
         app.setQuitOnLastWindowClosed(False)
         self._hotkeys_ok = self._register_hotkeys()
@@ -136,9 +181,14 @@ class EchoTray(QObject):
     # ---------------- 菜单 ----------------
     def _build_menu(self):
         m = QMenu()
-        self.act_toggle = m.addAction("隐藏 Echo", self.toggle_window)
+        m.setStyleSheet(_menu_qss())
+        # 圆角需要无边框 + 透明底；去掉系统阴影，用 QSS 圆角代替
+        m.setWindowFlags(m.windowFlags() | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
+        m.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.act_toggle = m.addAction("显示 / 隐藏 Echo", self.toggle_window)
         m.addSeparator()
         self.act_lost = m.addAction(f"我掉队了    {self.keys[1]}".rstrip(), self.lost)
+        m.addAction(f"圈一下问 AI    {self.keys[3]}".rstrip(), self.circle_ask)
         self.act_end = m.addAction("下课，生成回响", self.end_lesson)
         m.addAction("开始新的一节课", self.restart)
         m.addSeparator()
@@ -147,6 +197,8 @@ class EchoTray(QObject):
         self.act_offline.triggered.connect(self.toggle_offline)
         m.addAction(self.act_offline)
         m.addSeparator()
+        self.act_pet = m.addAction("显示桌宠", self.toggle_pet)
+        m.addAction("设置…", self.open_settings)
         m.addAction("退出 Echo", self.quit)
         m.aboutToShow.connect(self._sync_menu)
         self.menu = m
@@ -158,6 +210,8 @@ class EchoTray(QObject):
         self.act_offline.setChecked(bool(getattr(echo, "offline", False)))
         self.act_offline.setEnabled(hasattr(echo, "set_offline"))
         self.act_demo.setEnabled(hasattr(self.win, "_use_demo"))
+        self.act_pet.setVisible(self.pet is not None)
+        self.act_pet.setText("隐藏桌宠" if self.pet is not None and self.pet.isVisible() else "显示桌宠")
 
     # ---------------- 窗口显示 ----------------
     def show_window(self):
@@ -184,6 +238,19 @@ class EchoTray(QObject):
             self.hide_window()
         else:
             self.show_window()
+
+    def toggle_pet(self):
+        if self.pet is not None:
+            self.pet.setVisible(not self.pet.isVisible())
+
+    def open_settings(self):
+        from echo.widgets.settings import open_settings_dialog
+        open_settings_dialog(self.win)
+
+    def circle_ask(self):
+        """圈一下问 AI：截图时把 Echo 自己的窗口先藏起来。"""
+        from echo.widgets.snip import start_circle_ask
+        start_circle_ask(self.win.echo, hide=[self.win, self.pet])
 
     def _on_activated(self, reason):
         if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
@@ -226,6 +293,8 @@ class EchoTray(QObject):
         self._quitting = True
         self._unregister_hotkeys()
         self.tray.hide()
+        if self.pet is not None:
+            self.pet.close()
         self.win.close()             # 窗口 closeEvent 里会关掉后端线程
         self.app.quit()
 
@@ -297,3 +366,5 @@ class EchoTray(QObject):
             self.lost()
         elif hid == 2:
             self.toggle_window()
+        elif hid == 3:
+            self.circle_ask()

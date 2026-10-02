@@ -15,8 +15,9 @@ from ctypes import wintypes
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame, QSizePolicy, QStackedWidget,
-                             QProgressBar, QApplication, QShortcut, QScrollArea)
-from PyQt5.QtCore import Qt, QTimer, QRectF, QPoint
+                             QProgressBar, QApplication, QShortcut, QScrollArea,
+                             QLineEdit, QTextBrowser)
+from PyQt5.QtCore import Qt, QTimer, QRectF, QPoint, pyqtSignal
 from PyQt5.QtGui import QFont, QCursor, QPainter, QPainterPath, QColor, QBrush, QPen, QKeySequence, QPixmap
 
 # Win32 常量 — 无边框窗口边缘拖拽调整大小 + 最小化
@@ -118,6 +119,10 @@ def rich(text: str) -> str:
 
 
 class FloatingWindow(QWidget):
+    _ask_delta = pyqtSignal(str)
+    _ask_done = pyqtSignal(str)
+    _ask_err = pyqtSignal(str)
+
     def __init__(self):
         super().__init__()
         self.setObjectName("EchoRoot")
@@ -130,6 +135,8 @@ class FloatingWindow(QWidget):
         self.last_bp_concepts = []
         self._fixed = set()          # 学生点过「补上了」的断点知识点
         self._self_look = set()      # 学生点了「我自己看看」的断点知识点
+        self._ask = None             # 断点追问会话（LessonAsk）
+        self._ask_buf = ""
         self._auto_demo_msg = ""     # 音频采集失败、bridge 自动切示例课时的原因
         self._drag_pos = None
         self._page = LISTEN
@@ -400,6 +407,36 @@ class FloatingWindow(QWidget):
         ml.addWidget(self.reason_lbl)
         lay.addWidget(self.miss_card)
 
+        # 追问：学生针对自己的困惑继续问，带上课堂上下文问 DeepSeek
+        self.ask_frame = QFrame()
+        self.ask_frame.setObjectName("AskFrame")
+        self.ask_frame.setStyleSheet(
+            f"QFrame#AskFrame {{ background: {Colors.SURFACE}; border: 1px solid {Colors.BORDER};"
+            f"border-radius: {Radius.MD}px; }}")
+        al = QVBoxLayout(self.ask_frame)
+        al.setContentsMargins(Spacing.MD, Spacing.MD, Spacing.MD, Spacing.MD)
+        al.setSpacing(6)
+        al.addWidget(_label("还有哪里不懂？直接问我", f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;"))
+        qrow = QHBoxLayout()
+        self.ask_input = QLineEdit()
+        self.ask_input.setPlaceholderText("比如：为什么分母是 P(B)？")
+        self.ask_input.setStyleSheet(f"background:{Colors.SURFACE}; color:{Colors.TEXT_PRIMARY};"
+                                     f"border:1px solid {Colors.BORDER}; border-radius:6px; padding:7px 10px;")
+        self.ask_input.returnPressed.connect(self._ask_breakpoint)
+        qrow.addWidget(self.ask_input, 1)
+        self.ask_btn = _btn("问 AI", "Accent", self._ask_breakpoint)
+        self.ask_btn.setFixedHeight(34)
+        qrow.addWidget(self.ask_btn)
+        al.addLayout(qrow)
+        self.ask_view = QTextBrowser()
+        self.ask_view.setFixedHeight(150)
+        self.ask_view.setOpenExternalLinks(False)
+        self.ask_view.setStyleSheet(f"QTextBrowser {{ background:{Colors.CODE_BG}; border:1px solid {Colors.BORDER};"
+                                    f"border-radius:6px; padding:6px; color:{Colors.TEXT_PRIMARY}; }}")
+        self.ask_view.hide()
+        al.addWidget(self.ask_view)
+        lay.addWidget(self.ask_frame)
+
         row = QHBoxLayout()
         row.setSpacing(Spacing.SM)
         self.btn_fill = _btn("30 秒补上这一步", "Accent", self._go_lesson)
@@ -607,6 +644,8 @@ class FloatingWindow(QWidget):
         self.last_bp = None
         self._fixed.clear()
         self._self_look.clear()
+        self._ask = None
+        self._ask_buf = ""
         self.topic_lbl.setText("等待老师开讲…")
         self.mini_topic.setText("等待老师开讲…")
         self.summary_lbl.setText(WAIT_HINT)
@@ -663,6 +702,45 @@ class FloatingWindow(QWidget):
         self._cat("ok", 1500)
         self._show_page(LISTEN)
 
+    # ================= 断点追问 =================
+    def _ask_breakpoint(self):
+        q = self.ask_input.text().strip()
+        if not q or not self.ask_btn.isEnabled():
+            return
+        self.ask_input.clear()
+        self.ask_view.show()
+        self.ask_view.setHtml(f"<span style='color:{Colors.TEXT_SECONDARY}'>Echo 正在想…</span>")
+        self.ask_btn.setEnabled(False)
+        self._ask_buf = ""
+        bp = self.last_bp
+        if self._ask is None:
+            from echo.backend.vision import LessonAsk
+            extra = ""
+            if bp:
+                extra = (f"刚才定位到的知识断点：{bp.concept}\n缺失的这一步：{bp.missing}"
+                         f"\n为什么容易掉队：{bp.reason}")
+            self._ask = LessonAsk(self.echo.engine, extra)
+        self._ask.ask(q, self._ask_delta.emit, self._ask_done.emit, self._ask_err.emit)
+
+    def _on_ask_delta(self, d):
+        self._ask_buf += d
+        self._render_ask()
+
+    def _on_ask_done(self, a):
+        self._ask_buf = a
+        self._render_ask()
+        self.ask_btn.setEnabled(True)
+
+    def _on_ask_err(self, m):
+        self._ask_buf = f"<span style='color:{Colors.DANGER}'>{html.escape(m)}</span>"
+        self.ask_view.setHtml(self._ask_buf)
+        self.ask_btn.setEnabled(True)
+
+    def _render_ask(self):
+        body = html.escape(self._ask_buf).replace("\n", "<br>")
+        self.ask_view.setHtml(body)
+        self.ask_view.verticalScrollBar().setValue(self.ask_view.verticalScrollBar().maximum())
+
     def _ack(self, btn):
         """点击后短暂显示「已记录」，给学生一个确认感。"""
         if getattr(btn, "_orig_text", None) is None:
@@ -706,6 +784,13 @@ class FloatingWindow(QWidget):
     def _on_breakpoint(self, bp, concepts):
         self.last_bp = bp
         self.last_bp_concepts = list(concepts or [])
+        self._ask = None             # 新断点 = 新一轮追问
+        self._ask_buf = ""
+        if hasattr(self, "ask_view"):
+            self.ask_view.hide()
+        if hasattr(self, "ask_input"):
+            self.ask_input.clear()
+            self.ask_btn.setEnabled(True)
         self.bp_dots.stop()
         self.bp_loading.hide()
         self.break_cap.setText("你可能从这里开始掉队")

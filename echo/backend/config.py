@@ -28,6 +28,14 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 LLM_TIMEOUT = _int("ECHO_LLM_TIMEOUT", 40)
+# ---------- 「圈一下问 AI」视觉模型 ----------
+# 优先用 Qwen-VL（阿里云百炼），真正的视觉模型，能读屏/OCR 公式；没有 key 时退回 DeepSeek 视觉
+DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
+DASHSCOPE_BASE_URL = os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+QWEN_VL_MODEL = os.getenv("ECHO_QWEN_VL_MODEL", "qwen-vl-plus")   # 更准可换 qwen-vl-max
+VISION_MODEL = os.getenv("ECHO_VISION_MODEL", "deepseek-flash")
+# 桌宠皮肤：modern 矢量 AI 猫 + 声纹条 / classic 原来的表情包猫
+PET_SKIN = os.getenv("ECHO_PET_SKIN", "modern")
 
 # ---------- 课堂引擎 ----------
 # 每隔多少秒把新 transcript 交给 LLM 抽一次 concept

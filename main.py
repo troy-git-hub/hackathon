@@ -32,6 +32,7 @@ from PyQt5.QtWidgets import QApplication
 from echo.theme import apply_theme
 from echo.widgets.floating_window import FloatingWindow
 from echo.widgets.tray import EchoTray
+from echo.widgets.desk_pet import DeskPet
 
 
 def main():
@@ -51,7 +52,13 @@ def main():
     win.move(screen.center().x() - win.width() // 2,
              screen.center().y() - win.height() // 2)
     win.show()
-    tray = EchoTray(app, win)   # 托盘 + 关闭到托盘 + 全局快捷键（Ctrl+Alt+L 掉队 / Ctrl+Alt+E 显示隐藏）
+    tray = EchoTray(app, win)   # 托盘 + 关闭到托盘 + 全局快捷键（Ctrl+Alt+L 掉队 / Ctrl+Alt+E 显示隐藏 / Ctrl+Alt+Q 圈一下问 AI）
+
+    pet = DeskPet(win, tray)    # 桌宠：跟着课堂变表情，双击圈一下问 AI
+    pet.circle_ask.connect(tray.circle_ask)
+    tray.pet = pet
+    pet.place_default()
+    pet.show()
 
     sys.exit(app.exec_())
 
