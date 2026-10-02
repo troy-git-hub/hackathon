@@ -7,6 +7,7 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 from PyQt5.QtCore import Qt, QPointF, QRectF
 from PyQt5.QtGui import QFont, QPainter, QColor, QPen, QBrush
 
+from echo.i18n import tr
 from echo.theme import Colors, Radius, font, Spacing
 from echo.mock_data import Concept
 
@@ -57,9 +58,9 @@ class TimelineNode(QWidget):
         top.addWidget(name, 1)
 
         if is_now:
-            top.addWidget(self._tag("现在", Colors.PRIMARY, Colors.PRIMARY_LIGHT), 0, Qt.AlignTop)
+            top.addWidget(self._tag(tr("现在", "Now"), Colors.PRIMARY, Colors.PRIMARY_LIGHT), 0, Qt.AlignTop)
         elif is_breakpoint:
-            top.addWidget(self._tag("断点", Colors.WARNING, Colors.WARNING_SOFT), 0, Qt.AlignTop)
+            top.addWidget(self._tag(tr("断点", "Breakpoint"), Colors.WARNING, Colors.WARNING_SOFT), 0, Qt.AlignTop)
         layout.addLayout(top)
 
         if note:
@@ -127,7 +128,10 @@ class ConceptTimeline(QWidget):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(0)
 
-    def set_concepts(self, concepts, breakpoint_tc=None, note="老师快速跳过了推导"):
+    def set_concepts(self, concepts, breakpoint_tc=None, note=None):
+        # None = 没传，用默认文案；传 "" 表示这次就是不要备注
+        if note is None:
+            note = tr("老师快速跳过了推导", "The teacher skipped the derivation")
         while self._layout.count():
             item = self._layout.takeAt(0)
             w = item.widget()

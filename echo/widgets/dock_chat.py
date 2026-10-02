@@ -13,6 +13,7 @@ from PyQt5.QtGui import QColor, QPainter
 from PyQt5.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit,
                              QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
+from echo.i18n import tr
 from echo.theme import Colors, Radius, Spacing, font
 from echo.components.study import CatAvatar
 from echo.backend.vision import LessonAsk
@@ -109,7 +110,7 @@ class DockChat(QWidget):
         close = QPushButton("×")
         close.setObjectName("IconBtn")
         close.setCursor(Qt.PointingHandCursor)
-        close.setToolTip("收起")
+        close.setToolTip(tr("收起", "Collapse"))
         close.clicked.connect(self.hide)
         head.addWidget(close)
         lay.addLayout(head)
@@ -136,7 +137,7 @@ class DockChat(QWidget):
         # 输入行
         row = QHBoxLayout()
         self.input = QLineEdit(root)
-        self.input.setPlaceholderText("问一下这节课的内容…")
+        self.input.setPlaceholderText(tr("问一下这节课的内容…", "Ask about this lesson…"))
         self.input.setStyleSheet(
             f"QLineEdit {{ background: {Colors.SURFACE}; color: {Colors.TEXT_PRIMARY};"
             f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.SM}px; padding: 7px 10px;"
@@ -144,14 +145,14 @@ class DockChat(QWidget):
             f"QLineEdit:focus {{ border-color: {Colors.ACCENT}; }}")
         self.input.returnPressed.connect(self._send)
         row.addWidget(self.input, 1)
-        self.btn_send = QPushButton("发送")
+        self.btn_send = QPushButton(tr("发送", "Send"))
         self.btn_send.setObjectName("Accent")
         self.btn_send.setCursor(Qt.PointingHandCursor)
         self.btn_send.clicked.connect(self._send)
         row.addWidget(self.btn_send)
         lay.addLayout(row)
 
-        self._add_msg("有不懂的就问我，我给你讲讲～", False)
+        self._add_msg(tr("有不懂的就问我，我给你讲讲～", "Ask me anything you're unsure about."), False)
 
     # ================= 对外 =================
     def set_level(self, level):
@@ -207,7 +208,8 @@ class DockChat(QWidget):
             return
         self.input.clear()
         if self._ask is None:
-            self._add_msg("还没连上课堂（离线 / 未配置 key），暂时回答不了", False)
+            self._add_msg(tr("还没连上课堂（离线 / 未配置 key），暂时回答不了",
+                             "Not connected to a lesson (offline / no API key) — can't answer yet"), False)
             return
         self._add_msg(text, True)
         lb = self._add_msg("", False)

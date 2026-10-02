@@ -42,6 +42,11 @@ CONTEXT = """【课堂上下文】
 {transcript}"""
 
 QUICK_QUESTIONS = ["这是什么意思？", "这一步是怎么来的？", "能举个例子吗？", "和老师现在讲的有什么关系？"]
+# 英文界面用的同义问句（和上面一一对应）。这两个列表是界面文案，不是 AI 输出，
+# 所以放在这里由 snip 那边按语言挑。
+QUICK_QUESTIONS_EN = ["What does this mean?", "Where does this step come from?",
+                      "Can you give an example?",
+                      "How does this relate to what the teacher is covering?"]
 
 
 def lesson_context(engine, seconds: float = 120) -> str:

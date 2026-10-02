@@ -18,7 +18,9 @@ from PyQt5.QtGui import (QColor, QCursor, QFont, QFontMetrics, QGuiApplication, 
 from PyQt5.QtWidgets import (QApplication, QButtonGroup, QFrame, QGraphicsDropShadowEffect, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QTextBrowser, QVBoxLayout, QWidget)
 
-from echo.backend.vision import QUICK_QUESTIONS, VisionChat, lesson_context
+from echo.backend.vision import (QUICK_QUESTIONS, QUICK_QUESTIONS_EN, VisionChat,
+                                 lesson_context)
+from echo.i18n import tr
 from echo.theme import Colors, font
 
 log = logging.getLogger("echo.snip")
@@ -27,6 +29,10 @@ PALETTE = {
     "红": "#FF4D4F", "橙": "#FA8C16", "黄": "#FADB14", "绿": "#52C41A", "蓝": "#1677FF",
 }
 WIDTHS = {"细": 3, "中": 6, "粗": 11}
+# 上面两个字典的键是画布里用的内部标识，这里是显示给人看的名字
+COLOR_NAMES = {"红": ("红色", "Red"), "橙": ("橙色", "Orange"), "黄": ("黄色", "Yellow"),
+               "绿": ("绿色", "Green"), "蓝": ("蓝色", "Blue")}
+WIDTH_NAMES = {"细": ("细", "Thin"), "中": ("中", "Medium"), "粗": ("粗", "Thick")}
 _alive = []                      # 防止顶层窗口被 GC
 
 
@@ -76,7 +82,9 @@ class SnipOverlay(QWidget):
         lay.setSpacing(4)
 
         self.tools = QButtonGroup(self, exclusive=True)
-        for key, label in (("pen", "✏️ 画笔"), ("highlighter", "🖍️ 荧光笔"), ("text", "🅃 批注")):
+        for key, label in (("pen", tr("✏️ 画笔", "✏️ Pen")),
+                           ("highlighter", tr("🖍️ 荧光笔", "🖍️ Highlighter")),
+                           ("text", tr("🅃 批注", "🅃 Note"))):
             b = QPushButton(label)
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
@@ -92,7 +100,7 @@ class SnipOverlay(QWidget):
             b.setObjectName("sw")
             b.setFixedSize(20, 20)
             b.setCheckable(True)
-            b.setToolTip(name)
+            b.setToolTip(tr(*COLOR_NAMES.get(name, (name, name))))
             b.setCursor(Qt.PointingHandCursor)
             b.setStyleSheet(f"background:{c}; border-radius:9px;")
             self.colors.addButton(b)
@@ -104,7 +112,8 @@ class SnipOverlay(QWidget):
         self.widths = QButtonGroup(self, exclusive=True)
         for name, w in WIDTHS.items():
             b = QPushButton("●")
-            b.setToolTip(f"{name}线（{w}px）")
+            label = tr(*WIDTH_NAMES.get(name, (name, name)))
+            b.setToolTip(tr(f"{label}线（{w}px）", f"{label} line ({w}px)"))
             b.setStyleSheet(f"font-size:{9 + w}px; padding:2px 8px;")
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
@@ -114,19 +123,19 @@ class SnipOverlay(QWidget):
         self.widths.buttons()[1].setChecked(True)
 
         lay.addStretch()
-        undo = QPushButton("↶ 撤销")
+        undo = QPushButton(tr("↶ 撤销", "↶ Undo"))
         undo.setCursor(Qt.PointingHandCursor)
         undo.clicked.connect(self._undo)
         lay.addWidget(undo)
-        clear = QPushButton("清空")
+        clear = QPushButton(tr("清空", "Clear"))
         clear.setCursor(Qt.PointingHandCursor)
         clear.clicked.connect(self._clear)
         lay.addWidget(clear)
-        cancel = QPushButton("取消")
+        cancel = QPushButton(tr("取消", "Cancel"))
         cancel.setCursor(Qt.PointingHandCursor)
         cancel.clicked.connect(self._cancel)
         lay.addWidget(cancel)
-        self.confirm = QPushButton("✓ 问 AI")
+        self.confirm = QPushButton(tr("✓ 问 AI", "✓ Ask AI"))
         self.confirm.setObjectName("confirm")
         self.confirm.setCursor(Qt.PointingHandCursor)
         self.confirm.setEnabled(False)
@@ -136,7 +145,10 @@ class SnipOverlay(QWidget):
         self.bar = bar
         bar.adjustSize()
         bar.move((self.width() - bar.width()) // 2, 14)
-        self.hint = QLabel("用画笔圈出看不懂的地方，或点「批注」写下你的问题，再点「问 AI」", self)
+        self._hint_idle = tr("用画笔圈出看不懂的地方，或点「批注」写下你的问题，再点「问 AI」",
+                             "Circle what you don't understand, or use Note to write your question, then tap Ask AI")
+        self._hint_ready = tr("点「✓ 问 AI」让 Echo 讲解", "Tap \"✓ Ask AI\" to have Echo explain")
+        self.hint = QLabel(self._hint_idle, self)
         self.hint.setStyleSheet("color:#E6E6E8; font-size:13px; background:rgba(22,22,26,200);"
                                 "border-radius:8px; padding:4px 12px;")
         self.hint.adjustSize()
@@ -166,8 +178,8 @@ class SnipOverlay(QWidget):
 
     def _refresh_confirm(self):
         self.confirm.setEnabled(bool(self.strokes or self.notes))
-        self.hint.setText("点「✓ 问 AI」让 Echo 讲解" if (self.strokes or self.notes)
-                          else "用画笔圈出看不懂的地方，或点「批注」写下你的问题，再点「问 AI」")
+        self.hint.setText(self._hint_ready if (self.strokes or self.notes)
+                          else self._hint_idle)
         self.hint.adjustSize()
         self._hint_pos()
 
@@ -224,7 +236,7 @@ class SnipOverlay(QWidget):
         self._last_note_pt = pos
         ed = QLineEdit(self)
         ed.setFont(font(14))
-        ed.setPlaceholderText("写下你的问题…")
+        ed.setPlaceholderText(tr("写下你的问题…", "Write your question…"))
         ed.setStyleSheet(f"background:#FFFFFF; color:#1A1A1A; border:1px solid {self.color};"
                          "border-radius:6px; padding:4px 8px;")
         ed.setFixedWidth(260)
@@ -417,7 +429,7 @@ class AskPanel(QWidget):
         v.setSpacing(10)
 
         head = QHBoxLayout()
-        self.title = QLabel("问问 Echo")
+        self.title = QLabel(tr("问问 Echo", "Ask Echo"))
         self.title.setFont(font(14, QFont.DemiBold))
         head.addWidget(self.title)
         head.addStretch()
@@ -439,11 +451,13 @@ class AskPanel(QWidget):
         cl = QVBoxLayout(self.chips)
         cl.setContentsMargins(0, 0, 0, 0)
         cl.setSpacing(6)
-        for i, q in enumerate(QUICK_QUESTIONS):
+        for i, (q, q_en) in enumerate(zip(QUICK_QUESTIONS, QUICK_QUESTIONS_EN)):
             if i % 2 == 0:
                 row = QHBoxLayout()
                 row.setSpacing(6)
                 cl.addLayout(row)
+            # 这行同时也是要发给 AI 的问题，所以按当前语言发
+            q = tr(q, q_en)
             b = QPushButton(q)
             b.setObjectName("chip")
             b.setFont(font(12))
@@ -463,10 +477,11 @@ class AskPanel(QWidget):
         inp = QHBoxLayout()
         self.input = QLineEdit()
         self.input.setFont(font(13))
-        self.input.setPlaceholderText("想问什么？比如：为什么分母是 P(B)？")
+        self.input.setPlaceholderText(tr("想问什么？比如：为什么分母是 P(B)？",
+                                         "What do you want to ask? e.g. why is the denominator P(B)?"))
         self.input.returnPressed.connect(lambda: self.send(self.input.text()))
         inp.addWidget(self.input, 1)
-        self.btn_send = QPushButton("问")
+        self.btn_send = QPushButton(tr("问", "Ask"))
         self.btn_send.setObjectName("send")
         self.btn_send.setFont(font(13, QFont.DemiBold))
         self.btn_send.setCursor(Qt.PointingHandCursor)
@@ -475,12 +490,13 @@ class AskPanel(QWidget):
         v.addLayout(inp)
 
         foot = QHBoxLayout()
-        self.btn_mark = QPushButton("记为「有点懵」")
+        self.btn_mark = QPushButton(tr("记为「有点懵」", "Mark as \"a bit lost\""))
         self.btn_mark.setObjectName("ghost")
-        self.btn_mark.setToolTip("记到课堂时间轴，下课的回响里会提醒你复习")
+        self.btn_mark.setToolTip(tr("记到课堂时间轴，下课的回响里会提醒你复习",
+                                    "Marks it on the lesson timeline — the review will remind you"))
         self.btn_mark.setCursor(Qt.PointingHandCursor)
         self.btn_mark.clicked.connect(self._mark_warn)
-        self.btn_copy = QPushButton("复制回答")
+        self.btn_copy = QPushButton(tr("复制回答", "Copy answer"))
         self.btn_copy.setObjectName("ghost")
         self.btn_copy.setCursor(Qt.PointingHandCursor)
         self.btn_copy.clicked.connect(lambda: QGuiApplication.clipboard().setText(self.answer))
@@ -516,7 +532,7 @@ class AskPanel(QWidget):
         self.view.show()
         self.view.setMinimumHeight(300)
         self.transcript_html += (f"<p style='color:{Colors.ACCENT}; font-weight:600; margin:10px 0 4px 0'>"
-                                 f"你：{html.escape(q)}</p>")
+                                 f"{tr('你：', 'You: ')}{html.escape(q)}</p>")
         self.answer = ""
         self._set_busy(True)
         self._render(thinking=True)
@@ -525,12 +541,14 @@ class AskPanel(QWidget):
 
     def _set_busy(self, busy):
         self.btn_send.setEnabled(not busy)
-        self.title.setText("Echo 正在看你圈的地方…" if busy else "问问 Echo")
+        self.title.setText(tr("Echo 正在看你圈的地方…", "Echo is looking at what you circled…")
+                           if busy else tr("问问 Echo", "Ask Echo"))
 
     def _render(self, thinking=False):
         body = html.escape(_plain(self.answer)).replace("\n", "<br>")
         if thinking and not self.answer:
-            body = f"<span style='color:{Colors.TEXT_SECONDARY}'>Echo 正在看你圈的地方…</span>"
+            body = (f"<span style='color:{Colors.TEXT_SECONDARY}'>"
+                    f"{tr('Echo 正在看你圈的地方…', 'Echo is looking at what you circled…')}</span>")
         self.view.setHtml(self.transcript_html + f"<p style='line-height:150%; margin:0'>{body}</p>")
         sb = self.view.verticalScrollBar()
         sb.setValue(sb.maximum())
@@ -546,7 +564,7 @@ class AskPanel(QWidget):
         self.view.setHtml(self.transcript_html)
         self.view.verticalScrollBar().setValue(self.view.verticalScrollBar().maximum())
         self._set_busy(False)
-        self.input.setPlaceholderText("还有哪里不懂？接着问")
+        self.input.setPlaceholderText(tr("还有哪里不懂？接着问", "Still unclear on something? Ask away"))
         self.btn_copy.show()
         if self._course_active() and self.btn_mark.isEnabled():
             self.btn_mark.show()
@@ -573,13 +591,13 @@ class AskPanel(QWidget):
             engine = getattr(self.bridge, "engine", None)
             cur = engine.current_concept() if engine else None
             store.add([{
-                "topic": (cur.topic if cur else None) or "课堂拍题",
-                "missing": self._last_q or "课堂上的疑问",
+                "topic": (cur.topic if cur else None) or tr("课堂拍题", "Question from class"),
+                "missing": self._last_q or tr("课堂上的疑问", "A question from class"),
                 "micro_lesson": self.answer,
                 "reason": "", "known": "", "step": "", "now": "",
                 "status": "review", "reviewed": False,
             }])
-            self.btn_mark.setText("已记下 ✓")
+            self.btn_mark.setText(tr("已记下 ✓", "Noted ✓"))
             self.btn_mark.setEnabled(False)
         except Exception as e:
             log.warning("记录拍题失败: %s", e)
