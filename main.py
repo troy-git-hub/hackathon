@@ -12,14 +12,19 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # PyQt5 与 ctranslate2 的 native 库加载顺序冲突：先 import PyQt5 再加载 WhisperModel 会访问违例
 # 必须在主线程、QApplication 创建之前、且未 import 任何 PyQt5 模块时加载
 def _preload_whisper():
+    """在 import PyQt5 之前预加载 Whisper，避开 native 库冲突。
+    把模型存到 WhisperASR._model，避免 _startup 再加载一次（双倍内存会导致 mkl_malloc 失败）。
+    """
     try:
         os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
         from echo.backend import config
+        from echo.backend.sources import _WhisperWorker
         from faster_whisper import WhisperModel
-        WhisperModel(config.whisper_model_path(), device=config.WHISPER_DEVICE,
-                      compute_type=config.WHISPER_COMPUTE,
-                      cpu_threads=min(config.WHISPER_THREADS, os.cpu_count() or 1),
-                      local_files_only=True)
+        _WhisperWorker._model = WhisperModel(
+            config.whisper_model_path(), device=config.WHISPER_DEVICE,
+            compute_type=config.WHISPER_COMPUTE,
+            cpu_threads=min(config.WHISPER_THREADS, os.cpu_count() or 1),
+            local_files_only=True)
         print(f"[Echo] Whisper 预加载完成: {config.WHISPER_MODEL}")
     except Exception as e:
         print(f"[Echo] Whisper 预加载失败（将在后台重试）: {e}")
