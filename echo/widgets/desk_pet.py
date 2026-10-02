@@ -1,13 +1,14 @@
 """
-Echo - 桌面宠物（经典表情包猫 + 真实声纹条）
+Echo - 桌面宠物（表情包猫 + 真实声纹条，可收起成侧边小球）
 
-assets/emojis 里的表情包猫，跟着课堂状态变表情，
-旁边声纹条跟着老师声音真实起伏；头顶气泡报「老师在讲 X」，找到断点时提醒你点它。
+展开时用 assets/emojis 里的表情包图；拖到屏幕左/右边缘会收起成一颗挂在侧边的小球
+（360 加速球式吸附），小球里是矢量 CatAvatar 猫头（会眨眼）。旁边声纹条跟着老师声音
+真实起伏；头顶气泡报「老师在讲 X」，找到断点时提醒你点它。
 
 交互：
     单击        打开 / 收起 Echo 面板
     双击        圈一下问 AI
-    拖动        挪位置
+    拖动        挪位置（贴近屏幕边缘松手 → 收起成侧边球）
     鼠标来回蹭  摸摸它（会冒爱心）
     右键        圈一下问 AI / 跟上了 / 有点懵 / 我掉队了 / 设置 / 隐藏桌宠
 """
@@ -17,7 +18,7 @@ import random
 import time
 
 from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QCursor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
+from PyQt5.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
 from PyQt5.QtWidgets import QApplication, QMenu, QWidget
 
 from echo.theme import Colors, font, style_menu
@@ -78,13 +79,23 @@ def _load_face(path) -> QPixmap:
 class DeskPet(QWidget):
     circle_ask = pyqtSignal()        # 要求开始圈选（由外部接到 start_circle_ask）
 
+    # 桌宠心情 → CatAvatar 情绪（矢量猫头，跟主页/标题栏同一套画法，会眨眼）
+    _MOOD_EMO = {
+        "idle": "idle", "listening": "idle", "thinking": "thinking",
+        "alert": "warn", "ok": "ok", "fixed": "ok", "love": "ok",
+        "warn": "warn", "lost": "lost", "done": "ok",
+    }
+    # 收起后挂在屏幕侧边的「加速球」直径
+    ORB = 48
+    DOCK_MARGIN = 40
+
     def __init__(self, win=None, tray=None):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.win, self.tray = win, tray
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip("Echo · 单击打开面板 · 双击圈一下问 AI · 右键更多")
+        self.setToolTip("Echo · 单击打开面板 · 双击圈一下问 AI · 拖到屏幕边缘收起")
 
         self.mood = "idle"
         self._mood_until = 0.0
@@ -99,33 +110,28 @@ class DeskPet(QWidget):
         self._jump_t = -10.0
         self._shake_t = -10.0
         self._t0 = time.time()
-        self._blink_t = time.time() + random.uniform(2, 5)
-        self._blinking = False
         self._phase = 0.0
         self._level = 0.0          # 真实音频响度（0..1）
         self._level_env = 0.0      # 平滑后的响度包络
 
-        # 尺寸 / 布局：经典表情包猫（左边）+ 真实声纹条（右边）
+        # 尺寸 / 布局：表情包猫（左边）+ 真实声纹条（右边）；收起后只剩一个球
         self.CAT, self.W, self.H = 88, 176, 172
         self.GAP, self.VBAR_W = 10, 70
         self.VN = 9
         self._vbar = [0.05] * self.VN
+        self.docked = False          # True = 收起成侧边加速球
+        self.dock_side = ""          # "left" / "right"
+        self.setFixedSize(self.W, self.H)
+
+        # 展开态用 assets/emojis 下的表情包图；收起态用矢量 CatAvatar（自动眨眼）。
         self.faces = {}
         for k, f in FACES.items():
             pm = _load_face(os.path.join(ASSETS, f))
             if not pm.isNull():
                 self.faces[k] = pm
-        self.setFixedSize(self.W, self.H)
-        self._dock_side = None
-        self._dock_hover = False
-        self._dock_width, self._dock_height = 38, 118
-        self._flyout_width, self._flyout_height = 230, 118
-        self._dock_screen = None
-        self._dock_avatar = CatAvatar(56, self)
-        self._dock_avatar.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self._dock_avatar.hide()
-        self._collapse_timer = QTimer(self, singleShot=True, interval=300,
-                                      timeout=self._collapse_if_outside)
+        self.cat = CatAvatar(self.CAT, self)
+        self.cat.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._layout_cat()
 
         self._press = None
         self._dragged = False
@@ -159,83 +165,20 @@ class DeskPet(QWidget):
         self.update()
 
     def set_mood(self, mood, hold_ms=0):
+        self.mood = mood
         if hold_ms:
-            self.mood = mood
             self._mood_until = time.time() + hold_ms / 1000
         else:
             self._base_mood = mood
+        self._sync_cat_emotion()
         if mood in ("alert", "fixed", "ok", "love", "done"):
             self._jump_t = time.time()
         if mood in ("lost", "alert"):
             self._shake_t = time.time()
-        self._sync_dock_avatar()
         self.update()
 
-    def _sync_dock_avatar(self):
-        mood = self.mood
-        emotion = {"alert": "lost", "lost": "lost", "warn": "warn",
-                   "thinking": "thinking", "ok": "ok", "fixed": "fixed",
-                   "done": "ok", "love": "ok"}.get(mood, "idle")
-        if self._dock_avatar._emotion != emotion:
-            self._dock_avatar.set_emotion(emotion)
-
-    def _dock_geometry(self):
-        screen = self._dock_screen or QApplication.primaryScreen()
-        return screen.availableGeometry()
-
-    def _set_dock_hover(self, hover):
-        if not self._dock_side or self._dock_hover == hover:
-            return
-        g = self._dock_geometry()
-        center_y = self.y() + self.height() // 2
-        self._dock_hover = hover
-        w = self._flyout_width if hover else self._dock_width
-        h = self._flyout_height if hover else self._dock_height
-        self.setFixedSize(w, h)
-        x = g.left() if self._dock_side == "left" else g.right() - w + 1
-        y = max(g.top(), min(center_y - h // 2, g.bottom() - h + 1))
-        self.move(x, y)
-        avatar_size = 56 if hover else 30
-        self._dock_avatar.setFixedSize(avatar_size, avatar_size)
-        avatar_x = (39 if self._dock_side == "left" else w - 95) if hover else 4
-        avatar_y = 26 if hover else 80
-        self._dock_avatar.move(avatar_x, avatar_y)
-        self._dock_avatar.show()
-        self.update()
-
-    def _dock(self, side, screen):
-        self._dock_side = side
-        self._dock_screen = screen
-        self._dock_hover = True
-        self._set_dock_hover(False)
-
-    def _undock(self, cursor_pos=None):
-        if not self._dock_side:
-            return
-        self._collapse_timer.stop()
-        self._dock_side = None
-        self._dock_hover = False
-        self._dock_avatar.hide()
-        center_y = self.y() + self.height() // 2
-        self.setFixedSize(self.W, self.H)
-        x = cursor_pos.x() - self.W // 2 if cursor_pos is not None else self.x()
-        y = cursor_pos.y() - self.H // 2 if cursor_pos is not None else center_y - self.H // 2
-        self.move(x, y)
-        self.update()
-
-    def _snap_if_at_side(self):
-        screen = QApplication.screenAt(self.frameGeometry().center()) or self.screen()
-        if screen is None:
-            return
-        g = screen.availableGeometry()
-        if self.x() <= g.left() + 12:
-            self._dock("left", screen)
-        elif self.x() + self.width() >= g.right() - 11:
-            self._dock("right", screen)
-
-    def _collapse_if_outside(self):
-        if self._dock_side and not self.rect().contains(self.mapFromGlobal(QCursor.pos())):
-            self._set_dock_hover(False)
+    def _sync_cat_emotion(self):
+        self.cat.set_emotion(self._MOOD_EMO.get(self.mood, "idle"))
 
     def place_default(self):
         g = QApplication.primaryScreen().availableGeometry()
@@ -243,6 +186,48 @@ class DeskPet(QWidget):
         if self.win is not None and self.win.isVisible():
             x = self.win.x() - self.width() + 30
         self.move(max(g.left(), x), g.bottom() - self.height() - 4)
+
+    # ================= 侧边收起（360 加速球式吸附） =================
+    def _layout_cat(self):
+        """收起态显示矢量猫头小球；展开态用 emojis 图，隐藏矢量猫头。"""
+        if self.docked:
+            s = int(self.ORB * 0.8)
+            self.cat.setFixedSize(s, s)
+            self.cat.move((self.ORB - s) // 2, (self.ORB - s) // 2)
+            self.cat.show()
+        else:
+            self.cat.hide()
+
+    def _orb_rect(self) -> QRectF:
+        return QRectF(2, 2, self.ORB - 4, self.ORB - 4)
+
+    def _set_docked(self, docked, side=""):
+        """切换收起 / 展开；side ∈ {"left", "right"}。"""
+        self.docked = docked
+        self.dock_side = side if docked else ""
+        self.setFixedSize(self.ORB if docked else self.W,
+                          self.ORB if docked else self.H)
+        self._layout_cat()
+        self.update()
+
+    def _snap_dock(self):
+        """贴到屏幕左 / 右边缘，竖直方向不跑出屏。"""
+        g = QApplication.primaryScreen().availableGeometry()
+        x = g.left() if self.dock_side == "left" else g.right() - self.width()
+        y = max(g.top(), min(self.y(), g.bottom() - self.height()))
+        self.move(x, y)
+
+    def _maybe_dock(self):
+        """拖动松手后：贴近屏幕边缘就收起成侧边球，否则保持展开。"""
+        g = QApplication.primaryScreen().availableGeometry()
+        if self.x() - g.left() < self.DOCK_MARGIN:
+            self._set_docked(True, "left")
+        elif g.right() - (self.x() + self.width()) < self.DOCK_MARGIN:
+            self._set_docked(True, "right")
+        else:
+            self._set_docked(False, "")
+        if self.docked:
+            self._snap_dock()
 
     # ================= 后端事件 =================
     def _on_status(self, st):
@@ -344,12 +329,10 @@ class DeskPet(QWidget):
         if self._press and e.buttons() & Qt.LeftButton:
             d = e.globalPos() - self._press[0]
             if d.manhattanLength() > 5:
+                if self.docked and not self._dragged:
+                    self._set_docked(False, "")   # 开始拖动：先把收起的小球展开
                 self._dragged = True
             if self._dragged:
-                if self._dock_side:
-                    self._undock(e.globalPos())
-                    self._press = (e.globalPos(), self.pos())
-                    return
                 self.move(self._press[1] + d)
             return
         if self._cat_rect().contains(QPointF(e.pos())):
@@ -365,9 +348,9 @@ class DeskPet(QWidget):
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.LeftButton and self._press:
             if not self._dragged:
-                self._click_timer.start()
+                self._click_timer.start()   # 单击：打开 / 收起 Echo 面板
             else:
-                self._snap_if_at_side()
+                self._maybe_dock()          # 拖完松手：贴近屏幕边缘就收起成侧边球
             self._press = None
 
     def mouseDoubleClickEvent(self, e):
@@ -381,26 +364,16 @@ class DeskPet(QWidget):
 
     def enterEvent(self, e):
         self._pet_x, self._pet_dist = None, 0.0
-        if self._dock_side:
-            self._collapse_timer.stop()
-            self._set_dock_hover(True)
 
     def leaveEvent(self, e):
         self._pet_x = None
-        if self._dock_side and not self._press:
-            self._collapse_timer.start()
 
     # ================= 动画 =================
     def _tick(self):
         now = time.time()
         if self.mood != self._base_mood and now > self._mood_until:
             self.mood = self._base_mood
-            self._sync_dock_avatar()
-        if now > self._blink_t:
-            self._blinking = True
-            if now > self._blink_t + 0.12:
-                self._blinking = False
-                self._blink_t = now + random.uniform(2.5, 6)
+            self._sync_cat_emotion()
         self._hearts = [h for h in self._hearts if now - h[2] < 1.4]
         # 真实声纹条：跟随音频响度，说话时快起、停顿时慢落
         if self._level > self._level_env:
@@ -419,13 +392,33 @@ class DeskPet(QWidget):
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
-        if self._dock_side:
-            self._draw_dock(p)
-            return
         now = time.time()
+        if self.docked:
+            self._draw_orb(p)
+        else:
+            self._draw_full(p, now)
+
+    def _draw_orb(self, p):
+        """收起态：屏幕侧边的小球（加速球样式），猫头由子控件画在球上。"""
+        r = self._orb_rect()
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(0, 0, 0, 50))
+        p.drawEllipse(QRectF(r.center().x() - r.width() * 0.42, r.bottom() - 1, r.width() * 0.84, 7))
+        p.setPen(QPen(QColor(Colors.BORDER_STRONG), 1.5))
+        p.setBrush(QColor(Colors.SURFACE))
+        p.drawEllipse(r)
+        if self.badge:
+            br = QRectF(r.right() - 15, r.top() + 1, 18, 18)
+            p.setBrush(QColor(Colors.ACCENT))
+            p.setPen(QPen(QColor("#FFFFFF"), 2))
+            p.drawEllipse(br)
+            p.setPen(QColor("#FFFFFF"))
+            p.setFont(font(11, QFont.Bold))
+            p.drawText(br, Qt.AlignCenter, "!")
+
+    def _draw_full(self, p, now):
         t = now - self._t0
         cat = self._cat_rect()
-
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(0, 0, 0, 45))
         p.drawEllipse(QRectF(cat.center().x() - 32, cat.bottom() - 2, 64, 8))
@@ -452,6 +445,15 @@ class DeskPet(QWidget):
             p.setFont(font(12, QFont.Bold))
             p.drawText(r, Qt.AlignCenter, "!")
 
+        # 思考中：头顶三个点
+        if self.status in ("analyzing", "summarizing", "loading_asr") and now > self._bubble_until:
+            t = now - self._t0
+            p.setPen(Qt.NoPen)
+            for i in range(3):
+                a = 0.35 + 0.65 * max(0.0, math.sin(t * 4 - i * 0.8))
+                p.setBrush(QColor(242, 169, 59, int(255 * a)))
+                p.drawEllipse(QPointF(cat.center().x() - 14 + i * 14, cat.top() + 2), 4, 4)
+
         for x, y, born in self._hearts:
             k = (now - born) / 1.4
             p.setPen(Qt.NoPen)
@@ -461,42 +463,7 @@ class DeskPet(QWidget):
         if self.bubble and now < self._bubble_until:
             self._draw_bubble(p, self.bubble, cat, min(1.0, (self._bubble_until - now) / 0.3))
 
-    def _draw_dock(self, p):
-        """圆角声纹签：上方真实音量，下方同源矢量猫；悬停显示消息。"""
-        w, h = self.width(), self.height()
-        panel = QRectF(0, 3, w, h - 6)
-        p.setPen(QPen(QColor(Colors.BUBBLE_BORDER), 1))
-        p.setBrush(QColor(Colors.BUBBLE_BG))
-        p.drawRoundedRect(panel, 13, 13)
-        bar_x = 8 if self._dock_side == "left" else w - 30
-        for i, v in enumerate(self._vbar):
-            length = 4 + 18 * v
-            y = 12 + i * 7.5
-            p.setPen(Qt.NoPen)
-            col = QColor(Colors.ACCENT)
-            col.setAlpha(105 + int(135 * v))
-            p.setBrush(col)
-            p.drawRoundedRect(QRectF(bar_x + (22 - length) / 2, y, length, 4), 2, 2)
-        if not self._dock_hover:
-            return
-        text_x = 103 if self._dock_side == "left" else 12
-        text_w = 118
-        p.setPen(QColor(Colors.TEXT_SECONDARY))
-        p.setFont(font(10, QFont.DemiBold))
-        p.drawText(QRectF(text_x, 18, text_w, 18), Qt.AlignLeft | Qt.AlignVCenter,
-                   "ECHO · 正在说")
-        p.setPen(QColor(Colors.TEXT_PRIMARY))
-        p.setFont(font(12, QFont.DemiBold))
-        topic = self.bubble if time.time() < self._bubble_until else (
-            f"老师在讲：{self.topic}" if self.topic else "我在听，随时问我")
-        p.drawText(QRectF(text_x, 42, text_w, 50), Qt.AlignLeft | Qt.AlignVCenter |
-                   Qt.TextWordWrap, topic)
-        if self.badge:
-            p.setBrush(QColor(Colors.ACCENT))
-            p.setPen(Qt.NoPen)
-            p.drawEllipse(QRectF(w - 12 if self._dock_side == "left" else 4, 7, 7, 7))
-
-    # ---------- classic：表情包猫 ----------
+    # ---------- classic：表情包猫（展开态用 assets/emojis 图片） ----------
     def _draw_classic(self, p, cat, breathe, dy, dx):
         pm = self.faces.get(self.mood) or self.faces.get("idle")
         if pm is not None:
@@ -507,15 +474,6 @@ class DeskPet(QWidget):
         else:
             p.setBrush(QColor("#F2A93B"))
             p.drawEllipse(cat.adjusted(10, 20 + dy, -10, dy))
-        # 思考中：头顶三个点
-        now = time.time()
-        if self.status in ("analyzing", "summarizing", "loading_asr") and now > self._bubble_until:
-            t = now - self._t0
-            p.setPen(Qt.NoPen)
-            for i in range(3):
-                a = 0.35 + 0.65 * max(0.0, math.sin(t * 4 - i * 0.8))
-                p.setBrush(QColor(242, 169, 59, int(255 * a)))
-                p.drawEllipse(QPointF(cat.center().x() - 14 + i * 14, cat.top() + 2), 4, 4)
 
     def _draw_voice(self, p: QPainter, area: QRectF):
         """真实声纹条：柱高随真实音频响度起伏，中间高两边低。"""
