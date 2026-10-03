@@ -1014,6 +1014,10 @@ class FloatingWindow(QWidget):
         """错题复习页：今天该复习的 + 过几天再复习的。"""
         self._render_review()
         self._show_page(REVIEW, push=push)
+        # AI 说明是进入复习页时的一次性补充，不属于打分操作。
+        # 打分会重绘列表；若请求失败或尚未返回，放在 _render_review 里
+        # 就会随每次点击重新启动一个后台请求。
+        self._kick_why_matters(store.load())
 
     def _review_root(self, topic):
         """回响页点「去复习」：针对最该复习的根源概念，让 AI 出题练一下。"""
@@ -1067,7 +1071,6 @@ class FloatingWindow(QWidget):
                 self.review_list_lay.addWidget(self._review_card(it, due=False))
 
         self.review_empty.setVisible(not (due or later))
-        self._kick_why_matters(due + later)
 
     def _kick_why_matters(self, items):
         """给还没有「为什么要复习它」的错题批量补一句。
@@ -1218,8 +1221,10 @@ class FloatingWindow(QWidget):
                            lambda it=item: self._practice_item(it)))
         bv.addLayout(prow)
 
-        body.setVisible(not folded)
         v.addWidget(body)
+        # 先挂到卡片再显示；否则尚无 parent 的 QWidget.show() 会短暂成为
+        # 标题为「python」的独立顶层窗口，每次重绘复习卡都会闪一次。
+        body.setVisible(not folded)
 
         # 折叠按钮。用闭包直接改 body 的可见性、不重渲染整页 —— 重渲染会打断
         # 学生正在看的列表，而且他刚打完分的那张卡会跳位置。
@@ -2929,7 +2934,11 @@ class FloatingWindow(QWidget):
             # 量之前先把 stack 的固定高度松开。它会反过来把页面的高度撑大：
             # 「页面高度 → stack 高度 → 页面高度」互相顶住，一旦某次量高了，
             # 之后就永远是那个高个子 —— 抽问卡收起来、换个短页面都缩不回去。
-            self.stack.setFixedHeight(0)
+            # 解除上一次的固定高度，但保留当前实际高度。设成 0 会让顶层窗口
+            # 先缩成一小块，再在本轮末尾长回来；setUpdatesEnabled(False)
+            # 只能抑制重画，拦不住 Windows 展示这两次真实的窗口尺寸变化。
+            self.stack.setMinimumHeight(0)
+            self.stack.setMaximumHeight(16777215)
             pl.activate()
             w = PAGE_WIDTH[idx]
             h = pl.totalHeightForWidth(w) if pl.hasHeightForWidth() else pl.totalSizeHint().height()
@@ -2981,9 +2990,14 @@ class FloatingWindow(QWidget):
             finally:
                 self.setUpdatesEnabled(True)
 
-        apply()
-        QTimer.singleShot(0, apply)   # 换行文本需要一轮事件循环后才能算准高度
-        self.update()
+        if not self.isVisible():
+            # 首次展示前可以立即定好尺寸，免得先露出默认大小。
+            apply()
+        else:
+            # 复习卡刚重建时 Qt 还没把新控件算进布局；立刻量会得到约 76px，
+            # 使整个窗口瞬间缩成 200px，下一拍再撑回去，露出背后的 python 控制台。
+            # 等布局事件落定后只改一次顶层窗口尺寸。
+            QTimer.singleShot(0, apply)
 
     def _back_to_listen(self):
         self._show_page(LISTEN)
