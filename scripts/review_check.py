@@ -15,6 +15,8 @@ Echo - 间隔重复复习自检
   I. 「✓ 补上了」/「我自己看看」立刻同步状态
   J. 同一个知识点在新一节课又掉队 → 判定复发
   K. 「为什么要复习它」的依据（due_reason）
+  L. 概念为空的断点不落盘
+  M. 清缓存：公开的清理接口（clear_mistakes / clear_lessons / clear_all）
 
 退出码：全部通过为 0。
 """
@@ -299,6 +301,25 @@ n_before = len(store.load())
 eng._persist_breakpoint(bp_empty, check_relapse=True)
 check("concept 为空的断点不落盘", len(store.load()) == n_before)
 eng.shutdown()
+
+
+section("M. 清缓存：公开的清理接口（设置页「清除所有缓存」用）")
+fresh("待清理甲")
+store.add([{"topic": "待清理乙", "missing": "x"}])
+n = len(store.load())
+check("清错题本返回删掉的条数", store.clear_mistakes() == n, f"返回 {n}")
+check("清完错题本是空的", store.load() == [])
+
+eng = EchoEngine(use_llm=False)
+ts_c = store.save_lesson("待清理课", [{"name": "甲", "mastery": 0.5, "status": "ok"}], [])
+check("清课程归档返回删掉的节数", store.clear_lessons() == 1)
+check("清完查不到那节课了", not store.get_lesson(ts_c))
+
+fresh("再来一条")
+store.save_lesson("再来一课", [{"name": "乙", "mastery": 0.5, "status": "ok"}], [])
+counts = store.clear_all()
+check("clear_all 一次清两份", counts == {"mistakes": 1, "lessons": 1}, str(counts))
+check("clear_all 之后都是空的", store.load() == [] and store.list_lessons() == [])
 
 print("\n" + "=" * 56)
 if FAILED:

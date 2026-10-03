@@ -430,6 +430,36 @@ def rename_lesson(ts, new_title: str) -> bool:
     return changed
 
 
+def clear_mistakes() -> int:
+    """清空错题本，返回删掉的条数。
+
+    「设置 → 清除所有缓存」要走这条路来清错题：文件本身可以删，但删除逻辑得留在
+    真正管这个文件的地方，别让调用方自己去拼路径、猜文件名。
+    """
+    with _LOCK:
+        n = len(load())
+        if n:
+            _write([])
+        return n
+
+
+def clear_lessons() -> int:
+    """清空课程归档，返回删掉的节数。"""
+    with _LOCK:
+        n = len(_load_lessons())
+        if n:
+            _write_json(_lessons_path(), [])
+        return n
+
+
+def clear_all() -> dict:
+    """清空错题本 + 课程归档，返回各删了多少（{"mistakes": n, "lessons": m}）。
+
+    只清 Echo 自己存的这两份学习数据；凭据、设置、头像这些不算「缓存」，不动。
+    """
+    return {"mistakes": clear_mistakes(), "lessons": clear_lessons()}
+
+
 def stats() -> dict:
     """课程 + 错题复习情况汇总。"""
     lessons = _load_lessons()
