@@ -41,8 +41,12 @@ def run(argv, cwd, log_path):
     return p.returncode, Path(log_path)
 
 
-def pyinstaller_argv(build_dir: Path):
-    """从 build.bat 解析出 PyInstaller 命令行 —— 不手抄，避免两边漂移。"""
+def pyinstaller_argv(build_dir: Path, with_model: bool = False):
+    """从 build.bat 解析出 PyInstaller 命令行 —— 不手抄，避免两边漂移。
+
+    with_model=True 时额外把语音模型打进包里（「带语音」的胖安装包，约 565MB）：
+    给下不动那 483MB 的人用。默认不带 —— v2.1 起模型是启动时按需下载的。
+    """
     bat = (build_dir / "build.bat").read_text(encoding="utf-8", errors="replace")
     keep = []
     for line in bat.splitlines():
@@ -56,7 +60,11 @@ def pyinstaller_argv(build_dir: Path):
     m = re.search(r"(pyinstaller\b.*?main\.py)", text, re.S)
     if not m:
         raise SystemExit("没从 build.bat 里解析出 pyinstaller 命令")
-    return shlex.split(m.group(1).replace("\\", "/"))
+    argv = shlex.split(m.group(1).replace("\\", "/"))
+    if with_model:
+        # 插在 main.py 之前：PyInstaller 的位置参数只认脚本，选项得在它前面
+        argv[-1:-1] = ["--add-data", "models/faster-whisper-small;models/faster-whisper-small"]
+    return argv
 
 
 def find_iscc(explicit=""):
@@ -68,15 +76,26 @@ def find_iscc(explicit=""):
     return None
 
 
-def check_setup_tree(build_dir: Path):
-    """模型不再随包分发（483MB 的大头），改成第一次开课时后台下到 %APPDATA%\\Echo\\models。
+def check_setup_tree(build_dir: Path, with_model: bool = False):
+    """模型默认不随包分发（v2.1 起改成第一次启动时按需下载）。
 
-    所以这里不再往构建目录拷 models/：有也不用、没有也不该拦着打包。
-    但万一构建目录里还留着上一轮的 models/，得删掉 —— 否则 PyInstaller 又把它打进去。
+    with_model=True 才把 models/ 拷进构建目录 —— 那是给「带语音」的胖包用的
+    （约 565MB），留给下不动那 483MB 模型的人。
+    不带模型时反过来要主动清掉构建目录里残留的 models/，
+    否则 PyInstaller 会把它一起打进去，包又变回 565MB。
     """
     stale = build_dir / "models"
+    if with_model:
+        src = ROOT / "models"
+        if not src.is_dir():
+            raise SystemExit(f"--with-model 需要模型目录，但 {src} 不存在")
+        if stale.exists():
+            shutil.rmtree(stale, ignore_errors=True)
+        say(f"带语音：复制模型到构建目录（{src}）…")
+        shutil.copytree(src, stale)
+        return
     if stale.exists():
-        say(f"清掉构建目录里残留的模型（不再随包分发）：{stale}")
+        say(f"清掉构建目录里残留的模型（默认不随包分发）：{stale}")
         shutil.rmtree(stale, ignore_errors=True)
 
 
@@ -117,7 +136,11 @@ def main():
     ap.add_argument("--worktree", default="", help="构建目录（默认仓库旁边 echo-build）")
     ap.add_argument("--iscc", default="", help="ISCC.exe 路径（默认自动找）")
     ap.add_argument("--skip-iscc", action="store_true", help="只出 dist/Echo/，不编安装包")
+    ap.add_argument("--with-model", action="store_true",
+                    help="把语音模型打进包里（约 565MB 的胖包，给下不动模型的场景；"
+                         "默认不带，模型是启动时按需下载的）")
     args = ap.parse_args()
+    suffix = "-with-model" if args.with_model else ""
 
     version = ""
     iss = ROOT / "installer" / "setup.iss"
@@ -147,14 +170,15 @@ def main():
                                cwd=str(ROOT), capture_output=True, text=True)
             if r.returncode:
                 raise SystemExit(f"建构建目录失败：{r.stderr.strip()}")
-    check_setup_tree(build_dir)
+    check_setup_tree(build_dir, args.with_model)
 
     tmp = Path(os.environ.get("CLAUDE_JOB_DIR", "")) / "tmp"
     tmp = tmp if tmp.parent.exists() else Path(os.environ.get("TEMP", "."))
     tmp.mkdir(parents=True, exist_ok=True)
 
     say("PyInstaller 开跑（几分钟）…")
-    rc, log = run(pyinstaller_argv(build_dir), build_dir, tmp / "build_release_pyi.log")
+    rc, log = run(pyinstaller_argv(build_dir, args.with_model), build_dir,
+                  tmp / "build_release_pyi.log")
     if rc:
         say(f"PyInstaller 失败，日志尾部（完整：{log}）：")
         for line in log.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-12:]:
@@ -170,7 +194,8 @@ def main():
         raise SystemExit("找不到 ISCC.exe，用 --iscc 指定，例如 "
                          r'--iscc "D:\Program Files (x86)\Inno Setup 6\ISCC.exe"')
     say(f"Inno Setup：{iscc.name} 正在压缩（lzma2/ultra64，这次约 3 分钟）…")
-    rc, log = run([str(iscc), str(build_dir / "installer" / "setup.iss")],
+    rc, log = run([str(iscc), f"/DMyAppSuffix={suffix}",
+                   str(build_dir / "installer" / "setup.iss")],
                   build_dir, tmp / "build_release_iscc.log")
     text = log.read_text(encoding="utf-8", errors="replace")
     if rc or "Successful compile" not in text:
@@ -179,7 +204,7 @@ def main():
             say("   " + line)
         raise SystemExit(1)
 
-    exe = build_dir / "dist" / f"Echo-Setup-{version}.exe"
+    exe = build_dir / "dist" / f"Echo-Setup-{version}{suffix}.exe"
     ok, detail = verify_installer(exe)
     say(f"结构自检：{'通过' if ok else '不通过'} —— {detail}")
     if not ok:

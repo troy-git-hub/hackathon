@@ -5,6 +5,11 @@
 #define MyAppVersion "2.1"
 #define MyAppPublisher "Echo"
 #define MyAppExeName "Echo.exe"
+; 产物名后缀。build_release.py --with-model 会传 /DMyAppSuffix=-with-model，
+; 让「带语音模型的胖包」和默认的瘦包并存，不互相覆盖。
+#ifndef MyAppSuffix
+  #define MyAppSuffix ""
+#endif
 
 [Setup]
 AppId={{7C1F9A3E-0E4B-4A5C-9E2D-1B3A5F6C8D9E}
@@ -15,7 +20,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\dist
-OutputBaseFilename=Echo-Setup-{#MyAppVersion}
+OutputBaseFilename=Echo-Setup-{#MyAppVersion}{#MyAppSuffix}
 SetupIconFile=..\assets\echo.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
