@@ -14,7 +14,14 @@ import time
 
 from echo.backend import paths
 
-FIELDS = ("name", "nickname", "age", "hobbies", "username", "persona")
+# save() 能写的字段白名单 —— 不在这个名单里的键会被静默丢掉（写不进去）。
+# 分两类：
+#   · 前五个是学生在设置窗里填/改的；
+#   · 后面几个是程序自己写的（学习画像 + 它上次重算时的「水位线」），
+#     学生看不到也不该去改，但一样要落盘，所以也得列在这儿。
+FIELDS = ("name", "nickname", "age", "hobbies", "username",
+          "persona", "persona_baseline_lessons", "persona_baseline_reviews",
+          "persona_updated_at")
 # 头像：图片本体单独放配置目录，profile.json 里只记文件名。
 # 记绝对路径的话，换台机器（用户名不同）或换个安装位置就指向不存在的文件了。
 AVATAR_STEM = "avatar"

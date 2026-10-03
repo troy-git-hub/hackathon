@@ -8,6 +8,7 @@ Echo - 资料页
 （back_requested / avatar_changed 两个信号）。
 """
 import os
+import time
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
@@ -132,8 +133,15 @@ class ProfilePage(QWidget):
             f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.MD}px; }}")
         pl = QVBoxLayout(self.persona_card)
         pl.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        pl.setSpacing(4)
+        self.persona_headline = _label(
+            "", f"color: {Colors.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;", wrap=True)
+        pl.addWidget(self.persona_headline)
         self.persona_lbl = _label("", CAPTION, wrap=True)
         pl.addWidget(self.persona_lbl)
+        self.persona_when = _label("", f"color: {Colors.TEXT_DISABLED}; font-size: 11px;",
+                                   wrap=True)
+        pl.addWidget(self.persona_when)
         root.addWidget(self.persona_card)
 
         row2 = QHBoxLayout()
@@ -197,9 +205,36 @@ class ProfilePage(QWidget):
         self.avatar.refresh()
 
         try:
+            self.persona_headline.setText(persona.headline())
             self.persona_lbl.setText(persona.describe())
+            self.persona_when.setText(self._persona_when())
+            self.persona_when.setVisible(bool(self.persona_when.text()))
         except Exception:
+            self.persona_headline.setText("")
             self.persona_lbl.setText(tr("画像暂时算不出来。", "Couldn't compute this right now."))
+            self.persona_when.setVisible(False)
+
+    def _persona_when(self) -> str:
+        """画像是「什么时候算的」。
+
+        没算过（persona_updated_at 为 0）就直说实时算的 —— 别显示「刚刚更新」，
+        那会让学生以为系统一直在背后盯着他的记录。
+        """
+        try:
+            ts = persona.updated_at()
+        except Exception:
+            return ""
+        if not ts:
+            return tr("按你现在的记录实时算的，还没重算过",
+                      "Computed live from your record so far — not recalculated yet")
+        d = max(0.0, time.time() - ts)
+        if d < 90:
+            return tr("刚刚更新", "Updated just now")
+        if d < 3600:
+            return tr(f"{int(d // 60)} 分钟前更新", f"Updated {int(d // 60)} min ago")
+        if d < 86400:
+            return tr(f"{int(d // 3600)} 小时前更新", f"Updated {int(d // 3600)} h ago")
+        return tr(f"{int(d // 86400)} 天前更新", f"Updated {int(d // 86400)} d ago")
 
     def _reset_persona(self):
         try:
