@@ -2539,7 +2539,7 @@ class FloatingWindow(QWidget):
         self.status_dots.stop()
 
     def _fit(self):
-        """按当前页内容算窗口大小；扩展时尽量保持窗口中心不动，不跑出屏幕。"""
+        """按当前页内容算窗口大小。内容变高只往下长，窗口位置钉住不动（详见下面那段）。"""
         def do():
             idx = self.stack.currentIndex()
             pl = self.stack.currentWidget().layout()
@@ -2570,30 +2570,15 @@ class FloatingWindow(QWidget):
 
             old = self.geometry()
             scr = (self.screen() or QApplication.primaryScreen()).availableGeometry()
-            x, y = old.x(), old.y()
             if self.isVisible():
-                # 默认保持窗口中心不动（居中扩展）；窗口贴近视边缘时改贴该边
-                cx, cy = old.center().x(), old.center().y()
-                # 距离各边小于阈值 → 贴边
-                near_right = old.right() > scr.right() - 40
-                near_bottom = old.bottom() > scr.bottom() - 40
-                near_left = old.left() < scr.left() + 40
-                near_top = old.top() < scr.top() + 40
-                if near_right and not near_left:
-                    x = old.right() + 1 - W
-                elif near_left and not near_right:
-                    x = old.x()
-                else:
-                    x = cx - W // 2
-                if near_bottom and not near_top:
-                    y = old.bottom() + 1 - H
-                elif near_top and not near_bottom:
-                    y = old.y()
-                else:
-                    y = cy - H // 2
-                # 不跑出屏幕
-                x = max(scr.left() - SHADOW, min(x, scr.right() + SHADOW - W))
-                y = max(scr.top() - SHADOW, min(y, scr.bottom() + SHADOW - H))
+                # 内容变高时**只往下长，位置钉住不动**。
+                # 原来按「窗口中心不动」缩放：卡片一多，窗口同时往上、往左撑开，
+                # 看着像窗口自己在飘（用户原话「像会活的一样往左移」）；贴到屏幕
+                # 右边时那套逻辑还会切成「固定右边、往左长」，越量越往左。
+                # 学生盯着的是内容，窗口位置不该跟着内容跳。
+                x = max(scr.left() - SHADOW, min(old.x(), scr.right() + SHADOW - W))
+                # 往下放不下才整体上移，刚好放下为止；顶到屏幕上边就不再动
+                y = max(scr.top() - SHADOW, min(old.y(), scr.bottom() + SHADOW - H))
                 # 用 setGeometry 原子地设置位置+大小，避免 resize 先向右下长再 move 的闪烁/边界问题
                 self.setMinimumSize(W, H)
                 self.setGeometry(x, y, W, H)
