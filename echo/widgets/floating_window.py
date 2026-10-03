@@ -187,7 +187,7 @@ class FloatingWindow(QWidget):
     _ask_done = pyqtSignal(str)
     _ask_err = pyqtSignal(str)
     _prac_done = pyqtSignal(object)
-    _prac_err = pyqtSignal(str)
+    _prac_err = pyqtSignal(object)
     # 掌握验证：出题和判断都走 AI（后台线程），结果经信号回主线程
     _recall_planned = pyqtSignal(object)
     _recall_judged = pyqtSignal(object)
@@ -218,6 +218,7 @@ class FloatingWindow(QWidget):
         self._prac_item = None       # 当前在练的错题
         self._prac_qs, self._prac_cards = [], []
         self._prac_submitted = False
+        self._prac_request_id = 0
         # 练习页是从哪儿进来的。在里面点「✓ 这个我会了」或左上角返回时退回那里，
         # 而不是一律弹回主页 —— 从知识地图点进来，练完就该回到地图上那个知识点。
         self._prac_back = None
@@ -1259,11 +1260,19 @@ class FloatingWindow(QWidget):
         return tr(f"选这个 → {days} 天后再确认一次", f"Pick this → next check in {days} days")
 
     def _grade_review(self, topic, result):
-        """学生给一个知识点打了分：记下来，顺手算出下次复习时间。"""
+        """学生给一个知识点打了分：记下来，顺手算出下次复习时间。
+
+        写盘失败（磁盘满/目录不可写）时必须说出来 —— 界面显示「已记下」但重开
+        又回到原样，比报错更坑人。
+        """
         try:
-            store.grade(topic, result)
+            saved = store.grade(topic, result)
         except ValueError:
             return
+        if not saved:
+            self._toast(tr(
+                f"「{topic}」的复习记录没能保存，请检查磁盘空间后重试",
+                f"Couldn't save the review for \"{topic}\" — check disk space and try again"))
         self._render_review()
         self._fit()
         self._maybe_refresh_persona()      # 复习攒够了，画像可以重算一次
@@ -1401,7 +1410,7 @@ class FloatingWindow(QWidget):
             tr("去复习", "Review"), self._show_review)
         lay.addWidget(self.home_review_card)
         self.home_practice_card = self._home_card(
-            tr("AI 出题练习", "AI practice quiz"), tr("让 AI 按你的错题出题，真的练一下", "Let AI turn your mistakes into practice questions"),
+            tr("错题练习", "Mistake practice"), tr("照着错题出题，离线也能练", "Practise your mistakes, even offline"),
             tr("开始练", "Practice"), self._start_practice)
         lay.addWidget(self.home_practice_card)
         self.home_courses_card = self._home_card(
@@ -1651,7 +1660,14 @@ class FloatingWindow(QWidget):
                                   f"Delete the {n} selected lessons? This cannot be undone."),
                                ok_text=tr("删除", "Delete")):
             return
-        store.delete_lessons(ts_list)
+        removed = store.delete_lessons(ts_list)
+        if removed < 0:
+            dialogs.warn(self, tr("删除失败", "Delete failed"),
+                         tr("课程已从列表移除，但没能写回磁盘——重新打开 Echo 后它们还会在。"
+                            "请检查磁盘空间。",
+                            "Removed from the list, but the change couldn't be written to "
+                            "disk — the lessons will be back after restarting Echo. "
+                            "Check disk space."))
         self._render_courses()
 
     def _courses_rename_selected(self):
@@ -1699,9 +1715,16 @@ class FloatingWindow(QWidget):
             bits.append(tr(f"已经听过 {n_lesson} 节课", f"{n_lesson} lessons so far"))
         if mastered:
             bits.append(tr(f"补上了 {mastered} 个知识点", f"{mastered} knowledge points caught up"))
-        bits.append(tr(f"还有 {pending} 个错题要复习", f"{pending} mistakes left to review")
-                    if pending else tr("错题都复习完了 🎉", "All mistakes reviewed 🎉"))
+        if pending:
+            bits.append(tr(f"还有 {pending} 个错题要复习", f"{pending} mistakes left to review"))
+        elif n_lesson or mastered:
+            bits.append(tr("目前没有待复习的知识点", "Nothing due for review right now"))
+        else:
+            bits.append(tr("先开一节课，Echo 会记下没跟上的地方",
+                           "Start a lesson and Echo will remember where you got stuck"))
         self.home_sub.setText(" · ".join(bits))
+        for card in (self.home_courses_card, self.home_learned_card, self.home_weekly_card):
+            card.setVisible(bool(n_lesson))
         self._render_recall_card()
         self._render_gap_card()
 
@@ -1710,10 +1733,10 @@ class FloatingWindow(QWidget):
             if pending else tr("暂时没有错题，听课时点「我掉队了」就会收进来",
                                "No mistakes yet — tap \"I fell behind\" during a lesson and they'll show up here"))
         self.home_practice_card.sub_lbl.setText(
-            tr(f"让 AI 照着这 {pending} 个错题出题，真的练一下",
-               f"Have AI write questions from these {pending} mistakes and actually practise")
-            if pending else tr("有错题之后，AI 就能照着出题",
-                               "Once you have mistakes, AI can write questions from them"))
+            tr(f"照着这 {pending} 个错题出题，离线也能练",
+               f"Build questions from these {pending} mistakes, even offline")
+            if pending else tr("有错题之后，就能针对它练习",
+                               "Once you have mistakes, you can practise them here"))
         self.home_courses_card.sub_lbl.setText(
             tr(f"{n_lesson} 节历史课，可搜索、重命名、批量删除",
                f"{n_lesson} past lessons — search, rename, bulk delete")
@@ -1821,7 +1844,7 @@ class FloatingWindow(QWidget):
 
         head = QVBoxLayout()
         head.setSpacing(2)
-        head.addWidget(_label(tr("AI 出题练习", "AI practice quiz"), TITLE))
+        head.addWidget(_label(tr("错题练习", "Mistake practice"), TITLE))
         self.prac_sub = _label("", CAPTION)
         head.addWidget(self.prac_sub)
         lay.addLayout(head)
@@ -1837,6 +1860,10 @@ class FloatingWindow(QWidget):
         self.prac_loading_lbl = _label(tr("AI 正在照着你的错题出题…", "AI is writing questions from your mistakes…"),
                                        f"color: {Colors.TEXT_PRIMARY}; font-size: 14px;")
         pl.addWidget(self.prac_loading_lbl, 1)
+        self.btn_prac_local = _btn(tr("先用本地题", "Use local questions"), "Quiet",
+                                   self._use_local_practice)
+        pl.addWidget(self.btn_prac_local)
+        self.btn_prac_local.hide()
         lay.addWidget(self.prac_loading)
 
         self.prac_body = QWidget()
@@ -1875,6 +1902,7 @@ class FloatingWindow(QWidget):
         原来这里直接 _show_home() 弹回主页，点下去什么也没发生 —— 用户会以为按钮坏了。
         """
         self._prac_item = {}
+        self._prac_request_id += 1
         self._prac_back, self._prac_back_label = None, ""
         self._prac_qs, self._prac_cards = [], []
         self._prac_submitted = False
@@ -1891,11 +1919,14 @@ class FloatingWindow(QWidget):
         back 是练完之后该回哪儿；不传就回主页。
         """
         self._prac_item = item
+        self._prac_request_id += 1
+        request_id = self._prac_request_id
         self._prac_back, self._prac_back_label = back, back_label
         self._prac_qs, self._prac_cards = [], []
         self._prac_submitted = False
         self.prac_sub.setText(tr(f"针对：{item.get('topic', '')}", f"On: {item.get('topic', '')}"))
         self.prac_loading_lbl.setText(tr("AI 正在照着你的错题出题…", "AI is writing questions from your mistakes…"))
+        self.btn_prac_local.show()
         self.prac_dots.start()
         self.prac_loading.show()
         self.prac_body.hide()
@@ -1904,10 +1935,22 @@ class FloatingWindow(QWidget):
         self._show_page(PRACTICE)
         from echo.backend import practice
         practice.generate(item, 3,
-                          on_done=lambda qs: self._prac_done.emit(qs),
-                          on_error=lambda m: self._prac_err.emit(m))
+                          on_done=lambda qs: self._prac_done.emit((request_id, qs)),
+                          on_error=lambda m: self._prac_err.emit((request_id, m)))
+
+    def _use_local_practice(self):
+        """等待在线出题时先练本地题，丢弃随后返回的旧请求。"""
+        if self._page != PRACTICE or not self.prac_loading.isVisible() or not self._prac_item:
+            return
+        self._prac_request_id += 1
+        from echo.backend import practice
+        self._on_prac_done(practice.fallback_questions(self._prac_item))
 
     def _on_prac_done(self, qs):
+        if isinstance(qs, tuple) and len(qs) == 2 and isinstance(qs[0], int):
+            request_id, qs = qs
+            if request_id != self._prac_request_id or self._page != PRACTICE:
+                return
         self.prac_dots.stop()
         self.prac_loading.hide()
         self._prac_qs = list(qs or [])
@@ -1919,8 +1962,13 @@ class FloatingWindow(QWidget):
         self._render_paper()
 
     def _on_prac_err(self, msg):
+        if isinstance(msg, tuple) and len(msg) == 2 and isinstance(msg[0], int):
+            request_id, msg = msg
+            if request_id != self._prac_request_id or self._page != PRACTICE:
+                return
         self.prac_dots.stop()
         self.prac_loading_lbl.setText(msg)
+        self.btn_prac_local.hide()
         self.prac_loading.show()
         self.prac_body.hide()
         self.btn_prac_submit.setEnabled(False)
@@ -1939,8 +1987,11 @@ class FloatingWindow(QWidget):
             self._prac_cards.append(card)
             self.prac_body_lay.addWidget(card)
         topic = (self._prac_item or {}).get("topic", "")
-        self.prac_sub.setText(tr(f"针对：{topic}　共 {len(self._prac_qs)} 题",
-                                 f"On: {topic} · {len(self._prac_qs)} questions"))
+        local = bool(self._prac_qs and self._prac_qs[0].get("_source") == "local")
+        source = tr("本地题 · 根据已有错题整理", "Local questions · from your mistake record") if local else tr(
+            "AI 生成", "AI generated")
+        self.prac_sub.setText(tr(f"针对：{topic}　·　{source}　·　共 {len(self._prac_qs)} 题",
+                                 f"On: {topic} · {source} · {len(self._prac_qs)} questions"))
         self.prac_score.hide()
         self.btn_prac_submit.setEnabled(True)
         self._fit()
@@ -2705,6 +2756,7 @@ class FloatingWindow(QWidget):
     def _on_quiz_ready(self, questions):
         lesson = getattr(self, "_detail_lesson", {}) or {}
         self._prac_item = {"topic": self._lesson_name(lesson)}
+        self._prac_request_id += 1
         self._show_page(PRACTICE)
         self._on_prac_done(questions)
 
@@ -2767,9 +2819,14 @@ class FloatingWindow(QWidget):
         self._detail_back = back
         self._detail_back_label = back_label
         self.det_title.setText(self._lesson_name(ls))
+        detail_skills = ls.get("skills_detail") or []
+        followed = sum(1 for skill in detail_skills if skill.get("status") in ("ok", "fixed"))
+        total = len(detail_skills)
+        shown_ok = followed if total else ls.get("ok", 0)
+        shown_review = total - followed if total else ls.get("review", 0)
         self.det_sub.setText(
-            tr(f"{ls.get('date', '')}　✓ 跟上了 {ls.get('ok', 0)} · 待复习 {ls.get('review', 0)}",
-               f"{ls.get('date', '')}　✓ Kept up {ls.get('ok', 0)} · To review {ls.get('review', 0)}").strip())
+            tr(f"{ls.get('date', '')}　✓ 跟上了 {shown_ok} · 待复习 {shown_review}",
+               f"{ls.get('date', '')}　✓ Kept up {shown_ok} · To review {shown_review}").strip())
         self.det_stat.setText(self._stat_line(ls))
         self._fill_summary(self.det_sum_card, self.det_sum_lbl, self.det_hl_lay,
                            ls.get("summary", ""), ls.get("highlights", []))
@@ -2782,7 +2839,7 @@ class FloatingWindow(QWidget):
             "bp_max": int(max((b.get("duration") or 0 for b in _bps), default=0)),
             "quiz_total": _quiz.get("total", 0),
             "quiz_correct": _quiz.get("correct", 0),
-            "ok": sum(1 for s in _skills if s.get("status") == "ok"),
+            "ok": sum(1 for s in _skills if s.get("status") in ("ok", "fixed")),
             "total": len(_skills),
         }))
         self._fill_breakpoints(self.det_bp_lay, _bps)
@@ -3357,7 +3414,7 @@ class FloatingWindow(QWidget):
             "bp_max": int(max((b.get("duration") or 0 for b in _bps), default=0)),
             "quiz_total": _quiz.get("total", 0),
             "quiz_correct": _quiz.get("correct", 0),
-            "ok": sum(1 for s in _skills if getattr(s, "status", "ok") == "ok"),
+            "ok": cnt["ok"],
             "total": len(_skills),
         }))
         self._fill_breakpoints(self.bp_lay, _bps)

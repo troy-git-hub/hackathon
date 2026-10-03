@@ -11,11 +11,14 @@ Echo - 错题本 / 复习记录持久化
 存储位置：config_dir()/review.json（打包后 %APPDATA%\\Echo，开发时项目根目录）。
 """
 import json
+import logging
 import os
 import threading
 import time
 
 from echo.backend import paths
+
+log = logging.getLogger("echo.store")
 
 _LOCK = threading.RLock()     # 可重入：grade()/add() 整段持锁时内部还要调 load()
 
@@ -82,21 +85,34 @@ def load() -> list:
         return data if isinstance(data, list) else []
 
 
-def _write_json(path, items):
+def _write_json(path, items) -> bool:
+    """原子写一个 JSON 数组文件，返回写没写成功。
+
+    **失败必须让调用方知道**（返回 False，并留一条日志）：磁盘满、目录不可写、
+    路径被占用时，静默吞掉错误意味着「复习打分显示成功、重开却回到原样」——
+    用户以为记录了，其实什么都没发生，这比崩溃更糟。临时文件写一半失败时也要
+    尽力清掉，别在配置目录里留垃圾。
+    """
     tmp = path + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
         os.replace(tmp, path)
-    except OSError:
-        pass
+        return True
+    except OSError as e:
+        try:
+            os.remove(tmp)      # 写了一半的临时文件是坏数据，留着下次 load() 会炸
+        except OSError:
+            pass
+        log.error("数据写入失败 %s: %s", path, e)
+        return False
 
 
-def _write(items):
-    _write_json(_path(), items)
+def _write(items) -> bool:
+    return _write_json(_path(), items)
 
 
-def add(items, relapse: bool = False):
+def add(items, relapse: bool = False) -> bool:
     """追加/合并一批错题：同一 topic 覆盖更新内容，但保留复习进度（不复活老错题）。
 
     relapse=True 表示「学生在新一节课上又在同一个知识点掉队了」。这是「其实没掌握」
@@ -108,9 +124,11 @@ def add(items, relapse: bool = False):
     整段持锁：engine 现在找到断点就立刻调用这个函数（不再等下课批量写），
     并发调用变多了，读-改-写必须是一个原子操作，否则两次几乎同时的 add()
     会读到同一份旧数据，后写的那次把先写的那次覆盖掉。
+
+    返回写没写成功 —— 磁盘满/目录不可写时返回 False，调用方不该当成已保存。
     """
     if not items:
-        return
+        return True                      # 没东西可写，视为成功
     with _LOCK:
         cur = load()
         by_topic = {it.get("topic"): it for it in cur}
@@ -137,7 +155,7 @@ def add(items, relapse: bool = False):
                     it["last_result"] = AGAIN
                     it["reviewed"] = False
             by_topic[topic] = it
-        _write(list(by_topic.values()))
+        return _write(list(by_topic.values()))
 
 
 def mark_reviewed(topic: str):
@@ -175,7 +193,8 @@ def grade(topic: str, result: str, now: float = None) -> dict:
             it["review_count"] = int(it.get("review_count") or 0) + 1
             hit = it
         if hit:
-            _write(cur)
+            if not _write(cur):
+                hit = {}     # 写盘失败 = 这次打分没存上，别把成功的样子返回给调用方
         return hit
 
 
@@ -408,7 +427,8 @@ def save_lesson(title: str, skills: list, review_chain: list, suggestion: str = 
             record["graph"]["times"] = {str(k): str(v) for k, v in times.items()}
     cur = _load_lessons()
     cur.append(record)
-    _write_json(_lessons_path(), cur[-50:])
+    if not _write_json(_lessons_path(), cur[-50:]):
+        return 0.0           # 写盘失败：返回 0 让调用方知道没存上（正常的时间戳不会是 0）
     return now
 
 
@@ -472,19 +492,21 @@ def _same_time(a, b) -> bool:
 
 
 def delete_lessons(ts_list) -> int:
-    """按时间戳批量删除课程归档，返回删掉的条数。"""
+    """按时间戳批量删除课程归档，返回删掉的条数；写盘失败返回 -1（调用方要能分辨
+    「删了 0 条」和「删了但没存上」—— 后者重开后课程会原样回来）。"""
     if not ts_list:
         return 0
     cur = _load_lessons()
     kept = [it for it in cur if not any(_same_time(it.get("time", 0), t) for t in ts_list)]
     removed = len(cur) - len(kept)
     if removed:
-        _write_json(_lessons_path(), kept)
+        if not _write_json(_lessons_path(), kept):
+            return -1
     return removed
 
 
 def rename_lesson(ts, new_title: str) -> bool:
-    """重命名一节历史课。返回是否改到。"""
+    """重命名一节历史课。返回是否改到（含写盘成败 —— 没写上就是没改到）。"""
     new_title = (new_title or "").strip()
     if not new_title:
         return False
@@ -496,8 +518,8 @@ def rename_lesson(ts, new_title: str) -> bool:
             changed = True
             break
     if changed:
-        _write_json(_lessons_path(), cur)
-    return changed
+        return _write_json(_lessons_path(), cur)
+    return False
 
 
 def clear_mistakes() -> int:
@@ -508,17 +530,17 @@ def clear_mistakes() -> int:
     """
     with _LOCK:
         n = len(load())
-        if n:
-            _write([])
+        if n and not _write([]):
+            return 0           # 没写上 = 没清掉，报 0 让调用方如实显示
         return n
 
 
 def clear_lessons() -> int:
-    """清空课程归档，返回删掉的节数。"""
+    """清空课程归档，返回删掉的节数；写盘失败返回 0（同上）。"""
     with _LOCK:
         n = len(_load_lessons())
-        if n:
-            _write_json(_lessons_path(), [])
+        if n and not _write_json(_lessons_path(), []):
+            return 0
         return n
 
 
