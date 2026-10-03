@@ -215,6 +215,23 @@ QTest.mouseClick(rows[0], Qt.LeftButton)      # 回课程管理只是为了验�
 app.processEvents()
 assert window._page == ui.DETAIL
 
+# 回顾页 → 出几道题练练 → 返回：退路不能在练习那一圈丢掉
+# （「回顾页是从课程管理进来的」这件事由 _detail_back 记着，要在练习页转一圈后
+#   原样带回来。这是跨两处代码最容易断的一环，所以真点一遍，不只看按钮文案。）
+quiz_btns = [b for b in window.findChildren(QPushButton)
+             if b.text() == "出几道题练练" and b.isVisible()]
+assert quiz_btns, "回顾页上没有可见的「出几道题练练」按钮"
+QTest.mouseClick(quiz_btns[0], Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.PRACTICE, "点「出几道题练练」没有打开练习页"
+assert window.back_btn.text() == "← 课程回顾", \
+    f"练习页返回按钮写着「{window.back_btn.text()}」"
+QTest.mouseClick(window.back_btn, Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.DETAIL, "练习页返回没有回到课程回顾"
+assert window.back_btn.text() == "← 课程管理", \
+    f"在练习页转了一圈回来，回顾页的退路丢了，现在写着「{window.back_btn.text()}」"
+
 map_btns = [b for b in window.findChildren(QPushButton)
             if b.text() == "知识地图" and b.isVisible()]
 assert map_btns, "历史课回顾页上没有可见的「知识地图」按钮"
