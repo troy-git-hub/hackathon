@@ -27,6 +27,7 @@ def suite(with_tray, with_ai):
         ("讲给 Echo 听（掌握验证 / 共同根源）", ["recall_check.py"], "不需要网络"),
         ("学生画像（答题表现 → 语气适配）", ["persona_check.py"], "不需要网络"),
         ("语音转文字（麦克风录音 → Whisper）", ["voice_input_check.py"], "不需要真麦克风"),
+        ("模型按需下载（就绪判定 / 进度 / 失败兜底）", ["model_fetch_check.py"], "不需要网络"),
         ("「为什么要复习它」（批量生成 / 只动单字段）", ["why_check.py"], "不需要网络"),
         ("反复缺失的前置知识（跨课聚合 / 归一 / 阈值）", ["gaps_check.py"], "不需要网络"),
         ("提示词模板（转义 / 占位符 / 语言指令）", ["prompts_check.py"], "不需要网络"),

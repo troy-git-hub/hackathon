@@ -372,6 +372,13 @@ class FloatingWindow(QWidget):
         self._toast_timer.setSingleShot(True)
         self._toast_timer.timeout.connect(self._hide_toast)
 
+        # 语音识别模型是按需下载的（安装包不带 483MB 的它）。这里每 3 秒看一眼下到哪了，
+        # 下着的时候把进度写进状态栏 —— 学生看到的是「正在下载语音识别模型 40%」，
+        # 而不是开了课却一直「正在加载语音识别」等在那儿。下完/没在下就交还给状态机。
+        self._model_timer = QTimer(self)
+        self._model_timer.timeout.connect(self._poll_model_download)
+        self._model_timer.start(3000)
+
     def _build_header(self) -> QWidget:
         bar = _DraggableHeader()
         lay = QHBoxLayout(bar)
@@ -1293,6 +1300,25 @@ class FloatingWindow(QWidget):
         if self.toast_lbl.isVisible():
             self.toast_lbl.setVisible(False)
             self._fit()
+
+    def _poll_model_download(self):
+        """下模型的时候把进度写进状态栏；没下（下完了 / 从没下过）就交还给状态机。"""
+        try:
+            from echo.backend import model_fetch
+            pct = model_fetch.poll_progress()
+        except Exception:
+            return
+        showing = getattr(self, "_model_pct_shown", False)
+        if 0 <= pct < 100:
+            self.status_lbl.setText(
+                tr(f"正在下载语音识别模型 {pct}%（只下一次，以后离线可用）",
+                   f"Downloading speech model {pct}% (one-time, offline after that)"))
+            self.status_dot.setVisible(False)
+            self.status_dots.start()
+            self._model_pct_shown = True
+        elif showing:
+            self._model_pct_shown = False
+            self._sync_status()      # 下完了，状态栏还给「正在听课 / 已下课」
 
     def _maybe_refresh_persona(self):
         """攒够记录了就重算一次学生画像，重算了就跟学生说一声。

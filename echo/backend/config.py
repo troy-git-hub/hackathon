@@ -78,14 +78,41 @@ WHISPER_MODEL = os.getenv("ECHO_WHISPER_MODEL", "small")
 def whisper_model_path() -> str:
     """实际加载 Whisper 用的模型标识。
 
-    打包成 exe 后优先用随程序分发的 models/faster-whisper-small 目录
-    （在 sys._MEIPASS 下，离线可用）；开发时用 ECHO_WHISPER_MODEL（走 HF 缓存）。
+    优先级：
+    1. 用户数据目录里已经下载好的模型（%APPDATA%\\Echo\\models\\faster-whisper-small，
+       或开发时的项目根 models/）—— 下过一次就永远离线可用
+    2. 随程序分发的 models/faster-whisper-small（exe 的 sys._MEIPASS 下）
+    3. 都没有 → 返回 HF 模型名（"small"），faster-whisper 会自己去下载到缓存
     """
+    name = "faster-whisper-small"
+    user_dir = os.path.join(user_models_dir(), name)
+    if os.path.isfile(os.path.join(user_dir, "model.bin")):
+        return user_dir
+    # 开发时的项目根 models/（老行为，别把本机已经放好的模型作废）
+    dev_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                           "models", name)
+    if os.path.isfile(os.path.join(dev_dir, "model.bin")):
+        return dev_dir
     if getattr(sys, "frozen", False):
-        bundled = os.path.join(getattr(sys, "_MEIPASS", ""), "models", "faster-whisper-small")
+        bundled = os.path.join(getattr(sys, "_MEIPASS", ""), "models", name)
         if os.path.isdir(bundled):
             return bundled
     return WHISPER_MODEL
+
+
+def user_models_dir() -> str:
+    """用户模型目录：打包后 %APPDATA%\\Echo\\models，开发时项目根 models。可写、持久。"""
+    if getattr(sys, "frozen", False):
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+        path = os.path.join(base, "Echo", "models")
+    else:
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                            "models")
+    try:
+        os.makedirs(path, exist_ok=True)
+    except OSError:
+        pass
+    return path
 
 
 WHISPER_DEVICE = os.getenv("ECHO_WHISPER_DEVICE", "cpu")

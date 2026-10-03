@@ -69,15 +69,15 @@ def find_iscc(explicit=""):
 
 
 def check_setup_tree(build_dir: Path):
-    """PyInstaller 需要 models/ 在那里（它不在 git 里）。缺了就补上。"""
-    src = ROOT / "models"
-    dst = build_dir / "models"
-    if dst.exists():
-        return
-    if not src.exists():
-        raise SystemExit(f"找不到模型目录 {src} —— 先按 README 把 faster-whisper-small 放进去")
-    say(f"复制模型到构建目录（{src}）…")
-    shutil.copytree(src, dst)
+    """模型不再随包分发（483MB 的大头），改成第一次开课时后台下到 %APPDATA%\\Echo\\models。
+
+    所以这里不再往构建目录拷 models/：有也不用、没有也不该拦着打包。
+    但万一构建目录里还留着上一轮的 models/，得删掉 —— 否则 PyInstaller 又把它打进去。
+    """
+    stale = build_dir / "models"
+    if stale.exists():
+        say(f"清掉构建目录里残留的模型（不再随包分发）：{stale}")
+        shutil.rmtree(stale, ignore_errors=True)
 
 
 def verify_installer(path: Path):

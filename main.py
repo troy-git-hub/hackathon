@@ -69,6 +69,15 @@ def main():
     win.move(screen.center().x() - win.width() // 2,
              screen.center().y() - win.height() // 2)
     win.show()
+
+    # 语音识别模型不再随安装包分发（483MB 的大头），改成按需下载。启动就开始下 ——
+    # 等到第一次开课才下就太晚了。不阻塞：窗口已经出来了，进度显示在状态栏。
+    try:
+        from echo.backend import model_fetch
+        model_fetch.ensure()
+    except Exception as e:
+        print(f"[Echo] 触发模型下载失败（不影响使用）: {e}")
+
     tray = EchoTray(app, win)   # 托盘 + 关闭到托盘 + 全局快捷键（Ctrl+Alt+L 掉队 / Ctrl+Alt+E 显示隐藏 / Ctrl+Alt+Q 圈一下问 AI）
 
     pet = DeskPet(win, tray)    # 桌宠：跟着课堂变表情，双击圈一下问 AI

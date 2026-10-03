@@ -160,11 +160,23 @@ class EchoEngine:
         self.reset()
         self._stop = threading.Event()   # 每节课一个独立的停止信号，旧 ticker 不会被「复活」
         sid = self.session
+        # 语音识别模型不再随安装包分发（483MB 的大头），第一次用时后台下。
+        # 这里是保险：正常路径在 app 启动时就已经开始下了（main.py），
+        # 真到开课还没下好也不拦着 —— 进度由 UI 的定时器轮询显示，见 _poll_model_download。
+        self._ensure_model()
         self._ticker = threading.Thread(target=self._tick_loop, args=(sid, self._stop),
                                         daemon=True, name=f"echo-ticker-{sid}")
         self._ticker.start()
         self.active = True               # 开始上课：此后拍题/反馈才记入课程
         self._emit(sid, "status", "listening")
+
+    @staticmethod
+    def _ensure_model():
+        try:
+            from echo.backend import model_fetch
+            model_fetch.ensure()
+        except Exception as e:
+            log.warning("触发模型下载失败（不影响上课）: %s", e)
 
     def stop(self):
         self._stop.set()

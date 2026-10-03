@@ -93,6 +93,16 @@ class _WhisperWorker:
                     on_status("loading_asr")
                 kw = dict(device=config.WHISPER_DEVICE, compute_type=config.WHISPER_COMPUTE,
                           cpu_threads=min(config.WHISPER_THREADS, os.cpu_count() or 1))
+                # 模型是按需下载的（见 model_fetch）。先确保它在下、并等它下完：
+                # 不等的话 WhisperModel 会拿模型名去 HF 缓存再下一遍（同样 483MB）。
+                # 下不动也没关系 —— 下面那条 local_files_only 失败后还会走老路。
+                try:
+                    from echo.backend import model_fetch
+                    if not model_fetch.is_ready():
+                        model_fetch.ensure()
+                        model_fetch.wait_ready()
+                except Exception as e:
+                    log.info("等模型下载失败，走原有加载路径: %s", e)
                 # 先只用本地缓存：模型下过一次就不再联网（现场网络/SSL 抽风时联网会卡很久）
                 try:
                     cls._model = WhisperModel(config.whisper_model_path(), local_files_only=True, **kw)

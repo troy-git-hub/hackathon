@@ -2,7 +2,7 @@
 ; 先运行 build.bat 生成 dist\Echo\Echo.exe，再用本脚本编译。
 
 #define MyAppName "Echo"
-#define MyAppVersion "2.0"
+#define MyAppVersion "2.1"
 #define MyAppPublisher "Echo"
 #define MyAppExeName "Echo.exe"
 
@@ -31,9 +31,8 @@ Name: "chinesesimp"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务："; Flags: unchecked
 
 [Files]
-; 464MB 的模型是二进制，压缩既慢又压不动，单独放进来且不压缩
-Source: "..\dist\Echo\_internal\models\faster-whisper-small\model.bin"; DestDir: "{app}\_internal\models\faster-whisper-small"; Flags: ignoreversion nocompression dontverifychecksum
-Source: "..\dist\Echo\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion; Excludes: "_internal\models\faster-whisper-small\model.bin"
+; 语音识别模型不再随包分发（483MB 的大头）—— 第一次开课时后台下载到 %APPDATA%\Echo\models
+Source: "..\dist\Echo\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
