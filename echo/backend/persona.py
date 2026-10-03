@@ -32,15 +32,31 @@ TREND_IMPROVING = "improving"
 TREND_STRUGGLING = "struggling"
 TREND_STEADY = "steady"
 
+def _t(zh: str, en: str) -> str:
+    """按界面语言二选一。
+
+    这里用 config.UI_LANG，而不是 echo.i18n 的 tr()：tr() 依赖 QSettings，
+    会把 PyQt5 拖进后端的导入链，踩 main.py 里记的 ctranslate2/PyQt5 加载顺序坑。
+    prompts.py 读同一个开关，两边一致。
+
+    注意 persona 这一块是**静态界面文案**（阈值算出来之后拼的固定句子），
+    不是模型生成的内容 —— 所以该翻译；模型生成的那部分走 prompts.system()
+    的 ENGLISH_OUTPUT，是另一套机制。
+    """
+    from echo.backend import config
+    return en if config.UI_LANG == "en" else zh
+
+
 _STYLE_LABEL = {
-    STYLE_NEEDS_EXAMPLES: "容易没听懂，适合多举例子",
-    STYLE_CONCISE: "吸收得快，说重点就行",
-    STYLE_STEADY: "按正常节奏讲解",
+    STYLE_NEEDS_EXAMPLES: lambda: _t("容易没听懂，适合多举例子",
+                                     "benefits from more examples"),
+    STYLE_CONCISE: lambda: _t("吸收得快，说重点就行", "picks things up quickly"),
+    STYLE_STEADY: lambda: _t("按正常节奏讲解", "steady pace works well"),
 }
 _TREND_LABEL = {
-    TREND_IMPROVING: "最近在进步",
-    TREND_STRUGGLING: "最近比较吃力",
-    TREND_STEADY: "状态平稳",
+    TREND_IMPROVING: lambda: _t("最近在进步", "improving lately"),
+    TREND_STRUGGLING: lambda: _t("最近比较吃力", "struggling lately"),
+    TREND_STEADY: lambda: _t("状态平稳", "steady"),
 }
 
 
@@ -180,10 +196,10 @@ def headline(data: dict = None) -> str:
     """画像的短标签，当资料页那一块的小标题用。长解释在 describe()。"""
     data = get() if data is None else data
     if not data.get("sample"):
-        return "还没攒够记录"
-    style = _STYLE_LABEL.get(data.get("style"), "")
-    trend = _TREND_LABEL.get(data.get("trend"), "")
-    return " · ".join(b for b in (style, trend) if b)
+        return _t("还没攒够记录", "not enough data yet")
+    style = _STYLE_LABEL.get(data.get("style"))
+    trend = _TREND_LABEL.get(data.get("trend"))
+    return " · ".join(f() for f in (style, trend) if f)
 
 
 def describe(data: dict = None) -> str:
@@ -197,28 +213,49 @@ def describe(data: dict = None) -> str:
     data = get() if data is None else data
     n = int(data.get("sample") or 0)
     if not n:
-        return "还没有复习记录。多做几次「讲给 Echo 听」，我就慢慢知道该怎么给你讲了。"
+        return _t("还没有复习记录。多做几次「讲给 Echo 听」，我就慢慢知道该怎么给你讲了。",
+                  "No review record yet. A few rounds of “Talk it through” and I'll start "
+                  "to know how to explain things in a way that works for you.")
 
     again = int(round(float(data.get("again_rate") or 0) * n))
     clear = int(round(float(data.get("clear_rate") or 0) * n))
     style, trend = data.get("style"), data.get("trend")
 
-    parts = [f"从你复习过的 {n} 个知识点里，我看到的你："]
+    parts = [_t(f"从你复习过的 {n} 个知识点里，我看到的你：",
+                f"From the {n} knowledge points you've reviewed, here's what I see:")]
     if style == STYLE_NEEDS_EXAMPLES:
-        parts.append(f"其中 {again} 次是「还是没懂」——不是你不行，是第一次讲的时候"
-                     "那一步被跳过去了。接下来我会把步子放慢，多举一个具体例子再往下走。")
+        parts.append(_t(
+            f"其中 {again} 次是「还是没懂」——不是你不行，是第一次讲的时候那一步被跳过去了。"
+            "接下来我会把步子放慢，多举一个具体例子再往下走。",
+            f"{again} of them ended in “still don't get it” — not because you can't, "
+            "but because a step got skipped the first time. I'll slow down and work "
+            "through a concrete example before moving on."))
     elif style == STYLE_CONCISE:
-        parts.append("大部分一次就清楚，说明这些内容你接得住。"
-                     "那我就少铺垫，直接说重点，不浪费时间复述你已经会的。")
+        parts.append(_t(
+            "大部分一次就清楚，说明这些内容你接得住。"
+            "那我就少铺垫，直接说重点，不浪费时间复述你已经会的。",
+            "Most of them clicked right away, so these are within reach. I'll skip the "
+            "warm-up and get to the point instead of repeating what you already know."))
     else:
-        parts.append("整体接得比较稳，偶尔卡一两次，这是正常范围。")
+        parts.append(_t("整体接得比较稳，偶尔卡一两次，这是正常范围。",
+                        "Overall you keep up steadily, with the occasional stumble — "
+                        "that's squarely normal."))
     if trend == TREND_IMPROVING:
-        parts.append(f"最近这批里有 {clear} 次一遍就想起来了，在往上走。")
+        parts.append(_t(f"最近这批里有 {clear} 次一遍就想起来了，在往上走。",
+                        f"{clear} of the recent ones you recalled straight away — "
+                        "you're trending up."))
     elif trend == TREND_STRUGGLING:
-        parts.append("最近连着几次都没想起来——先别急，我们把前面的地基补牢再往下学，"
-                     "不然越往后越吃力。")
-    parts.append("这些只记在本机，跟着你的复习记录走，随时可以在下面重置。")
-    return "".join(parts)
+        parts.append(_t(
+            "最近连着几次都没想起来——先别急，我们把前面的地基补牢再往下学，"
+            "不然越往后越吃力。",
+            "A few in a row didn't come back to you — no rush. Let's shore up the "
+            "foundations first, or it only gets harder further on."))
+    parts.append(_t("这些只记在本机，跟着你的复习记录走，随时可以在下面重置。",
+                    "This stays on this computer and follows your review record. "
+                    "You can reset it below whenever you like."))
+    # 中文句子以「。」收尾，直接接下一句；英文要在句号后留一个空格
+    sep = _t("", " ")
+    return sep.join(parts)
 
 
 def tone_hint(data: dict = None) -> str:
