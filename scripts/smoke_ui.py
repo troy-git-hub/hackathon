@@ -752,5 +752,24 @@ assert len(store.list_lessons()) == n_lessons, "离线兜底跑出来的课被�
 window._save_lesson(_RealReport())
 assert len(store.list_lessons()) == n_lessons + 1, "真课反而没被存进去"
 
+# 等在线出题时可立刻使用本地题；迟到的在线结果不能覆盖学生正在做的卷子。
+from echo.backend import practice as practice_backend
+original_generate = practice_backend.generate
+pending_practice = {}
+try:
+    practice_backend.generate = lambda item, n, on_done=None, on_error=None: pending_practice.update(done=on_done)
+    window._practice_item({"topic": "极限", "missing": "极限的定义", "micro_lesson": "先看趋近过程"})
+    app.processEvents()
+    QTest.mouseClick(window.btn_prac_local, Qt.LeftButton)
+    app.processEvents()
+    assert window._prac_qs and window._prac_qs[0].get("_source") == "local"
+    assert "本地题" in window.prac_sub.text()
+    original_questions = list(window._prac_qs)
+    pending_practice["done"]([{"question": "迟到的 AI 题", "answer": "答案", "_source": "ai"}])
+    app.processEvents()
+    assert window._prac_qs == original_questions, "迟到的 AI 题覆盖了本地卷子"
+finally:
+    practice_backend.generate = original_generate
+
 window.close()
 print("UI smoke passed: one window, avatar and primary flow work")

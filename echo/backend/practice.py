@@ -43,7 +43,7 @@ def _clean_questions(data, n: int) -> list:
     return out
 
 
-def _fallback(item: dict) -> list:
+def fallback_questions(item: dict) -> list:
     """没 key / 调用失败时的兜底练习题：用 item 自己的字段拼出题，保证离线也有东西练。"""
     missing = item.get("missing") or "这个知识点"
     known = item.get("known") or ""
@@ -63,6 +63,8 @@ def _fallback(item: dict) -> list:
             "answer": now,
             "explain": micro,
         })
+    for question in questions:
+        question["_source"] = "local"
     return questions
 
 
@@ -72,7 +74,7 @@ def generate_sync(item: dict, n: int = 3) -> list:
     # 离线模式（ECHO_OFFLINE=1）下不许联网：只看 API key 会漏掉这个开关，
     # 断网演示时点出题会一直卡到超时才退回兜底
     if config.OFFLINE or not config.DEEPSEEK_API_KEY:
-        return _fallback(item)
+        return fallback_questions(item)
     try:
         system = prompts.system("PRACTICE_SYSTEM", n=n)
         user = prompts.PRACTICE_USER.format(
@@ -84,14 +86,18 @@ def generate_sync(item: dict, n: int = 3) -> list:
             micro_lesson=item.get("micro_lesson") or "",
             n=n,
         )
-        data = LLM().json(system, user, max_tokens=1200, temperature=0.5)
+        # 练习页有人在等题；网络卡住时尽快交还本地题，避免两次 40 秒超时。
+        data = LLM().json(system, user, max_tokens=1200, temperature=0.5,
+                          timeout=min(config.LLM_TIMEOUT, 20), attempts=1)
         questions = _clean_questions(data, n)
         if questions:
+            for question in questions:
+                question["_source"] = "ai"
             return questions
         log.warning("出题结果为空，退回兜底题")
     except Exception as e:
         log.exception("出题失败: %s", e)
-    return _fallback(item)
+    return fallback_questions(item)
 
 
 def generate(item: dict, n: int = 3, on_done=None, on_error=None) -> None:
