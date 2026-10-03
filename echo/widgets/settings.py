@@ -182,14 +182,19 @@ class SettingsDialog(QDialog):
         """刷新「本机存了多少」那一行。读不到就显示 0，不让设置窗口打不开。"""
         try:
             st = cache.stats()
+            empty = cache.is_empty(st)
         except Exception:
-            st = {"lessons": 0, "mistakes": 0, "bytes": 0}
-        self.storage_lbl.setText(tr(
-            f"本机存了 {st['lessons']} 节课的历史、{st['mistakes']} 个错题，"
-            f"共 {cache.size_text(st['bytes'])}。",
-            f"{st['lessons']} lessons and {st['mistakes']} mistakes on this computer, "
-            f"{cache.size_text(st['bytes'])} in total."))
-        self.btn_clear.setEnabled(st["bytes"] > 0)
+            st, empty = {"lessons": 0, "mistakes": 0, "bytes": 0}, True
+        if empty:
+            self.storage_lbl.setText(tr("本机还没有攒下任何记录。",
+                                        "Nothing stored on this computer yet."))
+        else:
+            self.storage_lbl.setText(tr(
+                f"本机存了 {st['lessons']} 节课的历史、{st['mistakes']} 个错题，"
+                f"共 {cache.size_text(st['bytes'])}。",
+                f"{st['lessons']} lessons and {st['mistakes']} mistakes on this computer, "
+                f"{cache.size_text(st['bytes'])} in total."))
+        self.btn_clear.setEnabled(not empty)
 
     def _clear_cache(self):
         """清空本机的记录。删之前把「删什么、留什么」摊开说清楚 —— 这步不可逆。"""

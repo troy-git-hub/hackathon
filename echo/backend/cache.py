@@ -7,23 +7,23 @@ Echo - 本机数据总管
 **不动**个人资料（名字/头像）、.env 里的 API key、界面设置：那些是「你设置的」，
 不是攒出来的数据，清缓存不该顺手把它们抹掉。
 
-课程/错题的路径优先问 store 要（它是那两个文件的权威，名字写死在别处早晚会对不上），
-拿不到才按默认名在配置目录里找。
+课程/错题走 store 的公开清理接口，不自己拼路径去删；只有「看占用」时问 store 要一下
+文件路径（那两个文件归它管，名字写死在别处早晚会对不上）。
 """
 import os
 
 from echo.backend import layout, paths, store
 
 
-def _data_files() -> list:
-    """会被越攒越大的那几个文件。"""
+def _file_paths() -> list:
+    """算占用用的文件路径。优先问 store 要（它是课程/错题的权威），拿不到用默认名。"""
     out = []
-    for fn in (getattr(store, "_lessons_path", None), getattr(store, "_path", None)):
+    for fn, name in ((getattr(store, "_lessons_path", None), "lessons.json"),
+                     (getattr(store, "_path", None), "review.json")):
         try:
-            if callable(fn):
-                out.append(fn())
+            out.append(fn() if callable(fn) else os.path.join(paths.config_dir(), name))
         except Exception:
-            pass
+            out.append(os.path.join(paths.config_dir(), name))
     out.append(os.path.join(paths.config_dir(), "mindmap.json"))
     return list(dict.fromkeys(out))          # 去重，顺序不变
 
@@ -50,7 +50,15 @@ def stats() -> dict:
     except Exception:
         lay = {"lessons": 0, "nodes": 0, "bytes": 0}
     return {"lessons": lessons, "mistakes": mistakes, "layout": lay,
-            "bytes": sum(_size(p) for p in _data_files())}
+            "bytes": sum(_size(p) for p in _file_paths())}
+
+
+def is_empty(st: dict = None) -> bool:
+    """有没有东西可清。看条数而不是字节数 —— 清空后文件还在（内容是个空数组），
+    按字节判断会导致「明明清干净了按钮却还亮着」。"""
+    st = stats() if st is None else st
+    return not (st.get("lessons") or st.get("mistakes")
+                or (st.get("layout") or {}).get("lessons"))
 
 
 def size_text(n: int) -> str:
@@ -63,16 +71,18 @@ def size_text(n: int) -> str:
 
 
 def clear() -> dict:
-    """清空。返回清掉了什么，给界面回显用。
+    """清空，返回清空前的数量（给界面回显用）。
 
-    直接删文件：store 读不到文件就当空（load/_load_lessons 都吞 OSError），
-    顺带把占的磁盘还回来。个人资料和设置不在这个名单里。
+    课程和错题交给 store 清（删除逻辑留在真正管那两个文件的地方，持它自己那把锁）；
+    地图位置是这边自己的，自己清。
     """
     before = stats()
-    for p in _data_files():
-        try:
-            os.remove(p)
-        except OSError:
-            pass
-    layout.clear()
+    try:
+        store.clear_all()
+    except Exception:
+        pass
+    try:
+        layout.clear()
+    except Exception:
+        pass
     return before
