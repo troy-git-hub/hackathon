@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 
@@ -81,6 +82,13 @@ def run_child(theme, shots):
 
     from PyQt5.QtCore import QObject, pyqtSignal
     from PyQt5.QtWidgets import QApplication
+
+    # 这套自检会真的调 window._on_echo(...) 把「回响页」点亮 —— 而那条路会存课程
+    # 和错题。不隔离的话，每跑一次自检就往用户**真实**的 lessons.json 里塞一节
+    # 贝叶斯课（accept_check 每跑一次就多一节，用户攒了 50 节内容一模一样的假课）。
+    # 指到临时目录，别动用户真数据。
+    from echo.backend import paths
+    paths.config_dir = lambda: tempfile.mkdtemp(prefix="echo-theme-")
 
     from echo.backend.engine import EchoReport
     from echo.mock_data import SAMPLE_BREAKPOINT, SAMPLE_CONCEPTS, SAMPLE_ECHO_SKILLS

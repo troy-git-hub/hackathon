@@ -44,6 +44,31 @@ def suite(with_tray, with_ai):
     return steps
 
 
+DATA_FILES = ("lessons.json", "review.json")
+
+
+def _data_fingerprint():
+    """用户真实数据的指纹（大小 + 修改时间）。自检跑前跑后各拍一张对一遍。"""
+    try:
+        from echo.backend import paths
+        d = paths.config_dir()
+    except Exception:
+        return {}
+    out = {}
+    for name in DATA_FILES:
+        try:
+            st = os.stat(os.path.join(d, name))
+            out[name] = (st.st_size, int(st.st_mtime))
+        except OSError:
+            out[name] = None
+    return out
+
+
+def _data_diff(before, after):
+    return [f"{name}: {before.get(name)} → {after.get(name)}"
+            for name in DATA_FILES if before.get(name) != after.get(name)]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--with-tray", action="store_true", help="追加托盘/快捷键检查")
@@ -59,6 +84,7 @@ def main():
     steps = suite(args.with_tray or args.full, args.with_ai or args.full)
     print(f"Echo 验收 — {len(steps)} 项\n" + "=" * 64, flush=True)
 
+    before = _data_fingerprint()
     rows, failed = [], []
     for i, (title, argv, note) in enumerate(steps, 1):
         path = SCRIPTS / argv[0]
@@ -82,6 +108,17 @@ def main():
             failed.append(title)
 
     print("=" * 64)
+
+    # 自检不该动用户真实数据。theme_check 曾经每跑一次就往真的 lessons.json 里
+    # 存一节假课（它调 window._on_echo 点回响页，那条路会存课程），用户攒了 50 节。
+    # 修好那一个之外再加这道网：以后哪个自检脚本又把数据写进真实目录，这里当场报出来。
+    dirty = _data_diff(before, _data_fingerprint())
+    if dirty:
+        print("⚠ 自检动了真实数据（这些脚本应该先把 paths.config_dir 指到临时目录）：")
+        for line in dirty:
+            print("   " + line)
+        failed.append("自检污染了真实数据")
+
     passed = sum(1 for r in rows if r[1] == "通过")
     print(f"结果：{passed}/{len(rows)} 通过，用时 {sum(r[2] for r in rows):.1f}s")
     if failed:
