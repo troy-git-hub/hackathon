@@ -1,17 +1,18 @@
 """
 Echo - Whisper 模型按需下载
 
-安装包不再内置 483MB 的 model.bin：565MB 的安装包大头是它，GitHub Release 虽装得下，
-但评装体验差 —— 装完第一次开课还要陪它一起等。改成**第一次开课时后台下载**：
+安装包不再内置 483MB 的 model.bin：565MB 的安装包大头就是它。改成**按需下载**：
 
-- 下到用户数据目录（打包后 %APPDATA%\Echo\models），下过一次就永远离线可用
-- 进度经引擎的 status 事件进 UI —— 学生看到的不是黑等，是「正在下载语音识别模型
-  37%」，跟现有的「正在加载语音识别」同一套反馈路
+- **app 启动时就开始下**（main.py 触发），不等到第一次开课 —— 那时候已经太晚
+- 下到用户数据目录（打包后 %APPDATA%\\Echo\\models），下过一次就永远离线可用
+- 进度由 UI 的定时器调 poll_progress() 扫盘算出来，显示在状态栏上 ——
+  学生看到的不是干等，是「正在下载语音识别模型 40%（只下一次，以后离线可用）」
 - 只用 huggingface_hub（faster-whisper 本来就依赖它），不引新的包
 - 下载失败不拦着上课：WhisperModel 自己还有「从 HF 缓存加载」的兜底路径
 """
 import logging
 import os
+import shutil
 import threading
 
 from echo.backend import config
@@ -66,24 +67,43 @@ def _run(callback):
     global _done
     from huggingface_hub import snapshot_download
     try:
-        # max_workers=1：串行下载让进度条是线性的，看着不跳
+        # max_workers=1：串行下载让进度是线性的，看着不跳
         path = snapshot_download(
             repo_id=HF_REPO,
             local_dir=model_dir(),
             allow_patterns=list(FILES),
             max_workers=1,
-            # 进度不走 tqdm（那是给人看的交互条），走每 3 秒扫一次文件大小 —— 简单可靠
-            tqdm_class=_QuietTqdm,
         )
+        _materialize(path)
+        if not is_ready():
+            raise RuntimeError(f"下载完了但文件不在位：{path}")
         _done = True
         _progress["percent"] = 100
-        log.info("Whisper 模型下载完成: %s", path)
+        log.info("Whisper 模型下载完成: %s", model_dir())
         if callback:
-            callback(path)
+            callback(model_dir())
     except Exception as e:
         _progress["percent"] = -1
         # 不拦着上课：WhisperModel 还有「从 HF 缓存加载」的兜底；模型这边等下次开课再试
         log.warning("Whisper 模型下载失败（开课时会再试）: %s", e)
+
+
+def _materialize(src: str):
+    """确认四个文件真的落在 model_dir() 里，不在就从下载落点拷过来。
+
+    huggingface_hub 的 snapshot_download(local_dir=...) 行为在不同版本/网络状况下
+    并不一致：实测 0.29.3 在文件已经在 HF 缓存里时，会把文件留在缓存目录、
+    local_dir 反而是空的。与其跟它较劲，不如下完自己核一遍 —— 本地拷 483MB
+    只要几秒，比「以为下好了其实没下」强得多。
+    """
+    if is_ready():
+        return
+    dst = model_dir()
+    os.makedirs(dst, exist_ok=True)
+    for f in FILES:
+        s, d = os.path.join(src, f), os.path.join(dst, f)
+        if os.path.isfile(s) and not os.path.isfile(d):
+            shutil.copy2(s, d)
 
 
 def wait_ready(timeout: float = 1800) -> bool:
@@ -125,30 +145,3 @@ def poll_progress():
     if pct >= _progress["percent"] + 10:       # 10% 一档往上跳，别每秒刷
         _progress["percent"] = pct
     return _progress["percent"]
-
-
-class _QuietTqdm:
-    """顶掉 huggingface_hub 的 tqdm：下载进度不走命令行条，走 poll_progress() 扫盘。"""
-
-    def __init__(self, *a, **kw):
-        pass
-
-    def __iter__(self):
-        return iter(())
-
-    def update(self, n=1):
-        pass
-
-    def close(self):
-        pass
-
-    def set_description(self, desc=None):
-        pass
-
-    @property
-    def n(self):
-        return 0
-
-    @n.setter
-    def n(self, v):
-        pass

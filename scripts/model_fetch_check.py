@@ -154,6 +154,21 @@ try:
 finally:
     config.user_models_dir = _saved
 
+section("H. 下载落点不在目标目录时，自己拷过去")
+# 实测踩到的坑：huggingface_hub 0.29.3 在文件已在 HF 缓存里时，snapshot_download
+# 会把文件留在缓存目录、传进去的 local_dir 反而是空的。所以下完必须自己核一遍。
+wipe()
+elsewhere = tempfile.mkdtemp(prefix="echo-hf-land-")
+for f in model_fetch.FILES:
+    with open(os.path.join(elsewhere, f), "wb") as fh:
+        fh.write(b"y" * 16)
+check("拷之前目标目录是空的", not model_fetch.is_ready())
+model_fetch._materialize(elsewhere)
+check("拷完就绪", model_fetch.is_ready())
+with open(os.path.join(model_fetch.model_dir(), "model.bin"), "rb") as fh:
+    check("考的是真内容不是空文件", fh.read(4) == b"yyyy")
+
+
 print("\n" + "=" * 56)
 if FAILED:
     print(f"失败 {len(FAILED)} 项：" + "、".join(FAILED))
