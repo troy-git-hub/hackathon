@@ -49,7 +49,7 @@ from echo.widgets.checkin import CheckinCard
 from echo.components.avatar import AvatarView
 from echo.widgets.mindmap import MindMapPage
 from echo.widgets.profile_page import ProfilePage
-from echo.backend import mindmap, persona, profile, recall, why_matters
+from echo.backend import gaps, mindmap, persona, profile, recall, why_matters
 
 log = logging.getLogger("echo.ui")
 
@@ -1182,6 +1182,37 @@ class FloatingWindow(QWidget):
         self.home_recall_card = self._recall_card()
         lay.addWidget(self.home_recall_card)
 
+        # 「你反复卡在 X」：跨课看出来的规律，不是今天的待办。放在「今天该回响」下面
+        # —— 两者都在说「你该注意什么」，但这条是慢性的、根子上的问题。
+        # 用暖色底跟回响卡区分开：上面那张催你「现在去做」，这张是「你可能一直没意识到」。
+        self.home_gap_card = QFrame()
+        self.home_gap_card.setObjectName("GapCard")
+        self.home_gap_card.setStyleSheet(
+            f"QFrame#GapCard {{ background: {Colors.WARNING_CARD};"
+            f"border: 1px solid {Colors.WARNING_CARD_BORDER}; border-radius: {Radius.LG}px; }}")
+        gv = QVBoxLayout(self.home_gap_card)
+        gv.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        gv.setSpacing(4)
+        ghead = QHBoxLayout()
+        ghead.setSpacing(Spacing.SM)
+        ghead.addWidget(_label(tr("反复卡住的地方", "A pattern worth noticing"),
+                               f"color: {Colors.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"))
+        ghead.addStretch()
+        self.gap_when = _label("", f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;")
+        ghead.addWidget(self.gap_when)
+        gv.addLayout(ghead)
+        self.gap_lbl = _label("", f"color: {Colors.TEXT_PRIMARY}; font-size: 12px;", wrap=True)
+        gv.addWidget(self.gap_lbl)
+        grow = QHBoxLayout()
+        grow.addStretch()
+        self.gap_btn = _btn("", "Accent", self._practice_gap,
+                            tr("针对这个前置知识点出几道题，把地基补上",
+                               "Practise this prerequisite and shore up the foundation"))
+        grow.addWidget(self.gap_btn)
+        gv.addLayout(grow)
+        self.home_gap_card.setVisible(False)      # 有结论才亮出来
+        lay.addWidget(self.home_gap_card)
+
         # 开课前先给这节课起个名，下课后在历史里一眼能认出来
         lay.addWidget(_label(tr("这节课叫什么？", "What's this lesson called?"), CAPTION))
         self.title_edit = QLineEdit()
@@ -1498,6 +1529,7 @@ class FloatingWindow(QWidget):
                     if pending else tr("错题都复习完了 🎉", "All mistakes reviewed 🎉"))
         self.home_sub.setText(" · ".join(bits))
         self._render_recall_card()
+        self._render_gap_card()
 
         self.home_review_card.sub_lbl.setText(
             tr(f"{pending} 个掉队过的知识点等你回看", f"{pending} knowledge points waiting for review")
@@ -1535,6 +1567,47 @@ class FloatingWindow(QWidget):
         self.recall_hint.setVisible(bool(hint))
         self.recall_time.setText(
             tr(f"预计 {s.get('minutes', n)} 分钟", f"About {s.get('minutes', n)} min"))
+
+    def _render_gap_card(self):
+        """填「你反复卡在 X」。没有结论就整张收起来。
+
+        只显示**最严重的一条**：首页是行动页，而且 cards 是纵向排的，堆三条就没重点了。
+        完整清单在「我的」里。排序（课次数多 → 最近还在卡）在 gaps.recurring 里做。
+        """
+        try:
+            found = gaps.recurring()
+        except Exception as e:
+            log.warning("算「反复卡住的前置知识」失败: %s", e)
+            found = []
+        self._home_gap = found[0] if found else None
+        if not self._home_gap:
+            self.home_gap_card.setVisible(False)
+            return
+        f = self._home_gap
+        self.gap_when.setText(tr(f"{f['lessons']} 节课都卡在这",
+                                 f"{f['lessons']} lessons in a row"))
+        self.gap_lbl.setText(f.get("sentence") or "")
+        self.gap_btn.setText(tr(f"专门补一下「{f['concept']}」",
+                                f"Work on \"{f['concept']}\""))
+        self.home_gap_card.setVisible(True)
+
+    def _practice_gap(self):
+        """首页「专门补一下 X」：拿这个前置概念现造一道题进练习页。
+
+        这个概念多半**不在错题本里**——它是更上游的前置，不是学生当下错的那道题。
+        所以造一个临时条目喂给 practice.generate（它只认 topic/missing 这几个字段）。
+        missing 得给一句话：对着一个光秃秃的词，模型出的题会空泛。
+        """
+        f = getattr(self, "_home_gap", None)
+        if not f:
+            return
+        item = {
+            "topic": f.get("concept", ""),
+            "missing": tr(f"这个前置知识点一直没打牢，最近 {f.get('lessons', 0)} 节课都卡在这",
+                          f"This prerequisite was never solid — stuck on it for "
+                          f"{f.get('lessons', 0)} lessons"),
+        }
+        self._practice_item(item)
 
     def _start_today(self):
         """主页上「开始今天的学习」：名字取自输入框。"""

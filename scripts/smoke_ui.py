@@ -677,5 +677,39 @@ finally:
     _persona.maybe_refresh = _orig_maybe
 window.toast_lbl.setVisible(False)
 
+# 首页「你反复卡在 X」：有结论才亮出来，点了能直接去补这个前置知识
+from echo.backend import gaps as _gaps              # noqa: E402
+
+_orig_recurring = _gaps.recurring
+try:
+    _gaps.recurring = lambda *a, **kw: []
+    window._show_home()          # 必须真的切到首页：控件在非当前页时 isVisible() 恒为 False
+    app.processEvents()
+    assert not window.home_gap_card.isVisible(), "没有结论却把「反复卡住」卡亮出来了"
+
+    _gaps.recurring = lambda *a, **kw: [{
+        "concept": "极限", "lessons": 3,
+        "topics": ["导数定义", "瞬时变化率", "洛必达法则"],
+        "first_seen": 1.0, "last_seen": 3.0,
+        "sentence": "你最近 3 节课都和「极限」有关。问题可能不在当前章节，而是这个前置知识还不稳定。"}]
+    window._show_home()
+    app.processEvents()
+    assert window.home_gap_card.isVisible(), "有结论却没显示「反复卡住」卡"
+    assert "极限" in window.gap_lbl.text(), f"卡片没说出卡在哪个概念：{window.gap_lbl.text()!r}"
+    assert "3" in window.gap_when.text(), f"没标出跨了几节课：{window.gap_when.text()!r}"
+    assert "极限" in window.gap_btn.text(), f"按钮没带上概念名：{window.gap_btn.text()!r}"
+
+    # 点下去要真的进练习页，而且是针对「极限」出的题——这个概念多半不在错题本里，
+    # 得凭空造一个条目，所以这里顺带验证那条路没崩
+    QTest.mouseClick(window.gap_btn, Qt.LeftButton)
+    app.processEvents()
+    assert window._page == ui.PRACTICE, "点「专门补一下」没有进练习页"
+    assert window._prac_item and window._prac_item.get("topic") == "极限", \
+        f"练习页拿到的知识点不对：{window._prac_item}"
+finally:
+    _gaps.recurring = _orig_recurring
+    window._render_home()
+    app.processEvents()
+
 window.close()
 print("UI smoke passed: one window, avatar and primary flow work")
