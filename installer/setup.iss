@@ -2,7 +2,7 @@
 ; 先运行 build.bat 生成 dist\Echo\Echo.exe，再用本脚本编译。
 
 #define MyAppName "Echo"
-#define MyAppVersion "1.3"
+#define MyAppVersion "2.0"
 #define MyAppPublisher "Echo"
 #define MyAppExeName "Echo.exe"
 
