@@ -2941,10 +2941,13 @@ class FloatingWindow(QWidget):
             self.stack.setFixedHeight(h)
             limit = max(80, scr.height() - m.top() - m.bottom() - header_h - 24)
             fits = h + 4 <= limit
+            # 知识地图 / 已学内容这类页面禁止上下滑动：滚轮要留给画布缩放，别跟滚动打架。
+            # 它们自带「画布自适应 + 平移缩放」，内容不靠滚动看。
+            no_scroll = idx in (MINDMAP, LEARNED)
             # 只有内容比屏幕还高时才允许滚动（此时滚动条只有 6px，并多留出这点宽度）
             self.body_scroll.setVerticalScrollBarPolicy(
-                Qt.ScrollBarAlwaysOff if fits else Qt.ScrollBarAsNeeded)
-            if not fits:
+                Qt.ScrollBarAlwaysOff if (fits or no_scroll) else Qt.ScrollBarAsNeeded)
+            if not fits and not no_scroll:
                 w += 8
             body_h = min(h + 4, limit)
             self.body_scroll.setFixedHeight(body_h)

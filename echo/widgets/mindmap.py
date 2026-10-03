@@ -69,6 +69,7 @@ class _Canvas(QWidget):
         self._subject_index = {}  # topic -> 学科列号
         self._subject = {}        # topic -> 学科名
         self._columns = {}        # 学科列号 -> 列左边界 x（画学科标签用）
+        self._focus_subject = None  # 聚焦某学科时，其它学科节点淡化；None = 全显示
         self._edges = []          # [(topic_a, topic_b)]
         self._world = QSizeF(1, 1)
         self._scale = 1.0
@@ -100,6 +101,7 @@ class _Canvas(QWidget):
         self._subject_index = {n["id"]: n.get("subject_index", 0) for n in nodes}
         self._subject = {n["id"]: n.get("subject", "") for n in nodes}
         self._columns = {}
+        self._focus_subject = None
         self._edges = [(e["from"], e["to"]) for e in edges
                        if e.get("from") is not None and e.get("to") is not None]
         if not keep_positions or set(self._pos) != set(topics):
@@ -190,6 +192,18 @@ class _Canvas(QWidget):
                            for t, _s, _tc in self._nodes])
         self._user_moved = False
         self.fit()
+
+    def set_focus(self, idx):
+        """聚焦某个学科（横向菜单点选）：其它学科节点淡化。idx=None 恢复全部。"""
+        if idx == self._focus_subject:
+            return
+        self._focus_subject = idx
+        self.update()
+
+    def _dimmed(self, topic: str) -> bool:
+        """聚焦模式下，这个节点是否该淡化（不在聚焦学科里）。"""
+        return self._focus_subject is not None and \
+            self._subject_index.get(topic) != self._focus_subject
 
     def resizeEvent(self, e):
         """学生还没自己摆弄过时，跟着尺寸重新适配 —— 详情面板一长高，地图容易被挤出去。"""
@@ -310,6 +324,7 @@ class _Canvas(QWidget):
         for a, b in self._edges:
             if a not in self._pos or b not in self._pos:
                 continue
+            dim = self._dimmed(a) and self._dimmed(b)   # 聚焦模式下，两端都不在聚焦学科里的边淡化
             ra, rb = self._rect(a), self._rect(b)
             x1, y1 = ra.center().x(), ra.bottom()
             x2, y2 = rb.center().x(), rb.top()
@@ -317,7 +332,10 @@ class _Canvas(QWidget):
                 y1, y2 = ra.top(), rb.bottom()
             mid = (y1 + y2) / 2
             hot = self._selected and (a == self._selected or b == self._selected)
-            pen = QPen(QColor(Colors.ACCENT if hot else Colors.BORDER_STRONG), 3.0 if hot else 2.0)
+            if dim:
+                pen = QPen(QColor(Colors.BORDER), 1.0)
+            else:
+                pen = QPen(QColor(Colors.ACCENT if hot else Colors.BORDER_STRONG), 3.0 if hot else 2.0)
             pen.setCapStyle(Qt.RoundCap)
             p.setPen(pen)
             path = QPainterPath(QPointF(x1, y1))
@@ -330,7 +348,7 @@ class _Canvas(QWidget):
             arrow.lineTo(x2 - 5.5, y2 - 7.5 * direction)
             arrow.lineTo(x2 + 5.5, y2 - 7.5 * direction)
             arrow.closeSubpath()
-            p.setBrush(QBrush(QColor(Colors.ACCENT if hot else Colors.BORDER_STRONG)))
+            p.setBrush(QBrush(QColor(Colors.BORDER if dim else (Colors.ACCENT if hot else Colors.BORDER_STRONG))))
             p.setPen(Qt.NoPen)
             p.drawPath(arrow)
             p.setBrush(Qt.NoBrush)
@@ -348,10 +366,13 @@ class _Canvas(QWidget):
         for topic, status, timecode in self._nodes:
             rect = self._rect(topic)
             border, fill, text = status_style(status)
+            dim = self._dimmed(topic)
+            if dim:
+                border, fill, text = Colors.BORDER, Colors.SURFACE, Colors.TEXT_DISABLED
             selected = topic == self._selected
             hover = topic == self._hover
-            first = topic == self._review_first
-            if hover and not selected:
+            first = topic == self._review_first and not dim
+            if hover and not selected and not dim:
                 fill = Colors.SURFACE_HOVER
             p.setBrush(QBrush(QColor(fill)))
             if selected or first:
@@ -380,7 +401,7 @@ class _Canvas(QWidget):
             else:
                 p.drawText(rect, Qt.AlignCenter, label)
 
-            if status != mindmap.STATUS_OK:
+            if status != mindmap.STATUS_OK and not dim:
                 p.setBrush(QBrush(QColor(border)))
                 p.setPen(Qt.NoPen)
                 p.drawEllipse(QPointF(rect.left() + 10, rect.top() + 11), 3.2, 3.2)
@@ -452,13 +473,13 @@ class MindMapPage(QWidget):
         cb.addWidget(self.lesson_points)
         root.addWidget(self.content_box)
 
-        # 「已学内容」顶部的目录：每个学科一项，点开看它的小分支（知识点），点小分支定位到图里
-        self.catalog_box = QWidget()
-        self.catalog_box_lay = QVBoxLayout(self.catalog_box)
-        self.catalog_box_lay.setContentsMargins(0, 0, 0, 0)
-        self.catalog_box_lay.setSpacing(2)
-        self.catalog_box.hide()
-        root.addWidget(self.catalog_box)
+        # 「已学内容」顶部的横向分类菜单：一类的知识放一起，点一下聚焦该类（其它淡化）
+        self.menu_box = QWidget()
+        self.menu_lay = QHBoxLayout(self.menu_box)
+        self.menu_lay.setContentsMargins(0, 0, 0, 0)
+        self.menu_lay.setSpacing(6)
+        self.menu_box.hide()
+        root.addWidget(self.menu_box)
 
         self.canvas = _Canvas()
         self.canvas.node_clicked.connect(self._on_node)
@@ -489,6 +510,7 @@ class MindMapPage(QWidget):
 
         self.detail = _DetailPanel()
         self.detail.practice_requested.connect(self.practice_requested.emit)
+        self.detail.navigate_requested.connect(self._on_node)   # 点相邻知识点 → 跳过去
         root.addWidget(self.detail)
 
         self.empty = QLabel(tr("这节课还没有知识点记录。上完一节课，这里会长出知识地图。",
@@ -510,6 +532,18 @@ class MindMapPage(QWidget):
             }}
             QPushButton#MapTool:hover {{
                 color: {Colors.TEXT_PRIMARY}; border-color: {Colors.ACCENT};
+            }}
+            QPushButton#CatChip {{
+                background: {Colors.SURFACE}; color: {Colors.TEXT_SECONDARY};
+                border: 1px solid {Colors.BORDER}; border-radius: {Radius.LG}px;
+                padding: 4px 12px; font-size: 12px;
+            }}
+            QPushButton#CatChip:hover {{
+                color: {Colors.TEXT_PRIMARY}; border-color: {Colors.ACCENT};
+            }}
+            QPushButton#CatChip:checked {{
+                background: {Colors.ACCENT_SOFT}; color: {Colors.ACCENT};
+                border-color: {Colors.ACCENT}; font-weight: 600;
             }}
         """)
 
@@ -535,7 +569,7 @@ class MindMapPage(QWidget):
         self.lesson_points.setText("\n".join("· " + p for p in points[:4]))
         self.lesson_points.setVisible(bool(points))
         self.content_box.setVisible(bool(title or summary or points))
-        self.catalog_box.setVisible(False)   # 目录只给「已学内容」聚合图用，单课地图不显示
+        self.menu_box.setVisible(False)   # 分类菜单只给「已学内容」聚合图用，单课地图不显示
 
         nodes = self._graph["nodes"]
         review = sum(1 for n in nodes if n["status"] == mindmap.STATUS_REVIEW)
@@ -602,71 +636,46 @@ class MindMapPage(QWidget):
         self.legend.setVisible(bool(nodes))
         self.reset_btn.setVisible(bool(nodes))
         self.canvas.set_graph(self._graph)
-        self._build_catalog()
-        self.catalog_box.setVisible(bool(nodes))
+        self._build_menu()
+        self.menu_box.setVisible(bool(nodes))
         self.detail.clear()
         self.detail.setVisible(bool(nodes))
         self.content_changed.emit()
 
-    def _build_catalog(self):
-        """「已学内容」顶部的目录：每个学科一项，点开看它的小分支（知识点）。"""
-        while self.catalog_box_lay.count():
-            it = self.catalog_box_lay.takeAt(0)
+    def _build_menu(self):
+        """「已学内容」顶部的横向分类菜单：一个学科一个 chip，点一下聚焦该类（其它淡化）。"""
+        while self.menu_lay.count():
+            it = self.menu_lay.takeAt(0)
             w = it.widget()
             if w:
                 w.deleteLater()
 
-        head = QLabel(tr("目录", "Contents"))
-        head.setFont(font(11, 700))
-        head.setStyleSheet(f"color:{Colors.ACCENT};")
-        self.catalog_box_lay.addWidget(head)
-
-        nodes = self._graph.get("nodes") or []
         subjects = self._graph.get("subjects") or []
-        by_subject = {}
-        for n in nodes:
-            by_subject.setdefault(n.get("subject_index", 0), []).append(n)
-
+        self._menu_btns = []
+        all_btn = self._make_chip(tr("全部", "All"), None)
+        self.menu_lay.addWidget(all_btn)
         for idx, subj in enumerate(subjects):
-            group = sorted(by_subject.get(idx, []),
-                           key=lambda n: (n.get("level", 0), n.get("topic", "")))
-            label = f"{subj} · {len(group)}"
-            header = QPushButton("▸  " + label)
-            header.setObjectName("CatalogHead")
-            header.setCursor(Qt.PointingHandCursor)
-            header.setFlat(True)
-            header.setStyleSheet(
-                "QPushButton#CatalogHead { text-align: left; padding: 4px 6px;"
-                f" font-size: 12px; font-weight: 600; color: {Colors.TEXT_PRIMARY}; }}"
-                "QPushButton#CatalogHead:hover { color: " + Colors.ACCENT + "; }")
+            self.menu_lay.addWidget(self._make_chip(subj, idx))
+        self.menu_lay.addStretch(1)
+        self._set_menu_checked(None)
 
-            container = QWidget()
-            cl = QVBoxLayout(container)
-            cl.setContentsMargins(16, 0, 0, 4)
-            cl.setSpacing(1)
-            for n in group:
-                topic = n.get("topic", "")
-                _, _, text_color = status_style(n.get("status", "ok"))
-                item = QPushButton(topic)
-                item.setObjectName("CatalogItem")
-                item.setCursor(Qt.PointingHandCursor)
-                item.setFlat(True)
-                item.setStyleSheet(
-                    "QPushButton#CatalogItem { text-align: left; padding: 2px 6px;"
-                    f" font-size: 12px; color: {text_color}; }}"
-                    "QPushButton#CatalogItem:hover { color: " + Colors.ACCENT + "; }")
-                item.clicked.connect(lambda _=False, t=topic: self.select(t))
-                cl.addWidget(item)
-            container.hide()
-            header.clicked.connect(lambda _=False, c=container, h=header, l=label:
-                                   self._toggle_catalog(c, h, l))
-            self.catalog_box_lay.addWidget(header)
-            self.catalog_box_lay.addWidget(container)
+    def _make_chip(self, text, idx):
+        b = QPushButton(text)
+        b.setObjectName("CatChip")
+        b.setCheckable(True)
+        b.setCursor(Qt.PointingHandCursor)
+        b.clicked.connect(lambda _=False, i=idx: self._focus_subject(i))
+        self._menu_btns.append(b)
+        return b
 
-    def _toggle_catalog(self, container, header, label):
-        show = container.isHidden()
-        container.setVisible(show)
-        header.setText(("▾  " if show else "▸  ") + label)
+    def _focus_subject(self, idx):
+        """点一个分类 chip：聚焦该学科，其余淡化；点「全部」恢复。"""
+        self.canvas.set_focus(idx)
+        self._set_menu_checked(idx)
+
+    def _set_menu_checked(self, idx):
+        for i, b in enumerate(self._menu_btns):
+            b.setChecked((i == 0 and idx is None) or (idx is not None and i == idx + 1))
 
     @staticmethod
     def _lesson_key(lesson: dict) -> str:
@@ -702,15 +711,32 @@ class MindMapPage(QWidget):
     def _on_node(self, topic: str):
         # 只换选中态，别把学生拖好的位置重置掉
         self.canvas.set_graph(self._graph, selected=topic, keep_positions=True)
-        self.detail.show_detail(mindmap.node_detail(
-            self._lesson, topic, self._mistakes, self._graph.get("review_first", "")))
+        self.detail.show_detail(self._node_detail(topic))
         self.detail.load_questions(self._lesson, topic, self._mistakes)
+
+    def _node_detail(self, topic: str) -> dict:
+        """节点详情 + 相邻知识点（可跳转链接）。"""
+        d = mindmap.node_detail(self._lesson, topic, self._mistakes,
+                                self._graph.get("review_first", ""))
+        d["related"] = [t for t in self._neighbors(topic) if t != topic]
+        return d
+
+    def _neighbors(self, topic: str) -> list:
+        """图上与这个知识点直接相连的其它知识点（前置/后继都算）。"""
+        out = []
+        for a, b in self.canvas._edges:
+            if mindmap._same(a, topic) and b not in out:
+                out.append(b)
+            elif mindmap._same(b, topic) and a not in out:
+                out.append(a)
+        return out
 
 
 class _DetailPanel(QFrame):
     """单个知识点的详情：老师怎么讲的 + 缺的那一步 + 一道题和解析。"""
 
     practice_requested = pyqtSignal(str)
+    navigate_requested = pyqtSignal(str)    # 详情里点了相邻知识点的链接，跳到那个节点
     content_changed = pyqtSignal()          # 详情面板变高了，宿主该重新算窗口高度
     # 出题在后台线程，出好后必须回到主线程再动控件（PyQt 信号跨线程会自动排队）
     _questions_ready = pyqtSignal(object)
@@ -746,6 +772,19 @@ class _DetailPanel(QFrame):
         self.miss_lbl.setWordWrap(True)
         self.miss_lbl.setFont(font(12))
         root.addWidget(self.miss_lbl)
+
+        # 相关知识点：相邻节点做成可点链接，点一下跳过去
+        self.rel_head = QLabel(tr("相关知识点", "Related topics"))
+        self.rel_head.setFont(font(11, 700))
+        self.rel_head.setStyleSheet(f"color:{Colors.ACCENT};")
+        root.addWidget(self.rel_head)
+        self.rel_box = QWidget()
+        self.rel_lay = QHBoxLayout(self.rel_box)
+        self.rel_lay.setContentsMargins(0, 0, 0, 0)
+        self.rel_lay.setSpacing(6)
+        root.addWidget(self.rel_box)
+        self.rel_head.hide()
+        self.rel_box.hide()
 
         self.quiz_box = QVBoxLayout()
         self.quiz_box.setSpacing(4)
@@ -783,6 +822,8 @@ class _DetailPanel(QFrame):
                                  "Click a knowledge point above to see its explanation and questions."))
         self.body_lbl.setStyleSheet(f"color:{Colors.TEXT_SECONDARY};")
         self.miss_lbl.setVisible(False)
+        self.rel_head.hide()
+        self.rel_box.hide()
         self._clear_quiz()
 
     def show_detail(self, detail: dict):
@@ -827,7 +868,32 @@ class _DetailPanel(QFrame):
                                      "You never fell behind here — try a question to confirm."))
             self.miss_lbl.setStyleSheet(f"color:{Colors.TEXT_SECONDARY};")
         self.miss_lbl.setVisible(True)
+        self._build_related(detail.get("related") or [])
         self.content_changed.emit()
+
+    def _build_related(self, topics):
+        """把相邻知识点做成一排可点链接（跳到那个节点）。没有相邻就整行隐藏。"""
+        while self.rel_lay.count():
+            it = self.rel_lay.takeAt(0)
+            w = it.widget()
+            if w:
+                w.deleteLater()
+        topics = [t for t in topics if t]
+        self.rel_head.setVisible(bool(topics))
+        self.rel_box.setVisible(bool(topics))
+        for t in topics:
+            b = QPushButton(t)
+            b.setObjectName("RelLink")
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFlat(True)
+            b.setStyleSheet(
+                "QPushButton#RelLink { text-align: left; padding: 2px 8px;"
+                f" font-size: 12px; color: {Colors.ACCENT}; border: 1px solid {Colors.ACCENT_BORDER};"
+                f" border-radius: {Radius.LG}px; background: transparent; }}"
+                "QPushButton#RelLink:hover { background: " + Colors.ACCENT_SOFT + "; }")
+            b.clicked.connect(lambda _=False, x=t: self.navigate_requested.emit(x))
+            self.rel_lay.addWidget(b)
+        self.rel_lay.addStretch(1)
 
     def load_questions(self, lesson: dict, topic: str, mistakes: list = None):
         self._clear_quiz()
