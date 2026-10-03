@@ -439,12 +439,19 @@ class DeskPet(QWidget):
             self.tray.toggle_window()
         elif self.win is not None:
             self.win.setVisible(not self.win.isVisible())
-        # 打开面板、且今天有该回响的 → 直接落在主页（顶部就是「今天该回响」卡片）
-        if opening and self.due_count and self.win is not None:
+        # 打开面板、有该回响的、**而且没在上课** → 落在主页（顶部就是「今天该回响」卡片）。
+        # 上课时绝不能跳：那等于把学生从课堂里拽出去，而这节课还没收尾（回响和错题
+        # 都不会存）——「上课锁死在课堂」是更硬的规则，这条让路。
+        if opening and self.due_count and self.win is not None and not self._in_class():
             show_home = getattr(self.win, "_show_home", None)
             if callable(show_home):
                 show_home()
         self._check_due()
+
+    def _in_class(self) -> bool:
+        """这堂课还开着没有。引擎还没接上时当没在上课（启动早期会走到这儿）。"""
+        engine = getattr(getattr(self.win, "echo", None), "engine", None)
+        return bool(getattr(engine, "active", False))
 
     def _feedback(self, kind):
         self._last_interact = time.time()
