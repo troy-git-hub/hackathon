@@ -238,6 +238,34 @@ def due_reason(item: dict, now: float = None) -> str:
     return base
 
 
+def set_why(topics: dict) -> int:
+    """批量写「为什么要复习它」：{topic: 一句话}，返回实际写到几条。
+
+    单独开一个函数、不复用 add()：add() 是按 topic **整条替换**的
+    （by_topic[topic] = it），只会把 reviewed/time 和几个调度字段带过去 ——
+    拿它写一个新字段，会把 missing / micro_lesson / timecode 一起抹成空。
+    这里只动 why_matters 一个键，其余原样留着。
+
+    空串不写入：调用方（why_matters）拿不到 AI 结果时会传空，这时候宁可留着
+    上一次写好的说明，也不要拿空值把它盖掉。
+    """
+    clean = {str(t).strip(): str(v).strip() for t, v in (topics or {}).items()
+             if str(t).strip() and str(v).strip()}
+    if not clean:
+        return 0
+    with _LOCK:
+        cur = load()
+        n = 0
+        for it in cur:
+            topic = str(it.get("topic") or "").strip()
+            if topic in clean and it.get("why_matters") != clean[topic]:
+                it["why_matters"] = clean[topic]
+                n += 1
+        if n:
+            _write(cur)
+        return n
+
+
 def due_summary(now: float = None) -> dict:
     """首页「今天该回响」卡片要的那几个数。
 

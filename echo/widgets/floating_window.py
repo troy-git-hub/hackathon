@@ -49,7 +49,7 @@ from echo.widgets.checkin import CheckinCard
 from echo.components.avatar import AvatarView
 from echo.widgets.mindmap import MindMapPage
 from echo.widgets.profile_page import ProfilePage
-from echo.backend import mindmap, profile, recall
+from echo.backend import mindmap, persona, profile, recall, why_matters
 
 log = logging.getLogger("echo.ui")
 
@@ -166,6 +166,10 @@ class FloatingWindow(QWidget):
     _recall_planned = pyqtSignal(object)
     _recall_judged = pyqtSignal(object)
     _recall_voice_done = pyqtSignal(str)
+    # 「为什么要复习它」是后台批量生成的，结果经信号回主线程再碰控件
+    _why_ready = pyqtSignal(object)
+    # 断点页的麦克风：转写在后台线程，结果经信号回主线程填进输入框
+    _ask_voice_done = pyqtSignal(str)
     # 随时问：回答是流式的，回调在后台线程，经信号回主线程追加文字
     _qa_delta = pyqtSignal(str)
     _qa_done = pyqtSignal(str)
@@ -196,6 +200,11 @@ class FloatingWindow(QWidget):
         self._detail_lesson = {}     # 当前正在看的这节历史课
         self._detail_back = None     # 回顾页是从哪儿进来的（课程管理 / 别处），← 按钮退回那里
         self._detail_back_label = ""
+        # 错题卡的折叠状态 {topic: 是否收起}。_render_review 整页重建，
+        # 不记着的话学生刚展开的卡打完分就被收回去。
+        self._review_folded = {}
+        self._why_busy = False       # 正在批量生成「为什么要复习它」，防重复触发
+        self._why_labels = {}        # {topic: 那张卡的说明标签}，生成回来后就地填字
         # 「讲给 Echo 听」这一轮的状态
         self._recall_items = []      # 本轮聊到的知识点
         self._recall_root = ""       # 它们的共同根源（有的话）
@@ -206,6 +215,8 @@ class FloatingWindow(QWidget):
         self._recall_busy = False
         self._recall_recording = False      # 麦克风按一下开始、再按一下结束
         self._recall_recorder = None
+        self._ask_recording = False         # 断点页的追问框也有一套（跟上面同款）
+        self._ask_recorder = None
         # 「答疑（随时问）」的状态：对话实例留着，课后回来接着问
         self._qa_chat = None
         self._qa_busy = False
@@ -227,6 +238,8 @@ class FloatingWindow(QWidget):
         self._recall_planned.connect(self._on_recall_planned)
         self._recall_judged.connect(self._on_recall_judged)
         self._recall_voice_done.connect(self._on_recall_voice_done)
+        self._why_ready.connect(self._on_why_ready)
+        self._ask_voice_done.connect(self._on_ask_voice_done)
         self._qa_delta.connect(self._on_qa_delta)
         self._qa_done.connect(self._on_qa_done)
         self._qa_err.connect(self._on_qa_err)
@@ -312,6 +325,20 @@ class FloatingWindow(QWidget):
         self.stack.setAutoFillBackground(False)
         self.stack.setStyleSheet("QStackedWidget {background: transparent;}")
         root.addWidget(self.body_scroll)
+
+        # 会自己消失的提示条：默认藏着，用的时候显示几秒。
+        # 放在 header 正下方而不是借 status_lbl —— 那里显示「正在听课/已下课」，
+        # 借来显示别的会让状态栏短暂说谎。
+        self.toast_lbl = _label("", wrap=True)
+        self.toast_lbl.setStyleSheet(
+            f"color: {Colors.TEXT_PRIMARY}; font-size: 12px;"
+            f"background: {Colors.ACCENT_SOFT}; border: 1px solid {Colors.ACCENT_BORDER};"
+            f"border-radius: {Radius.MD}px; padding: 8px 12px;")
+        self.toast_lbl.setVisible(False)
+        root.insertWidget(1, self.toast_lbl)
+        self._toast_timer = QTimer(self)
+        self._toast_timer.setSingleShot(True)
+        self._toast_timer.timeout.connect(self._hide_toast)
 
     def _build_header(self) -> QWidget:
         bar = _DraggableHeader()
@@ -592,6 +619,13 @@ class FloatingWindow(QWidget):
                                      f"border:1px solid {Colors.BORDER}; border-radius:6px; padding:7px 10px;")
         self.ask_input.returnPressed.connect(self._ask_breakpoint)
         qrow.addWidget(self.ask_input, 1)
+        # 按一下说话、再按一下转成文字填进输入框（不自动发送）——跟「讲给 Echo 听」
+        # 那套完全一样。这里尤其值得有：学生刚掉队正烦着，开口说「我卡在哪」比打字容易。
+        self.ask_mic = _btn(tr("说", "Speak"), "Quiet", self._toggle_ask_mic,
+                            tr("按一下说话，Echo 把你说的话转成文字（不会自动发送）",
+                               "Tap to speak — Echo converts it to text (won't send automatically)"))
+        self.ask_mic.setFixedWidth(40)
+        qrow.addWidget(self.ask_mic)
         self.ask_btn = _btn(tr("问 AI", "Ask AI"), "Accent", self._ask_breakpoint)
         self.ask_btn.setFixedHeight(34)
         qrow.addWidget(self.ask_btn)
@@ -804,6 +838,7 @@ class FloatingWindow(QWidget):
             w = self.review_list_lay.takeAt(0).widget()
             if w:
                 w.deleteLater()
+        self._why_labels = {}        # 旧卡片连同它们的标签一起销毁了
         try:
             due = store.due_items()
             later = store.later_items()
@@ -830,6 +865,42 @@ class FloatingWindow(QWidget):
                 self.review_list_lay.addWidget(self._review_card(it, due=False))
 
         self.review_empty.setVisible(not (due or later))
+        self._kick_why_matters(due + later)
+
+    def _kick_why_matters(self, items):
+        """给还没有「为什么要复习它」的错题批量补一句。
+
+        一次问一整批，不是每张卡各问一次：模型看不到彼此就容易写成一模一样的套话，
+        而且 N 张卡就是 N 次往返。已经在生成中就跳过（`_why_busy`）——复习页会被
+        反复重渲染（每次打分都重渲染），不挡一下会连着发起好几批。
+        """
+        if self._why_busy:
+            return
+        todo = why_matters.needs(items)
+        if not todo:
+            return
+        self._why_busy = True
+        # 回调在后台线程，只允许 emit —— 碰控件一律回主线程做（_on_why_ready）
+        why_matters.generate_async(todo,
+                                   on_done=lambda reasons: self._why_ready.emit(reasons),
+                                   on_error=lambda msg: self._why_ready.emit({}))
+
+    def _on_why_ready(self, reasons):
+        """批量生成回来了。写进错题本，然后只把对应那几行文字填上。"""
+        self._why_busy = False
+        if not isinstance(reasons, dict) or not reasons:
+            return
+        try:
+            store.set_why(reasons)
+        except Exception as e:
+            log.warning("写「为什么要复习它」失败: %s", e)
+            return
+        for topic, text in reasons.items():
+            lbl = self._why_labels.get(topic)
+            if lbl is not None:
+                lbl.setText(text)
+                lbl.setVisible(True)
+        self._fit()      # 多出来的一行会改变卡片高度
 
     def _recall_cta(self, n: int) -> QFrame:
         """「讲给 Echo 听」的入口卡：不做题，讲一遍就够了。"""
@@ -861,39 +932,68 @@ class FloatingWindow(QWidget):
         v = QVBoxLayout(card)
         v.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
         v.setSpacing(6)
+
+        topic_name = (item.get("topic") or "").strip()
+        # 折叠状态记在实例上：_render_review 是整页清空重建的，不记的话
+        # 学生刚展开一张，打完分重渲染又给收回去。默认值：今天该复习的展开
+        # （自评按钮不该多一次点击），「过几天再复习」那一堆收起（错题一多
+        # 就是这一堆把页面撑爆的）。
+        folded = bool(self._review_folded.get(topic_name, not due))
+        self._review_folded[topic_name] = folded      # 把生效值记下，_toggle 直接翻它
+
+        head = QHBoxLayout()
+        head.setSpacing(Spacing.SM)
         topic = _label(tr(f"✦ {item.get('topic', '知识点')}", f"✦ {item.get('topic', 'Knowledge point')}"),
                        f"color: {Colors.TEXT_PRIMARY}; font-size: 15px; font-weight: 600;")
         topic.setWordWrap(True)
-        v.addWidget(topic)
+        head.addWidget(topic, 1)
+        v.addLayout(head)
+
+        # 「为什么要复习它」——AI 生成的，说的是这个知识点跟后面要学的东西有什么
+        # 关系，不是「你为什么错了」。这一行**不随折叠隐藏**：它就是让学生觉得
+        # 这步值得认真对待的那句话，收起状态尤其需要它在。
+        # 即使现在还没有内容也先把控件建出来、藏起来：后台批量生成回来时只改
+        # 文字、不重渲染整页（学生可能正在看列表）。
+        why = (item.get("why_matters") or "").strip()
+        why_lbl = _label(why, f"color: {Colors.ACCENT}; font-size: 12px;", wrap=True)
+        why_lbl.setVisible(bool(why))
+        v.addWidget(why_lbl)
+        if topic_name:
+            self._why_labels[topic_name] = why_lbl
+
+        body = QWidget()
+        bv = QVBoxLayout(body)
+        bv.setContentsMargins(0, 0, 0, 0)
+        bv.setSpacing(6)
+
         # 为什么现在该复习它——不是随机抽的，是调度算出来的，让学生看见依据
         reason = store.due_reason(item)
         if reason:
             rl = _label(f"◷ {reason}", f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;",
                        wrap=True)
-            v.addWidget(rl)
+            bv.addWidget(rl)
         miss = item.get("missing") or item.get("reason") or tr("这里没跟上", "Lost track here")
         ml = _label(tr(f"没跟上：{miss}", f"Missed: {miss}"),
                     f"color: {Colors.ACCENT}; font-size: 13px;")
         ml.setWordWrap(True)
-        v.addWidget(ml)
+        bv.addWidget(ml)
         # 老师当时讲到哪儿 —— 想回去看录像时有个抓手
         tc = (item.get("timecode") or "").strip()
         if tc:
-            v.addWidget(_label(tr(f"老师讲到 {tc}", f"Teacher covered it at {tc}"),
+            bv.addWidget(_label(tr(f"老师讲到 {tc}", f"Teacher covered it at {tc}"),
                                f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"))
         lesson = (item.get("micro_lesson") or "").strip()
         if lesson:
             lb = _label(lesson, f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;")
             lb.setWordWrap(True)
-            v.addWidget(lb)
+            bv.addWidget(lb)
 
-        topic_name = item.get("topic", "")
         if not due:
             # 还没到时候：只告诉他下次什么时候来，不给按钮（不该现在就刷）
-            v.addWidget(_label(self._next_review_text(item),
+            bv.addWidget(_label(self._next_review_text(item),
                                f"color: {Colors.OK_FG}; font-size: 11px;"))
         else:
-            v.addWidget(_label(tr("想起来了吗？", "How well do you remember it?"),
+            bv.addWidget(_label(tr("想起来了吗？", "How well do you remember it?"),
                                f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"))
             # 三档自评决定下次什么时候再问。没有「永久掌握」这个终态：
             # 答得越稳，Echo 把下次确认推得越远；答崩了明天就回来。
@@ -908,14 +1008,35 @@ class FloatingWindow(QWidget):
                          lambda t=topic_name, r=result: self._grade_review(t, r),
                          self._next_due_tip(item, result))
                 grades.addWidget(b)
-            v.addLayout(grades)
+            bv.addLayout(grades)
 
-        row = QHBoxLayout()
-        row.addStretch()
-        row.addWidget(_btn(tr("想不起来？出道题试试", "Not sure? Try a question"), "Link",
+        prow = QHBoxLayout()
+        prow.addStretch()
+        prow.addWidget(_btn(tr("想不起来？出道题试试", "Not sure? Try a question"), "Link",
                            lambda it=item: self._practice_item(it)))
-        v.addLayout(row)
+        bv.addLayout(prow)
+
+        body.setVisible(not folded)
+        v.addWidget(body)
+
+        # 折叠按钮。用闭包直接改 body 的可见性、不重渲染整页 —— 重渲染会打断
+        # 学生正在看的列表，而且他刚打完分的那张卡会跳位置。
+        # toggle 在这里还没赋值，但 lambda 体是点击时才求值，那时它已经绑好了。
+        toggle = _btn("▸" if folded else "▾", "IconBtn",
+                      lambda t=topic_name, b=body: self._toggle_review_card(t, b, toggle),
+                      tr("展开", "Expand") if folded else tr("收起", "Collapse"))
+        toggle.setFixedSize(22, 22)
+        head.addWidget(toggle, 0, Qt.AlignTop)
         return card
+
+    def _toggle_review_card(self, topic: str, body, btn):
+        """折起 / 展开一张错题卡：翻 body 的可见性、换箭头、重算窗口高度。"""
+        folded = not bool(self._review_folded.get(topic))
+        self._review_folded[topic] = folded
+        body.setVisible(not folded)
+        btn.setText("▸" if folded else "▾")
+        btn.setToolTip(tr("展开", "Expand") if folded else tr("收起", "Collapse"))
+        self._fit()          # 卡片高度变了，窗口要跟着重算，否则留白
 
     @staticmethod
     def _next_review_text(item) -> str:
@@ -938,11 +1059,40 @@ class FloatingWindow(QWidget):
             return
         self._render_review()
         self._fit()
+        self._maybe_refresh_persona()      # 复习攒够了，画像可以重算一次
 
     def _mark_reviewed(self, topic):
         store.mark_reviewed(topic)
         self._render_review()
         self._fit()
+
+    def _toast(self, text: str, ms: int = 5000):
+        """一条会自己消失的提示。不打断当前操作，所以不用弹窗。"""
+        self.toast_lbl.setText(text)
+        self.toast_lbl.setVisible(True)
+        self._fit()
+        self._toast_timer.start(ms)      # start 会顶掉上一条还没到点的隐藏
+
+    def _hide_toast(self):
+        if self.toast_lbl.isVisible():
+            self.toast_lbl.setVisible(False)
+            self._fit()
+
+    def _maybe_refresh_persona(self):
+        """攒够记录了就重算一次学生画像，重算了就跟学生说一声。
+
+        「攒够没」的判据在水位线里（persona 内部），这里只管够了就提示一下。
+        同一段节奏里两个触发点（下课、复习打分）可能都命中，第二次
+        maybe_refresh() 会返回 None —— 天然只会提示一次。
+        """
+        try:
+            data = persona.maybe_refresh()
+        except Exception as e:
+            log.warning("重算学生画像失败: %s", e)
+            return
+        if data:
+            self._toast(tr("个人信息已更新 —— Echo 对你的了解又细了一点",
+                           "Profile updated — Echo knows you a bit better now"))
 
     def _on_checkin_closed(self):
         """抽问卡片收起来了：把窗口缩回听课页该有的高度。
@@ -1768,6 +1918,48 @@ class FloatingWindow(QWidget):
             self.recall_input.setFocus()
         else:
             self.recall_input.setPlaceholderText(
+                tr("没听清，再说一次，或者直接打字", "Didn't catch that — try again, or just type"))
+
+    # ----- 断点页的麦克风：跟上面「讲给 Echo 听」那套是一回事，只是填另一个框 -----
+    # 两处逻辑目前是重复的。留着重复也不抽公共函数：能变的点太多（占位符、目标输入框、
+    # 状态字段、信号），抽出来会变成一堆参数的胶水函数，比这两段还真难读。
+    # 出现第三处再抽。
+    def _toggle_ask_mic(self):
+        """掉队页的追问框也支持说话。学生正卡着，开口比打字容易。"""
+        if getattr(self, "_ask_recording", False):
+            self._ask_recording = False
+            self.ask_mic.setText(tr("说", "Speak"))
+            self.ask_mic.setEnabled(False)
+            self.ask_input.setPlaceholderText(tr("转写中…", "Transcribing…"))
+            from echo.backend import voice_input
+            voice_input.transcribe_async(
+                self._ask_recorder,
+                on_done=lambda text: self._ask_voice_done.emit(text),
+                on_error=lambda msg: self._ask_voice_done.emit(""))
+            return
+        try:
+            from echo.backend import voice_input
+            self._ask_recorder = voice_input.Recorder()
+            self._ask_recorder.start()
+        except Exception as e:
+            log.warning("麦克风打不开: %s", e)
+            dialogs.warn(self, tr("麦克风打不开", "Couldn't open the microphone"),
+                        tr("检查一下有没有麦克风设备、系统有没有给 Echo 麦克风权限。",
+                           "Check that a microphone is connected and Echo has permission to use it."))
+            return
+        self._ask_recording = True
+        self.ask_mic.setText("●")
+        self.ask_input.setPlaceholderText(tr("在听你说…再按一下结束", "Listening… tap again to stop"))
+
+    def _on_ask_voice_done(self, text: str):
+        self.ask_mic.setEnabled(True)
+        self.ask_input.setPlaceholderText(tr("比如：为什么分母是 P(B)？",
+                                            "e.g. why is the denominator P(B)?"))
+        if text:
+            self.ask_input.setText(text)      # 填进去但不自动问——转写会有错字，先让他看一眼
+            self.ask_input.setFocus()
+        else:
+            self.ask_input.setPlaceholderText(
                 tr("没听清，再说一次，或者直接打字", "Didn't catch that — try again, or just type"))
 
     def _bubble(self, box_lay: QVBoxLayout, box: QWidget, text: str, who: str, tone: str = ""):
@@ -2763,6 +2955,7 @@ class FloatingWindow(QWidget):
         self._save_lesson(report)
         self._cat("ok" if not cnt["review"] else "idle")
         self._fit()
+        self._maybe_refresh_persona()      # 这节课上完了，画像可能攒够该重算
 
     @staticmethod
     def _stat_line(src) -> str:

@@ -584,5 +584,98 @@ window._show_page(ui.LISTEN)
 app.processEvents()
 assert window.btn_qa.isVisible() and window.btn_lost.isVisible(), "听课页的两个主按钮有一个不见了"
 
+# 错题卡：折叠 + 「为什么要复习它」
+# 到期那组默认展开（自评按钮不该多一次点击）「过几天再复习」那组默认收起——
+# 错题一多，把页面撑爆的正是后者。
+store._write([])
+store.add([{"topic": "到期知识点", "missing": "为什么分母是 P(B)？",
+            "timecode": "03:12", "micro_lesson": "分母是 B 的总可能",
+            "time": _t.time() - 86400},
+           {"topic": "以后再看的", "missing": "还没到时候", "time": _t.time() - 86400}])
+store.grade("以后再看的", store.CLEAR)          # 打过一次分 → 排到「过几天再复习」
+store.set_why({"到期知识点": "后面所有推导都从这里出发"})
+
+window._show_review()
+app.processEvents()
+assert window._page == ui.REVIEW
+assert window._review_folded.get("到期知识点") is False, "到期的那张卡应该默认展开"
+assert window._review_folded.get("以后再看的") is True, "「过几天再复习」的卡应该默认收起"
+
+# 说明那一行 AI 还没生成时也得先建出来（回来就地填字，不重渲染整页）；
+# 而且**收起状态下它仍然可见** —— 它就是让人重视这句话的那一行。
+why_lbl = window._why_labels.get("到期知识点")
+assert why_lbl is not None, "没给错题卡建「为什么要复习它」那一行"
+assert why_lbl.isVisible(), "有说明却不显示"
+assert "后面所有推导" in why_lbl.text(), f"说明文字不对：{why_lbl.text()!r}"
+
+card = why_lbl.parentWidget()
+grades_before = card.sizeHint().height()
+toggle = next(b for b in card.findChildren(QPushButton) if b.objectName() == "IconBtn")
+QTest.mouseClick(toggle, Qt.LeftButton)
+app.processEvents()
+assert window._review_folded.get("到期知识点") is True, "点了折叠按钮状态没翻"
+assert card.sizeHint().height() < grades_before, "收起后卡片的正文没有真的藏起来"
+assert why_lbl.isVisible(), "收起之后「为什么要复习它」不该跟着一起藏"
+
+# 重渲染（每次打分都会发生）之后，学生刚展开/收起的状态不能被重置回去
+window._render_review()
+app.processEvents()
+assert window._review_folded.get("到期知识点") is True, "重渲染把折叠状态弄丢了"
+
+# 断点页的追问框也能说话——跟「讲给 Echo 听」同一套，只是填另一个框
+window._show_page(ui.BREAK)
+app.processEvents()
+assert window.ask_mic.text() == "说", "断点页麦克风初始状态不对"
+
+
+class _FakeAskRec:
+    def start(self):
+        pass
+
+    def stop_and_transcribe(self):
+        return "为什么分母是 P(B)"
+
+
+_orig_ask_rec = voice_input.Recorder
+voice_input.Recorder = lambda: _FakeAskRec()
+try:
+    window._toggle_ask_mic()                     # 点一下：开始录
+    assert window._ask_recording is True, "断点页点麦克风没进入录音状态"
+    assert window.ask_mic.text() == "●", "录音中断点页按钮没变成提示"
+    window._toggle_ask_mic()                     # 再点一下：停止并转写
+    for _ in range(40):
+        app.processEvents()
+        if window.ask_input.text():
+            break
+        QTest.qWait(10)
+    assert window.ask_input.text() == "为什么分母是 P(B)", \
+        f"转写结果没填进断点页输入框：{window.ask_input.text()!r}"
+    assert window._ask_recording is False, "转写完没退出录音状态"
+    assert window.ask_mic.isEnabled(), "转写完断点页麦克风没恢复可点"
+    assert window.ask_btn.isEnabled(), "转写完不该自动提问——应该等学生自己点「问 AI」"
+finally:
+    voice_input.Recorder = _orig_ask_rec
+window.ask_input.clear()
+
+# persona 攒够了会重算，重算了就弹一条会自己消失的提示
+from echo.backend import persona as _persona        # noqa: E402
+
+_orig_maybe = _persona.maybe_refresh
+try:
+    _persona.maybe_refresh = lambda: None
+    window.toast_lbl.setVisible(False)
+    window._maybe_refresh_persona()
+    app.processEvents()
+    assert not window.toast_lbl.isVisible(), "没重算画像却弹了「已更新」提示"
+
+    _persona.maybe_refresh = lambda: {"style": "steady", "sample": 5}
+    window._maybe_refresh_persona()
+    app.processEvents()
+    assert window.toast_lbl.isVisible(), "重算了画像却没提示学生"
+    assert "更新" in window.toast_lbl.text(), f"提示文案不对：{window.toast_lbl.text()!r}"
+finally:
+    _persona.maybe_refresh = _orig_maybe
+window.toast_lbl.setVisible(False)
+
 window.close()
 print("UI smoke passed: one window, avatar and primary flow work")
