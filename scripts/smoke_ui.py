@@ -534,6 +534,26 @@ app.processEvents()
 assert window._page == ui.PROFILE, "点头像没进资料页"
 assert window.profile_page.name_lbl.text(), "资料页没渲染出名字"
 
+# 资料页「反复卡住的地方」：有结论要画出来，没结论整块藏起来（不留一个空标题）
+from echo.backend import gaps as _gaps                       # noqa: E402
+_real_recurring = _gaps.recurring
+_gaps.recurring = lambda *a, **k: [{"concept": "极限", "lessons": 3,
+                                    "topics": ["导数定义", "瞬时变化率"],
+                                    "first_seen": 0.0, "last_seen": 0.0,
+                                    "sentence": "你最近 3 节课都和「极限」有关。"}]
+window.profile_page.refresh()
+app.processEvents()
+assert window.profile_page.gaps_box.isVisibleTo(window.profile_page), \
+    "有结论时资料页没画出「反复卡住的地方」"
+_gaps.recurring = lambda *a, **k: []
+window.profile_page.refresh()
+app.processEvents()
+assert not window.profile_page.gaps_box.isVisibleTo(window.profile_page), \
+    "没结论时该整块藏起来，不该留个空标题"
+_gaps.recurring = _real_recurring
+window.profile_page.refresh()
+app.processEvents()
+
 # 正在听课时从资料页点「回到主页」：不能真的回主页，那是另一条能溜走的路
 window.echo.engine.active = True
 window.profile_page.back_requested.emit()

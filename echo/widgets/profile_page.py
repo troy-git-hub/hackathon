@@ -11,13 +11,14 @@ import os
 import time
 
 from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
                              QPushButton, QVBoxLayout, QWidget)
 
-from echo.backend import persona, profile, store
+from echo.backend import gaps, persona, profile, store
 from echo.components.avatar import AvatarView, load_normalized
 from echo.i18n import tr
-from echo.theme import Colors, Radius, Spacing
+from echo.theme import Colors, Radius, Spacing, font
 from echo.widgets import dialogs
 
 TITLE = f"color: {Colors.TEXT_PRIMARY}; font-size: 17px; font-weight: 700;"
@@ -39,6 +40,17 @@ def _btn(text, obj, slot, tip=""):
     b.clicked.connect(lambda *_: slot())      # clicked 带一个 checked，槽一律无参
     if tip:
         b.setToolTip(tip)
+    return b
+
+
+def _badge(text):
+    """小胶囊徽章（「卡了 3 次」这种）。资料页窄，用底色区分比再起一行省地方。"""
+    b = QLabel(text)
+    b.setFont(font(10, QFont.DemiBold))
+    b.setStyleSheet(
+        f"color: {Colors.ACCENT}; background: {Colors.ACCENT_SOFT};"
+        f"border: 1px solid {Colors.ACCENT_BORDER}; border-radius: 8px;"
+        "padding: 1px 8px;")
     return b
 
 
@@ -144,6 +156,16 @@ class ProfilePage(QWidget):
         pl.addWidget(self.persona_when)
         root.addWidget(self.persona_card)
 
+        # 反复卡住的地方：跨课看出来的「你以为卡在这章，其实地基没打牢」。
+        # 数据来自 backend/gaps.py（纯数据、无 Qt 依赖），这里只管画。
+        self.gaps_head = _label(tr("反复卡住的地方", "Recurring gaps"), CAPTION)
+        root.addWidget(self.gaps_head)
+        self.gaps_box = QWidget()
+        self.gaps_lay = QVBoxLayout(self.gaps_box)
+        self.gaps_lay.setContentsMargins(0, 0, 0, 0)
+        self.gaps_lay.setSpacing(Spacing.SM)
+        root.addWidget(self.gaps_box)
+
         row2 = QHBoxLayout()
         row2.addStretch()
         row2.addWidget(_btn(tr("回到主页", "Back to home"), "Link", self.back_requested.emit))
@@ -213,6 +235,54 @@ class ProfilePage(QWidget):
             self.persona_headline.setText("")
             self.persona_lbl.setText(tr("画像暂时算不出来。", "Couldn't compute this right now."))
             self.persona_when.setVisible(False)
+        self._render_gaps()
+
+    # ================= 反复卡住的地方 =================
+    def _render_gaps(self):
+        """重画「反复卡住的地方」。没有结论就整块藏起来 —— 留个空标题比不显示更糟。"""
+        while self.gaps_lay.count():
+            w = self.gaps_lay.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        try:
+            findings = gaps.recurring()
+        except Exception:
+            findings = []
+        for f in (findings or []):
+            self.gaps_lay.addWidget(self._gap_card(f))
+        has = bool(findings)
+        self.gaps_head.setVisible(has)
+        self.gaps_box.setVisible(has)
+
+    def _gap_card(self, f: dict) -> QFrame:
+        """一条「反复卡住的地方」。左侧琥珀竖条跟断点页的卡片同一套视觉语言。"""
+        card = QFrame()
+        card.setObjectName("ProfileGap")
+        card.setStyleSheet(
+            f"QFrame#ProfileGap {{ background: {Colors.SURFACE};"
+            f"border: 1px solid {Colors.ACCENT_BORDER};"
+            f"border-left: 3px solid {Colors.ACCENT}; border-radius: {Radius.MD}px; }}")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        v.setSpacing(5)
+
+        head = QHBoxLayout()
+        head.setSpacing(Spacing.SM)
+        head.addWidget(_label(f"✦ {f.get('concept') or ''}",
+                              f"color: {Colors.TEXT_PRIMARY}; font-size: 14px; font-weight: 700;",
+                              wrap=True), 1)
+        n = int(f.get("lessons") or 0)
+        head.addWidget(_badge(tr(f"{n} 节课都是它", f"in {n} lessons")))
+        v.addLayout(head)
+
+        # sentence 由 gaps 兜底保证非空（模板拼的，跟有没有 API key 无关）
+        v.addWidget(_label(f.get("sentence") or "", CAPTION, wrap=True))
+
+        topics = [str(t).strip() for t in (f.get("topics") or []) if str(t).strip()]
+        if topics:
+            v.addWidget(_label(tr("这段时间卡在：", "You got stuck on: ") + " · ".join(topics[:4]),
+                               f"color: {Colors.TEXT_DISABLED}; font-size: 11px;", wrap=True))
+        return card
 
     def _persona_when(self) -> str:
         """画像是「什么时候算的」。
