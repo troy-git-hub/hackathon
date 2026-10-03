@@ -536,16 +536,24 @@ class FloatingWindow(QWidget):
         lay.addWidget(self.mini_cat)
         col = QVBoxLayout()
         col.setSpacing(0)
-        col.addWidget(_label(tr("老师正在讲", "Teacher is speaking"), f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"))
+        self.mini_cap = _label(tr("老师正在讲", "Teacher is speaking"),
+                               f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;")
+        col.addWidget(self.mini_cap)
         self.mini_topic = _label(tr("等待老师开讲…", "Waiting for the teacher to start…"), f"color: {Colors.TEXT_PRIMARY}; font-size: 14px;"
                                                 "font-weight: 600;")
         self.mini_topic.setMinimumWidth(10)
         self.mini_topic.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         col.addWidget(self.mini_topic)
         lay.addLayout(col, 1)
-        b = _btn(tr("掉队了", "Fell behind"), "Accent", self._on_lost)
-        b.setStyleSheet("font-size: 13px; padding: 6px 12px;")
-        lay.addWidget(b)
+        # 折叠条地方小，只留最实用的两个按钮，而且**跟着场景换**（见 _sync_mini）：
+        # 上课时是「掉队了 + 答疑」，没上课时是「开始听课 + 复习」。
+        # 点哪个都要先看当前在不在上课，所以槽是个转发器，不是写死某个动作。
+        self.mini_main = _btn(tr("掉队了", "Fell behind"), "Accent", self._mini_primary)
+        self.mini_main.setStyleSheet("font-size: 13px; padding: 6px 12px;")
+        lay.addWidget(self.mini_main)
+        self.mini_second = _btn(tr("答疑", "Ask"), "Quiet", self._mini_second)
+        self.mini_second.setStyleSheet("font-size: 13px; padding: 6px 10px;")
+        lay.addWidget(self.mini_second)
         ex = _btn("+", "IconBtn", lambda: self._show_page(LISTEN), tr("展开", "Expand"))
         ex.setFixedSize(26, 26)
         lay.addWidget(ex)
@@ -553,6 +561,41 @@ class FloatingWindow(QWidget):
         self.mini_wave_orb = WaveOrb(size=None)
         lay.addWidget(self.mini_wave_orb)
         return page
+
+    def _mini_primary(self):
+        """折叠条上的主按钮：上课时「我掉队了」，没上课时「开始听课」。"""
+        if self._in_class():
+            self._on_lost()
+        else:
+            self._start_lesson_named()
+
+    def _mini_second(self):
+        """折叠条上的次按钮：上课时「答疑」，没上课时去复习。"""
+        if self._in_class():
+            self._show_qa()
+        else:
+            self._show_review()
+
+    def _sync_mini(self):
+        """折叠条按「在不在上课」换一套按钮和文案。
+
+        学生折叠起来的时候是还在听课（想随手点「掉队了」），还是已经下课在翻别的
+        （想开下一节）—— 这两种时候最该点的按钮完全不同，所以按场景换。
+        """
+        if not hasattr(self, "mini_main"):
+            return
+        in_class = self._in_class()
+        if in_class:
+            self.mini_cap.setText(tr("老师正在讲", "Teacher is speaking"))
+            self.mini_main.setText(tr("掉队了", "Fell behind"))
+            self.mini_second.setText(tr("答疑", "Ask"))
+        else:
+            self.mini_cap.setText(tr("Echo", "Echo"))
+            self.mini_main.setText(tr("开始听课", "Start lesson"))
+            self.mini_second.setText(tr("复习", "Review"))
+        for b in (self.mini_main, self.mini_second):
+            b.style().unpolish(b)      # 换了文案宽度会变，重新套一遍样式
+            b.style().polish(b)
 
     # ----- 2 断点页（主画面）-----
     def _build_break(self) -> QWidget:
@@ -1494,11 +1537,30 @@ class FloatingWindow(QWidget):
             tr(f"预计 {s.get('minutes', n)} 分钟", f"About {s.get('minutes', n)} min"))
 
     def _start_today(self):
-        """给这节课命名并开课。"""
+        """主页上「开始今天的学习」：名字取自输入框。"""
         name = self.title_edit.text().strip()
+        self.title_edit.clear()
+        self._begin_lesson(name)
+
+    def _start_lesson_named(self):
+        """折叠条上点「开始听课」：先问一句这节课叫什么，留空就用开课时间命名。
+
+        主页那张卡片上本来就有输入框，这里是给学生**折叠状态下顺手开课**用的，
+        所以弹一个小输入框，别逼他先展开再找输入框。取消就什么都不做。
+        """
+        from echo.widgets import dialogs
+        name, ok = dialogs.ask_text(
+            self, tr("开始今天的学习", "Start today's lesson"),
+            tr("这节课叫什么？（留空就用开课时间命名）",
+               "What's this lesson called? (leave blank to name it by start time)"), "")
+        if not ok:
+            return
+        self._begin_lesson((name or "").strip())
+
+    def _begin_lesson(self, name: str):
+        """开一节课。name 空着不自造名字 —— 交给 store 用开课时间命名。"""
         if hasattr(self.echo, "set_title"):
             self.echo.set_title(name)
-        self.title_edit.clear()
         self._restart()
         if name:
             self.topic_lbl.setText(name)
@@ -2509,7 +2571,10 @@ class FloatingWindow(QWidget):
         self.home_btn.setVisible(idx == ECHO or (idx == LISTEN and not in_class))
         self.avatar_view.setVisible(not in_class)
         self.end_btn.setVisible(idx == LISTEN)
-        self.fold_btn.setVisible(idx == LISTEN)
+        # 折叠按钮哪一页都能点（折叠页自己除外）：学生想把这个面板收起来、只留一条
+        # 小条盯着，这个诉求在任何一页都成立。折叠后的尺寸各页一致（都是 MINI）。
+        self.fold_btn.setVisible(idx != MINI)
+        self._sync_mini()
         m = Spacing.MD if mini else Spacing.LG
         self.layout().setContentsMargins(SHADOW + m, SHADOW + (Spacing.SM if mini else Spacing.MD),
                                          SHADOW + m, SHADOW + (Spacing.SM if mini else Spacing.LG))
