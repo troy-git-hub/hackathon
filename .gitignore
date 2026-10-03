@@ -43,3 +43,6 @@ lessons.json
 # 用户资料（姓名/昵称/年龄/爱好）和自定义头像（可能是本人照片）
 profile.json
 /avatar.*
+
+# 知识地图上记住的节点位置（纯缓存，删了只是回到自动排布）
+mindmap.json

@@ -20,7 +20,7 @@ from PyQt5.QtGui import QBrush, QColor, QFontMetrics, QPainter, QPainterPath, QP
 from PyQt5.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
                              QVBoxLayout, QWidget)
 
-from echo.backend import mindmap
+from echo.backend import layout, mindmap
 from echo.i18n import tr
 from echo.theme import Colors, Radius, Spacing, font
 
@@ -53,6 +53,7 @@ class _Canvas(QWidget):
     """
 
     node_clicked = pyqtSignal(str)
+    node_moved = pyqtSignal()        # 学生拖完一个节点（页面据此把新位置记下来）
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -61,6 +62,7 @@ class _Canvas(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._nodes = []          # [(topic, status, timecode)]
         self._pos = {}            # topic -> QPointF（世界坐标）
+        self._auto = {}           # topic -> QPointF（自动排布的原位置，用来算拖动偏移）
         self._levels = {}         # topic -> 依赖层级，重置视图时用来还原排布
         self._review_first = ""   # 复习链的根源概念，图上标出来告诉学生从哪开始补
         self._edges = []          # [(topic_a, topic_b)]
@@ -76,8 +78,13 @@ class _Canvas(QWidget):
         self._user_moved = False   # 学生自己拖过/缩放过之后，就别再自动改他的视图
 
     # ---------------- 数据 ----------------
-    def set_graph(self, graph: dict, selected: str = "", keep_positions: bool = False):
-        """换一张图。keep_positions=True 时保留用户拖动后的位置（只换选中态用）。"""
+    def set_graph(self, graph: dict, selected: str = "", keep_positions: bool = False,
+                  offsets: dict = None):
+        """换一张图。keep_positions=True 时保留用户拖动后的位置（只换选中态用）。
+
+        offsets 是上一次学生拖出来的偏移（{知识点: (dx, dy)}，见 backend/layout.py），
+        自动排布之后叠回去，这样同一节课再打开还是他摆的样子。
+        """
         nodes = graph.get("nodes") or []
         edges = graph.get("edges") or []
         topics = [n["id"] for n in nodes]
@@ -89,6 +96,7 @@ class _Canvas(QWidget):
                        if e.get("from") is not None and e.get("to") is not None]
         if not keep_positions or set(self._pos) != set(topics):
             self._auto_layout(nodes)
+            self._apply_offsets(offsets)
             self._need_fit = True
             self._user_moved = False
         self._selected = selected
@@ -110,6 +118,35 @@ class _Canvas(QWidget):
             for i, topic in enumerate(row):
                 self._pos[topic] = QPointF(step * i + (step - NODE_W) / 2, y)
         self._world = QSizeF(width, PAD * 2 + max(1, len(levels)) * LEVEL_H)
+        # 留一份原位置：拖动偏移是相对它算的，重置视图也靠它还原
+        self._auto = {t: QPointF(p) for t, p in self._pos.items()}
+
+    def _apply_offsets(self, offsets: dict):
+        """把记住的偏移叠回自动排布上。没有记录（或记录坏了）就是纯自动排布。"""
+        for topic, d in (offsets or {}).items():
+            base = self._auto.get(topic)
+            if base is None or not d:
+                continue
+            try:
+                dx, dy = float(d[0]), float(d[1])
+            except (TypeError, ValueError, IndexError):
+                continue
+            self._pos[topic] = QPointF(base.x() + dx, base.y() + dy)
+
+    def _offsets(self) -> dict:
+        """学生挪动过的节点：{知识点: (dx, dy)}，相对自动排布、整数像素。
+
+        没挪过的节点（偏移为零）不写进去 —— 这是文件能压到很小的关键。
+        """
+        out = {}
+        for topic, pos in self._pos.items():
+            base = self._auto.get(topic)
+            if base is None:
+                continue
+            dx, dy = int(round(pos.x() - base.x())), int(round(pos.y() - base.y()))
+            if dx or dy:
+                out[topic] = (dx, dy)
+        return out
 
     def reset_view(self):
         """回到默认排布和缩放。"""
@@ -203,6 +240,8 @@ class _Canvas(QWidget):
             self.update()
         elif not drag or not moved:
             self.update()
+        if drag and moved and drag["kind"] == "node":
+            self.node_moved.emit()      # 拖完了 → 页面把新位置记下来
 
     def wheelEvent(self, e):
         """滚轮缩放，以光标为中心。"""
@@ -326,6 +365,7 @@ class MindMapPage(QWidget):
         self._lesson = {}
         self._mistakes = []
         self._graph = {"nodes": [], "edges": []}
+        self._key = ""          # 这节课在位置记忆里的键（按时间戳）；空 = 不记位置
         self._build()
         self.detail.content_changed.connect(self.content_changed.emit)
 
@@ -368,6 +408,7 @@ class MindMapPage(QWidget):
 
         self.canvas = _Canvas()
         self.canvas.node_clicked.connect(self._on_node)
+        self.canvas.node_moved.connect(self._save_positions)
         root.addWidget(self.canvas, 1)
         tools = QHBoxLayout()
         tools.setSpacing(Spacing.SM)
@@ -381,7 +422,7 @@ class MindMapPage(QWidget):
         self.reset_btn.setObjectName("MapTool")
         self.reset_btn.setCursor(Qt.PointingHandCursor)
         self.reset_btn.setToolTip(tr("回到自动排布的位置", "Back to the automatic layout"))
-        self.reset_btn.clicked.connect(lambda: self.canvas.reset_view())
+        self.reset_btn.clicked.connect(self._reset_view)
         tools.addWidget(self.reset_btn)
         root.addLayout(tools)
 
@@ -424,6 +465,7 @@ class MindMapPage(QWidget):
         self._lesson = lesson or {}
         self._mistakes = mistakes if mistakes is not None else []
         self._graph = mindmap.build(self._lesson, self._mistakes)
+        self._key = self._lesson_key(self._lesson)
 
         # 课程内容
         title = (self._lesson.get("title") or "").strip()
@@ -463,10 +505,37 @@ class MindMapPage(QWidget):
         self.canvas.setVisible(bool(nodes))
         self.legend.setVisible(bool(nodes))
         self.reset_btn.setVisible(bool(nodes))
-        self.canvas.set_graph(self._graph)
+        self.canvas.set_graph(self._graph,
+                              offsets=layout.get(self._key) if self._key else None)
         self.detail.clear()
         self.detail.setVisible(bool(nodes))
         self.content_changed.emit()
+
+    @staticmethod
+    def _lesson_key(lesson: dict) -> str:
+        """这节课在位置记忆里的键 —— 用归档时间戳，同一节课每次打开都是同一个键。
+
+        刚下课「回响 → 知识地图」给的是 from_report() 的临时记录、没有 time，
+        这种拿不到稳定键的就不记位置：下次打开回到自动排布，总比记错位置强。
+        """
+        try:
+            return f"{float(lesson.get('time')):.3f}"
+        except (TypeError, ValueError):
+            return ""
+
+    def _save_positions(self):
+        """把学生拖出来的节点位置记下来。"""
+        if not self._key:
+            return
+        try:
+            layout.save(self._key, self.canvas._offsets())
+        except Exception:
+            pass          # 记不下来不影响看图
+
+    def _reset_view(self):
+        """回到默认排布，并把记下的位置一起清掉（不然下次打开又变回拖过的样子）。"""
+        self.canvas.reset_view()
+        self._save_positions()
 
     def select(self, topic: str):
         """外部直接选中某个知识点（比如从别处跳进来）。"""

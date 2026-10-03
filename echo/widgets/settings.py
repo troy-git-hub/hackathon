@@ -9,10 +9,10 @@ Echo - 设置
 import os
 
 from PyQt5.QtCore import Qt, QSettings
-from PyQt5.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel,
-                             QLineEdit, QVBoxLayout, QWidget, QApplication)
+from PyQt5.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+                             QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget)
 
-from echo.backend import paths, profile
+from echo.backend import cache, paths, profile
 from echo.theme import Colors, font, dialog_qss, apply_native_titlebar
 from echo.i18n import tr, lang, set_lang
 
@@ -153,6 +153,20 @@ class SettingsDialog(QDialog):
 
         root.addLayout(form)
 
+        # 存储：攒了多少东西 + 一键清空
+        root.addSpacing(4)
+        self.storage_lbl = QLabel("")
+        self.storage_lbl.setStyleSheet(f"color:{Colors.TEXT_SECONDARY}; font-size:12px;")
+        self.storage_lbl.setWordWrap(True)
+        root.addWidget(self.storage_lbl)
+        srow = QHBoxLayout()
+        self.btn_clear = QPushButton(tr("清除所有缓存", "Clear all data"))
+        self.btn_clear.clicked.connect(self._clear_cache)
+        srow.addWidget(self.btn_clear)
+        srow.addStretch()
+        root.addLayout(srow)
+        self._refresh_storage()
+
         btns = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         btns.button(QDialogButtonBox.Save).setText(tr("保存", "Save"))
         btns.button(QDialogButtonBox.Cancel).setText(tr("取消", "Cancel"))
@@ -161,7 +175,50 @@ class SettingsDialog(QDialog):
         root.addWidget(btns)
 
         self.setStyleSheet(dialog_qss())
-        self.resize(480, 360)
+        self.resize(480, 440)        # 比原来高：「清除缓存」那一段占了一行
+
+    # ================= 存储 =================
+    def _refresh_storage(self):
+        """刷新「本机存了多少」那一行。读不到就显示 0，不让设置窗口打不开。"""
+        try:
+            st = cache.stats()
+        except Exception:
+            st = {"lessons": 0, "mistakes": 0, "bytes": 0}
+        self.storage_lbl.setText(tr(
+            f"本机存了 {st['lessons']} 节课的历史、{st['mistakes']} 个错题，"
+            f"共 {cache.size_text(st['bytes'])}。",
+            f"{st['lessons']} lessons and {st['mistakes']} mistakes on this computer, "
+            f"{cache.size_text(st['bytes'])} in total."))
+        self.btn_clear.setEnabled(st["bytes"] > 0)
+
+    def _clear_cache(self):
+        """清空本机的记录。删之前把「删什么、留什么」摊开说清楚 —— 这步不可逆。"""
+        from echo.widgets import dialogs
+        try:
+            st = cache.stats()
+        except Exception:
+            st = {"lessons": 0, "mistakes": 0, "bytes": 0}
+        if not dialogs.confirm(
+                self, tr("清除所有缓存", "Clear all data"),
+                tr(f"会删掉：\n"
+                   f"　· {st['lessons']} 节课的历史记录\n"
+                   f"　· {st['mistakes']} 个错题（连同复习进度）\n"
+                   f"　· 知识地图上记住的位置\n\n"
+                   f"名字、头像、API key 和这里的设置都会保留。\n"
+                   f"删掉之后没法恢复。",
+                   f"This will delete:\n"
+                   f"　· {st['lessons']} lesson records\n"
+                   f"　· {st['mistakes']} mistakes (and their review progress)\n"
+                   f"　· saved positions on the knowledge map\n\n"
+                   f"Your name, photo, API keys and settings are kept.\n"
+                   f"This can't be undone."),
+                ok_text=tr("删除", "Delete")):
+            return
+        try:
+            cache.clear()
+        except Exception:
+            pass
+        self._refresh_storage()
 
     def _save(self):
         updates = {k: ed.text().strip() for k, ed in self.inputs.items()}
