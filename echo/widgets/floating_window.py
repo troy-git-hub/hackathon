@@ -62,6 +62,23 @@ PAGE_WIDTH = {LISTEN: 340, MINI: 300, BREAK: 380, LESSON: 400, ECHO: 380,
               REVIEW: 380, HOME: 360, PRACTICE: 400, DETAIL: 380, MINDMAP: 480,
               COURSES: 420, RECALL: 400, PROFILE: 380, ASK: 400}
 
+# ← 按钮上写什么：按「退回去会到哪一页」说，别让学生猜自己会掉到哪儿。
+# 页面自己说了算（练习页/回顾页记着来路）时以它们为准，这里管其余的。
+BACK_LABEL = {
+    LISTEN: tr("← 回到课堂", "← Back to class"),
+    HOME: tr("← 主页", "← Home"),
+    ECHO: tr("← 回响", "← Review"),
+    REVIEW: tr("← 错题复习", "← Mistakes"),
+    RECALL: tr("← 讲给 Echo 听", "← Talk it through"),
+    PRACTICE: tr("← 练习", "← Practice"),
+    DETAIL: tr("← 课程回顾", "← Lesson recap"),
+    MINDMAP: tr("← 知识地图", "← Knowledge map"),
+    COURSES: tr("← 课程管理", "← Courses"),
+    PROFILE: tr("← 我的资料", "← My profile"),
+    ASK: tr("← 回到课堂", "← Back to class"),
+}
+NAV_HISTORY_MAX = 24          # 来路记最近这么多步就够，别无限长
+
 
 def _label(text="", style="", wrap=False):
     l = QLabel(text)
@@ -189,7 +206,7 @@ class FloatingWindow(QWidget):
         self._recall_busy = False
         self._recall_recording = False      # 麦克风按一下开始、再按一下结束
         self._recall_recorder = None
-        # 「答题（随时问）」的状态：对话实例留着，课后回来接着问
+        # 「答疑（随时问）」的状态：对话实例留着，课后回来接着问
         self._qa_chat = None
         self._qa_busy = False
         self._qa_reply = None
@@ -198,6 +215,10 @@ class FloatingWindow(QWidget):
         self._mindmap_lesson = {}    # 知识地图页正在看的那节课
         self._drag_pos = None
         self._page = LISTEN
+        # 翻页来路。← 按钮退回上一步，而不是永远弹回主页：
+        # 从「课程管理 → 看回顾 → 知识地图」一路点进来，退回去也该按原路走。
+        self._nav_history = []
+        self._back_navigating = False    # 正在执行「返回」，这期间的翻页不再记来路
         self._analysis_pending = False   # 掉队分析进行中，防重复触发
         self._break_failed = False       # 本次掉队分析失败，可重试
 
@@ -427,7 +448,7 @@ class FloatingWindow(QWidget):
         lay.addWidget(self.caption_lbl)
 
         lay.addSpacing(Spacing.SM)
-        # 「我掉队了」和「答题」并排：一个是"我没跟上"，一个是"我有问题要问" ——
+        # 「我掉队了」和「答疑」并排：一个是"我没跟上"，一个是"我有问题要问" ——
         # 上课时最常见的两种动作，都放在最好点的地方。
         main_row = QHBoxLayout()
         main_row.setSpacing(Spacing.SM)
@@ -435,7 +456,9 @@ class FloatingWindow(QWidget):
                              tr("Echo 回看最近几分钟，找到你从哪一步开始没听懂", "Echo reviews the last few minutes to find where you lost track"))
         self.btn_lost.setMinimumHeight(46)
         main_row.addWidget(self.btn_lost, 1)
-        self.btn_qa = _btn(tr("答题", "Ask"), "Quiet", self._show_qa,
+        # 叫「答疑」不叫「答题」：这是学生有问题要问 Echo，不是被考一道题。
+        # 「答题」听着像抽问，跟右边那个「考考我」的语义撞了。
+        self.btn_qa = _btn(tr("答疑", "Ask a question"), "Quiet", self._show_qa,
                            tr("随时问 Echo，它带着这节课听到的内容回答；课后回来还能接着问",
                               "Ask Echo anything — answered with this lesson's context, "
                               "and you can pick it up again after class"))
@@ -751,10 +774,10 @@ class FloatingWindow(QWidget):
         lay.addLayout(row)
         return page
 
-    def _show_review(self):
+    def _show_review(self, push=True):
         """错题复习页：今天该复习的 + 过几天再复习的。"""
         self._render_review()
-        self._show_page(REVIEW)
+        self._show_page(REVIEW, push=push)
 
     def _review_root(self, topic):
         """回响页点「去复习」：针对最该复习的根源概念，让 AI 出题练一下。"""
@@ -1621,7 +1644,7 @@ class FloatingWindow(QWidget):
         back, self._prac_back = self._prac_back, None
         self._prac_back_label = ""
         if back:
-            back()
+            self._run_back(back)        # 走 _run_back：这次翻页属于「往回走」，不记来路
         else:
             self._show_home()
 
@@ -2003,7 +2026,7 @@ class FloatingWindow(QWidget):
     def _on_avatar_changed(self, _path=""):
         self._refresh_avatar()
 
-    # ----- 13 答题（随时问 Echo）-----
+    # ----- 13 答疑（随时问 Echo）-----
     def _build_ask(self) -> QWidget:
         """上课时随时能问的问答框。
 
@@ -2058,7 +2081,7 @@ class FloatingWindow(QWidget):
         return page
 
     def _show_qa(self):
-        """从听课页点「答题」进来。对话本身是留着的 —— 课后回来接着问，上下文还在。"""
+        """从听课页点「答疑」进来。对话本身是留着的 —— 课后回来接着问，上下文还在。"""
         if getattr(self, "_qa_chat", None) is None:
             from echo.backend.vision import LessonAsk
             engine = getattr(getattr(self, "echo", None), "engine", None)
@@ -2249,7 +2272,19 @@ class FloatingWindow(QWidget):
                             back_label=tr("← 知识地图", "← Knowledge map"))
 
     # ================= 页面切换 / 尺寸 =================
-    def _show_page(self, idx):
+    def _show_page(self, idx, push=True):
+        """切到某一页。push=True 时把当前页记进「来路」，← 按钮据此原路退回。
+
+        少数几处是「替掉当前页」而不是「往前走」（比如讲完回错题复习），
+        那些地方传 push=False，免得来路里留下一步会把自己弹回来的死循环。
+        """
+        prev = self._page
+        # 断点页/补课页不进「来路」：那是课堂里被推着走的流程（掉队→补课→回课堂），
+        # 不是学生自己翻的页。记进去的话，之后按返回会莫名其妙掉回补课页。
+        if (push and not self._back_navigating and prev != idx
+                and prev not in (BREAK, LESSON)):
+            self._nav_history.append(prev)
+            del self._nav_history[:-NAV_HISTORY_MAX]
         self._page = idx
         for i in range(self.stack.count()):     # 非当前页不参与尺寸计算
             pol = QSizePolicy.Preferred if i == idx else QSizePolicy.Ignored
@@ -2260,24 +2295,27 @@ class FloatingWindow(QWidget):
         self.header.setVisible(not mini)
         self.back_btn.setVisible(idx in (BREAK, LESSON, REVIEW, PRACTICE, DETAIL, MINDMAP,
                                          COURSES, RECALL, PROFILE, ASK))
-        back_label = tr("← 主页", "← Home")
+        # ← 按钮写哪儿：页面自己记着来路时听它的，否则看这一页是怎么进来的
+        back_label = ""
         if idx == PRACTICE and self._prac_back_label:
-            back_label = self._prac_back_label     # 从地图/回顾进来的，返回到那儿
+            back_label = self._prac_back_label
         elif idx == DETAIL and self._detail_back_label:
-            back_label = self._detail_back_label    # 从课程管理进来的，返回到那儿
-        elif idx == RECALL:
-            back_label = tr("← 错题复习", "← Review")
-        elif idx in (PROFILE, ASK):
-            back_label = tr("← 回到课堂", "← Back to class")
-        self.back_btn.setText(back_label if idx in (REVIEW, PRACTICE, DETAIL, MINDMAP,
-                                                    COURSES, RECALL, PROFILE, ASK)
-                              else tr("← 回到课堂", "← Back to class"))
-        # 正在听课时不给回首页的路：中途溜去首页等于悄悄丢下这节课没收尾，
-        # 想走就得走「下课」——那条路会把回响和错题正经存下来。
-        # 折叠（fold_btn）不受影响，只是不让跳页面。
-        engine = getattr(getattr(self, "echo", None), "engine", None)
-        listening = idx == LISTEN and getattr(engine, "active", False)
-        self.home_btn.setVisible(idx == ECHO or (idx == LISTEN and not listening))
+            back_label = self._detail_back_label
+        else:
+            target = self._back_target()
+            if target is not None:
+                back_label = BACK_LABEL.get(target, "")
+        if idx not in (BREAK, LESSON, REVIEW, PRACTICE, DETAIL, MINDMAP,
+                       COURSES, RECALL, PROFILE, ASK):
+            back_label = ""                      # 这条没有 ← 按钮，随便写什么都没人看见
+        self.back_btn.setText(back_label or tr("← 回到课堂", "← Back to class"))
+
+        # 上课期间这条路锁死：不给回首页、不给进资料页。中途溜去别处等于悄悄丢下
+        # 这节课没收尾——回响和错题都不会存。想离开课堂只有「下课」这一条路。
+        # 断点页/补课页仍可进（那是课堂流程的一部分），折叠（fold_btn）也不受影响。
+        in_class = self._in_class()
+        self.home_btn.setVisible(idx == ECHO or (idx == LISTEN and not in_class))
+        self.avatar_view.setVisible(not in_class)
         self.end_btn.setVisible(idx == LISTEN)
         self.fold_btn.setVisible(idx == LISTEN)
         m = Spacing.MD if mini else Spacing.LG
@@ -2286,15 +2324,21 @@ class FloatingWindow(QWidget):
         self._sync_status()
         self._fit()
 
+    def _in_class(self) -> bool:
+        """这堂课还开着没有。开着的时候页面导航锁死，只有「下课」能出去。
+
+        __init__ 里 _show_home() 比 self.echo 还早，所以这里必须容错。
+        """
+        engine = getattr(getattr(self, "echo", None), "engine", None)
+        return bool(getattr(engine, "active", False))
+
     def _sync_status(self):
         """状态栏跟着引擎真实状态走。
 
         原来标签初始就是「正在听课」，可应用启动停在主页、根本没开课，
         翻历史课的回顾时也一直挂着「正在听课」—— 看着像在监听，实际什么都没跑。
         """
-        # __init__ 里 _show_home() 比 self.echo 还早，这里必须容错
-        engine = getattr(getattr(self, "echo", None), "engine", None)
-        if getattr(engine, "active", False):
+        if self._in_class():
             return                      # 在上课：交给引擎的状态事件去更新
         self.status_lbl.setText(tr("已下课", "Class ended") if getattr(self, "_had_lesson", False)
                                 else tr("还没开始上课", "Lesson not started"))
@@ -2371,31 +2415,69 @@ class FloatingWindow(QWidget):
     def _back_to_listen(self):
         self._show_page(LISTEN)
 
-    def _back(self):
-        """← 按钮：复习/练习/回顾/课程页回主页，断点/补课页回课堂。
+    def _back_target(self):
+        """按「来路」算该退回哪一页；没有来路返回 None。
 
-        练习页特殊：从知识地图/课程回顾进来的，退回到进来的那一页。
+        倒着找第一个不等于当前页的记录：A → B → A 这样绕一圈之后，栈顶会压着
+        一条 A（=当前页），直接取栈顶等于原地踏步。← 按钮的文案和 _back 的实际
+        退法都得按同一条规则算，不然会出现「写着退回回顾、按下去却回主页」。
+        """
+        for prev in reversed(self._nav_history):
+            if prev != self._page:
+                return prev
+        return None
+
+    def _back(self):
+        """← 按钮：按原路退回你进来的那一页。
+
+        以前是「除了练习/回顾，其余一律回主页」—— 从课程管理 → 看回顾 → 知识地图
+        一路点进来，按返回却被弹回主页，得从头再点一遍。现在统一走「来路」，
+        按钮上写什么也跟着来路走（见 BACK_LABEL）。
+
+        三条路仍然走自己的回调，因为它们除了翻页还有额外动作：
+          · 练习页 → 退回地图时要重画（刚点过「我会了」，节点状态变了）
+          · 回顾页 → 退回时要带上当初从哪儿进来的
+          · 讲给 Echo 听 → 退回错题复习时要重算进度
         """
         if self._page == PRACTICE and self._prac_back:
             back, self._prac_back = self._prac_back, None
             self._prac_back_label = ""
-            back()
+            self._run_back(back)
             return
         if self._page == DETAIL and self._detail_back:
             back, self._detail_back = self._detail_back, None
             self._detail_back_label = ""
-            back()
+            self._run_back(back)
             return
         if self._page == RECALL:
-            self._show_review()          # 讲完回错题复习，进度一眼能看见
+            self._show_review(push=False)   # 讲完回错题复习，进度一眼能看见
             return
-        if self._page in (PROFILE, ASK):
-            self._show_page(LISTEN)      # 从听课页点进来的，退回去接着上课
+        if self._page in (BREAK, LESSON):
+            self._show_page(LISTEN, push=False)   # 断点/补课在课堂流程里，退回课堂
             return
-        if self._page in (REVIEW, PRACTICE, DETAIL, MINDMAP, COURSES):
-            self._show_home()
+        while self._nav_history:            # 原路退回
+            prev = self._nav_history.pop()
+            if prev != self._page:
+                self._show_page(prev, push=False)
+                return
+        # 没有来路（比如直接跳进来的）：课堂流程内的回课堂，其余回主页
+        if self._page in (BREAK, LESSON, ASK, PROFILE):
+            self._show_page(LISTEN, push=False)
         else:
-            self._show_page(LISTEN)
+            self._show_home()
+
+    def _run_back(self, back):
+        """跑一个「返回」回调（练习页要重画地图、回顾页要带来源）。
+
+        回调内部自己会翻页，那些翻页属于往回走，不该再记进来路 ——
+        否则「课程管理 → 回顾 → 点返回」会把回顾又记一遍，
+        下一步返回就被弹回回顾页，退不出去。
+        """
+        self._back_navigating = True
+        try:
+            back()
+        finally:
+            self._back_navigating = False
 
     def _open_from_avatar(self):
         self._show_page(ECHO if self._page == ECHO else LISTEN)
@@ -2430,6 +2512,9 @@ class FloatingWindow(QWidget):
     def _restart(self):
         self._reset_ui()
         self.echo.start()
+        # 开课了，把页面装饰重刷一遍：`active` 是刚刚才变 True 的，
+        # _reset_ui 里那次 _show_page 跑在它变之前，那时候还锁不上。
+        self._show_page(self._page, push=False)
 
     def _toggle_offline(self):
         self.echo.set_offline(not self.echo.offline)
@@ -2452,7 +2537,8 @@ class FloatingWindow(QWidget):
         self.caption_lbl.hide()
         self.tc_lbl.setText("00:00")
         self.progress.setValue(0)
-        self._show_page(LISTEN)
+        self._nav_history.clear()       # 新的一节课，上一节的来路作废
+        self._show_page(LISTEN, push=False)
 
     def _cat(self, emotion, hold_ms=0):
         self.cat.set_emotion(emotion, hold_ms)

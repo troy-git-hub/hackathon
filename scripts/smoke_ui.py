@@ -162,8 +162,13 @@ assert window._page == ui.REVIEW, "错题复习页打不开"
 window._show_detail(0)          # 不存在的归档：应安全退化，不崩
 app.processEvents()
 assert window._page == ui.DETAIL, "历史课程回顾页打不开"
-assert window.back_btn.text() == "← 主页", \
-    f"没指定 back 进来的回顾页，返回按钮应该退回主页，实际写着「{window.back_btn.text()}」"
+# ← 按钮上写的是「你从哪儿来的」，不再一律写「回主页」——
+# 用户反馈过「上面的永远是返回主页」：从错题复习进来的，就该写着能退回错题复习。
+assert window.back_btn.text() == "← 错题复习", \
+    f"从错题复习进来的回顾页，返回按钮应该退回错题复习，实际写着「{window.back_btn.text()}」"
+QTest.mouseClick(window.back_btn, Qt.LeftButton)
+app.processEvents()
+assert window._page == ui.REVIEW, "回顾页按返回没有原路退回错题复习"
 
 # 主页「AI 出题练习」：没有错题时要进练习页说清楚，不能默默弹回主页
 window._show_home()
@@ -274,7 +279,8 @@ QTest.mouseClick(master[0], Qt.LeftButton)
 app.processEvents()
 assert window._page == ui.MINDMAP, "练完点「我会了」应该回知识地图，而不是弹回主页"
 assert window.mindmap_page.canvas._selected == "贝叶斯公式", "回到地图后没选回刚才那个知识点"
-assert window.back_btn.text() == "← 主页", "地图页的返回按钮被练习页的标签带跑了"
+assert window.back_btn.text() == "← 课程回顾", \
+    f"练完回到地图，返回按钮该写「← 课程回顾」（这节课是从课程回顾进来的），实际写着「{window.back_btn.text()}」"
 
 # 从课程回顾进来的，就回课程回顾
 window._show_detail(ts3)
