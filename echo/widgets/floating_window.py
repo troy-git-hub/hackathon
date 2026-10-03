@@ -16,10 +16,11 @@ import html
 import logging
 import re
 import time
+import datetime
 import ctypes
 from ctypes import wintypes
 
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
                              QPushButton, QFrame, QSizePolicy, QStackedWidget,
                              QProgressBar, QApplication, QShortcut, QScrollArea,
                              QLineEdit, QTextBrowser, QRadioButton, QButtonGroup,
@@ -37,7 +38,7 @@ from echo.widgets import dialogs
 from echo.theme import Colors, Radius, font, Spacing
 from echo.components.loading import PulseDots
 from echo.components.wave_orb import WaveOrb
-from echo.components.study import (CatAvatar, BreakPath, LessonStep, SkillRow,
+from echo.components.study import (CatAvatar, BreakPath, LessonStep, SkillRow, SkillTile,
                                    ReviewChain, echo_status, echo_mark)
 from echo.mock_data import Concept
 from echo.backend.engine import parse_tc
@@ -56,11 +57,12 @@ log = logging.getLogger("echo.ui")
 SHADOW = 14
 WAIT_HINT = tr("播放网课后，Echo 会自动开始听", "Play your course and Echo will start listening automatically")
 LISTEN, MINI, BREAK, LESSON, ECHO, REVIEW, HOME, PRACTICE, DETAIL, MINDMAP, COURSES, RECALL, \
-    PROFILE, ASK = range(14)
+    PROFILE, ASK, LEARNED, WEEKLY = range(16)
 # 各页内容区宽度（不含阴影与内边距）
 PAGE_WIDTH = {LISTEN: 340, MINI: 300, BREAK: 380, LESSON: 400, ECHO: 380,
               REVIEW: 380, HOME: 360, PRACTICE: 400, DETAIL: 380, MINDMAP: 480,
-              COURSES: 420, RECALL: 400, PROFILE: 380, ASK: 400}
+              COURSES: 420, RECALL: 400, PROFILE: 380, ASK: 400, LEARNED: 480,
+              WEEKLY: 400}
 
 # ← 按钮上写什么：按「退回去会到哪一页」说，别让学生猜自己会掉到哪儿。
 # 页面自己说了算（练习页/回顾页记着来路）时以它们为准，这里管其余的。
@@ -76,6 +78,8 @@ BACK_LABEL = {
     COURSES: tr("← 课程管理", "← Courses"),
     PROFILE: tr("← 我的资料", "← My profile"),
     ASK: tr("← 回到课堂", "← Back to class"),
+    LEARNED: tr("← 已学内容", "← Learned so far"),
+    WEEKLY: tr("← 一周回响", "← Weekly review"),
 }
 NAV_HISTORY_MAX = 24          # 来路记最近这么多步就够，别无限长
 
@@ -100,6 +104,28 @@ def _btn(text, obj, slot, tip=""):
     if tip:
         b.setToolTip(tip)
     return b
+
+
+def _fmt_clock(ts) -> str:
+    """墙钟 epoch 秒 → 「HH:MM」。0 或异常兜底空串。"""
+    try:
+        ts = float(ts)
+        if ts <= 0:
+            return ""
+        return datetime.datetime.fromtimestamp(ts).strftime("%H:%M")
+    except (OSError, ValueError, TypeError):
+        return ""
+
+
+def _fmt_duration(sec) -> str:
+    """秒 → 「X 分钟」/「X 秒」/「X 分 Y 秒」。"""
+    sec = max(0, int(sec))
+    if sec < 60:
+        return tr(f"{sec} 秒", f"{sec}s")
+    m, s = divmod(sec, 60)
+    if s == 0:
+        return tr(f"{m} 分钟", f"{m} min")
+    return tr(f"{m} 分 {s} 秒", f"{m}m {s}s")
 
 
 CAPTION = f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;"
@@ -272,6 +298,8 @@ class FloatingWindow(QWidget):
         self.mindmap_page.practice_requested.connect(self._go_practice)
         # 地图页内容变高变矮时重新适配窗口（出题回来那几张卡不然会被底边截掉）
         self.mindmap_page.content_changed.connect(self._fit)
+        self.learned_map.practice_requested.connect(self._go_practice)
+        self.learned_map.content_changed.connect(self._fit)
         # 注意：不在这里 echo.start()。启动停在主页，等用户点「开始今天的学习」才真正开课+抓音频。
 
         # 现场兜底快捷键（Echo 窗口在前台时有效）
@@ -303,6 +331,9 @@ class FloatingWindow(QWidget):
         self.stack.addWidget(self._build_recall())   # 11
         self.stack.addWidget(self._build_profile())  # 12
         self.stack.addWidget(self._build_ask())      # 13
+        self.learned_map = MindMapPage()             # 14 已学内容：全部历史知识点的大图
+        self.stack.addWidget(self.learned_map)
+        self.stack.addWidget(self._build_weekly())   # 15
         self.body_scroll = QScrollArea()
         self.body_scroll.setWidgetResizable(True)
         self.body_scroll.setFrameShape(QFrame.NoFrame)
@@ -763,6 +794,12 @@ class FloatingWindow(QWidget):
         self.echo_sum_card, self.echo_sum_lbl, self.echo_hl_lay = self._summary_card()
         lay.addWidget(self.echo_sum_card)
 
+        self.overview_card, self.overview_lay = self._overview_card()
+        lay.addWidget(self.overview_card)
+
+        self.bp_card, self.bp_lay = self._breakpoint_card()
+        lay.addWidget(self.bp_card)
+
         self.echo_path = QWidget()
         self.echo_path_lay = QVBoxLayout(self.echo_path)
         self.echo_path_lay.setContentsMargins(0, 0, 0, 0)
@@ -818,6 +855,128 @@ class FloatingWindow(QWidget):
                                         f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;"
                                         "line-height: 150%;", wrap=True))
         card.setVisible(bool(summary) or hl_lay.count() > 0)
+
+    def _breakpoint_card(self):
+        """「这节课的掉队」卡片：掉队的具体时间 + 时长。返回 (卡片, 容器 layout)。"""
+        card = QFrame()
+        card.setObjectName("BpCard")
+        card.setStyleSheet(f"QFrame#BpCard {{ background: {Colors.SURFACE};"
+                           f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.MD}px; }}")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        v.setSpacing(6)
+        v.addWidget(_label(tr("这节课的掉队", "Where you fell behind"),
+                           f"color: {Colors.ACCENT}; font-size: 12px; font-weight: 600;"))
+        lay = QVBoxLayout()
+        lay.setContentsMargins(0, 2, 0, 0)
+        lay.setSpacing(4)
+        v.addLayout(lay)
+        card.hide()
+        return card, lay
+
+    def _fill_breakpoints(self, lay, breakpoints):
+        """把掉队时间线填进卡片容器；没内容整卡隐藏（由调用方 setVisible）。"""
+        while lay.count():
+            it = lay.takeAt(0)
+            w = it.widget()
+            if w:
+                w.deleteLater()
+        outcome_txt = {
+            "fixed": tr("已补上", "caught up"),
+            "self": tr("自己看了", "reviewed alone"),
+            "open": tr("未补上", "not caught up"),
+        }
+        for bp in (breakpoints or []):
+            clock = _fmt_clock(bp.get("lost_at"))
+            dur = _fmt_duration(bp.get("duration") or 0)
+            concept = (bp.get("concept") or "").strip()
+            outcome = outcome_txt.get(bp.get("outcome"), "")
+            bits = []
+            if clock:
+                bits.append(tr(f"{clock} 掉队", f"Fell behind at {clock}"))
+            if concept:
+                bits.append(f"「{concept}」")
+            bits.append(tr(f"掉了 {dur}", f"lost for {dur}"))
+            if outcome:
+                bits.append(outcome)
+            lay.addWidget(_label(" · ".join(bits),
+                                 f"color: {Colors.TEXT_PRIMARY}; font-size: 12px;"
+                                 "line-height: 150%;", wrap=True))
+
+    def _overview_card(self):
+        """「本节课概览」卡片：掉队总览 / 答题情况 / 掌握概览。返回 (卡片, 容器 layout)。"""
+        card = QFrame()
+        card.setObjectName("OvCard")
+        card.setStyleSheet(f"QFrame#OvCard {{ background: {Colors.SURFACE};"
+                           f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.MD}px; }}")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        v.setSpacing(8)
+        v.addWidget(_label(tr("本节课概览", "Lesson at a glance"),
+                           f"color: {Colors.ACCENT}; font-size: 12px; font-weight: 600;"))
+        lay = QVBoxLayout()
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        v.addLayout(lay)
+        card.hide()
+        return card, lay
+
+    def _fill_overview(self, lay, overview) -> bool:
+        """把概览三行填进卡片；返回是否有内容（供调用方 setVisible）。"""
+        while lay.count():
+            it = lay.takeAt(0)
+            w = it.widget()
+            if w:
+                w.deleteLater()
+        any_ = False
+
+        # 1) 掉队总览
+        bp_count = overview.get("bp_count") or 0
+        if bp_count:
+            bits = [tr(f"掉队 {bp_count} 次", f"Fell behind {bp_count}×")]
+            if overview.get("bp_total"):
+                bits.append(tr(f"共 {_fmt_duration(overview['bp_total'])}",
+                               f"{_fmt_duration(overview['bp_total'])} total"))
+            if overview.get("bp_max"):
+                bits.append(tr(f"最长 {_fmt_duration(overview['bp_max'])}",
+                               f"longest {_fmt_duration(overview['bp_max'])}"))
+            lay.addWidget(_label(" · ".join(bits),
+                                 f"color: {Colors.TEXT_PRIMARY}; font-size: 12px;", wrap=True))
+            any_ = True
+
+        # 2) 答题情况
+        q_total = overview.get("quiz_total") or 0
+        if q_total:
+            q_correct = overview.get("quiz_correct") or 0
+            acc = int(round(q_correct / q_total * 100))
+            lay.addWidget(_label(tr(f"抽问 {q_total} 次 · 答对 {q_correct} 道 · 正确率 {acc}%",
+                                    f"{q_total} asked · {q_correct} correct · {acc}% accuracy"),
+                                 f"color: {Colors.TEXT_PRIMARY}; font-size: 12px;", wrap=True))
+            any_ = True
+
+        # 3) 掌握概览（已跟上 / 待复习 进度条）
+        total = overview.get("total") or 0
+        if total:
+            ok = overview.get("ok") or 0
+            row = QWidget()
+            h = QHBoxLayout(row)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.setSpacing(Spacing.SM)
+            bar = QProgressBar()
+            bar.setRange(0, total)
+            bar.setValue(ok)
+            bar.setTextVisible(False)
+            bar.setFixedHeight(8)
+            bar.setStyleSheet(
+                f"QProgressBar {{ background:{Colors.SURFACE_HOVER}; border:none; border-radius:4px; }}"
+                f"QProgressBar::chunk {{ background:{Colors.OK_FG}; border-radius:4px; }}")
+            h.addWidget(bar, 1, Qt.AlignVCenter)
+            h.addWidget(_label(tr(f"已跟上 {ok} / {total}", f"{ok} / {total} kept up"),
+                               f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"))
+            lay.addWidget(row)
+            any_ = True
+
+        return any_
 
     # ----- 5 错题复习（主页）-----
     def _build_review(self) -> QWidget:
@@ -1244,6 +1403,16 @@ class FloatingWindow(QWidget):
             tr("课程管理", "Course manager"), tr("回看、搜索、重命名、批量管理历史课程", "Review, search, rename, and manage past lessons"),
             tr("管理", "Manage"), self._show_courses)
         lay.addWidget(self.home_courses_card)
+        self.home_learned_card = self._home_card(
+            tr("已学内容", "Learned so far"),
+            tr("所有历史学过的知识点，一张按学科分区的大思维导图", "Every topic you've learned, in one subject-grouped mind map"),
+            tr("查看", "View"), self._show_learned)
+        lay.addWidget(self.home_learned_card)
+        self.home_weekly_card = self._home_card(
+            tr("一周学习回响", "Weekly review"),
+            tr("最近 7 天学过的知识点，一页看全", "What you learned in the last 7 days, at a glance"),
+            tr("查看", "View"), self._show_weekly)
+        lay.addWidget(self.home_weekly_card)
         return page
 
     def _recall_card(self):
@@ -2407,6 +2576,62 @@ class FloatingWindow(QWidget):
         lay.addLayout(row)
         return page
 
+    # ----- 已学内容（全部历史知识点大图，按学科分区）-----
+    def _show_learned(self):
+        self.learned_map.show_all(store.list_lessons(), store.load())
+        self._show_page(LEARNED)
+
+    # ----- 一周学习回响（最近 7 天知识点，两列进度条）-----
+    def _build_weekly(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(Spacing.MD)
+
+        head = QVBoxLayout()
+        head.setSpacing(2)
+        head.addWidget(_label(tr("一周学习回响", "Weekly review"), TITLE))
+        self.weekly_sub = _label("", CAPTION, wrap=True)
+        head.addWidget(self.weekly_sub)
+        lay.addLayout(head)
+
+        self.weekly_host = QWidget()
+        self.weekly_grid = QGridLayout(self.weekly_host)
+        self.weekly_grid.setContentsMargins(0, 0, 0, 0)
+        self.weekly_grid.setHorizontalSpacing(Spacing.MD)
+        self.weekly_grid.setVerticalSpacing(Spacing.SM)
+        lay.addWidget(self.weekly_host)
+
+        self.weekly_empty = _label(
+            tr("最近 7 天还没有学习记录。开始听一节课，这里就会长出来。",
+               "No learning recorded in the last 7 days. Start a lesson and this page fills up."),
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 13px;", wrap=True)
+        lay.addWidget(self.weekly_empty)
+        lay.addStretch(1)
+        return page
+
+    def _render_weekly(self):
+        while self.weekly_grid.count():
+            it = self.weekly_grid.takeAt(0)
+            w = it.widget()
+            if w:
+                w.deleteLater()
+        skills = store.weekly_skills(7)
+        for i, sk in enumerate(skills):
+            st = echo_status(sk.get("status", "ok"))
+            mark = echo_mark(st, sk.get("mastery", 0.0))
+            self.weekly_grid.addWidget(
+                SkillTile(sk.get("name", ""), sk.get("mastery", 0.0), mark), i // 2, i % 2)
+        n = len(skills)
+        self.weekly_sub.setText(
+            tr(f"最近 7 天学了 {n} 个知识点", f"{n} knowledge points learned in the last 7 days")
+            if n else tr("最近 7 天还没有学习记录", "Nothing learned in the last 7 days"))
+        self.weekly_empty.setVisible(not n)
+
+    def _show_weekly(self):
+        self._render_weekly()
+        self._show_page(WEEKLY)
+
     def _show_qa(self):
         """从听课页点「答疑」进来。对话本身是留着的 —— 课后回来接着问，上下文还在。"""
         if getattr(self, "_qa_chat", None) is None:
@@ -2499,6 +2724,12 @@ class FloatingWindow(QWidget):
         self.det_sum_card, self.det_sum_lbl, self.det_hl_lay = self._summary_card()
         lay.addWidget(self.det_sum_card)
 
+        self.det_overview_card, self.det_overview_lay = self._overview_card()
+        lay.addWidget(self.det_overview_card)
+
+        self.det_bp_card, self.det_bp_lay = self._breakpoint_card()
+        lay.addWidget(self.det_bp_card)
+
         self.det_path = QWidget()
         self.det_path_lay = QVBoxLayout(self.det_path)
         self.det_path_lay.setContentsMargins(0, 0, 0, 0)
@@ -2537,6 +2768,20 @@ class FloatingWindow(QWidget):
         self.det_stat.setText(self._stat_line(ls))
         self._fill_summary(self.det_sum_card, self.det_sum_lbl, self.det_hl_lay,
                            ls.get("summary", ""), ls.get("highlights", []))
+        _bps = ls.get("breakpoints") or []
+        _quiz = ls.get("quiz") or {}
+        _skills = ls.get("skills_detail") or []
+        self.det_overview_card.setVisible(self._fill_overview(self.det_overview_lay, {
+            "bp_count": len(_bps),
+            "bp_total": int(sum(b.get("duration") or 0 for b in _bps)),
+            "bp_max": int(max((b.get("duration") or 0 for b in _bps), default=0)),
+            "quiz_total": _quiz.get("total", 0),
+            "quiz_correct": _quiz.get("correct", 0),
+            "ok": sum(1 for s in _skills if s.get("status") == "ok"),
+            "total": len(_skills),
+        }))
+        self._fill_breakpoints(self.det_bp_lay, _bps)
+        self.det_bp_card.setVisible(bool(_bps))
 
         while self.det_path_lay.count():
             w = self.det_path_lay.takeAt(0).widget()
@@ -2621,7 +2866,7 @@ class FloatingWindow(QWidget):
         mini = idx == MINI
         self.header.setVisible(not mini)
         self.back_btn.setVisible(idx in (BREAK, LESSON, REVIEW, PRACTICE, DETAIL, MINDMAP,
-                                         COURSES, RECALL, PROFILE, ASK))
+                                         COURSES, RECALL, PROFILE, ASK, LEARNED, WEEKLY))
         # ← 按钮写哪儿：页面自己记着来路时听它的，否则看这一页是怎么进来的
         back_label = ""
         if idx == PRACTICE and self._prac_back_label:
@@ -2633,7 +2878,7 @@ class FloatingWindow(QWidget):
             if target is not None:
                 back_label = BACK_LABEL.get(target, "")
         if idx not in (BREAK, LESSON, REVIEW, PRACTICE, DETAIL, MINDMAP,
-                       COURSES, RECALL, PROFILE, ASK):
+                       COURSES, RECALL, PROFILE, ASK, LEARNED, WEEKLY):
             back_label = ""                      # 这条没有 ← 按钮，随便写什么都没人看见
         self.back_btn.setText(back_label or tr("← 回到课堂", "← Back to class"))
 
@@ -3076,6 +3321,20 @@ class FloatingWindow(QWidget):
         self.echo_stat.setText(self._stat_line(report))
         self._fill_summary(self.echo_sum_card, self.echo_sum_lbl, self.echo_hl_lay,
                            getattr(report, "summary", ""), getattr(report, "highlights", []))
+        _bps = getattr(report, "breakpoints", []) or []
+        _quiz = getattr(report, "quiz", {}) or {}
+        _skills = getattr(report, "skills", []) or []
+        self.overview_card.setVisible(self._fill_overview(self.overview_lay, {
+            "bp_count": len(_bps),
+            "bp_total": int(sum(b.get("duration") or 0 for b in _bps)),
+            "bp_max": int(max((b.get("duration") or 0 for b in _bps), default=0)),
+            "quiz_total": _quiz.get("total", 0),
+            "quiz_correct": _quiz.get("correct", 0),
+            "ok": sum(1 for s in _skills if getattr(s, "status", "ok") == "ok"),
+            "total": len(_skills),
+        }))
+        self._fill_breakpoints(self.bp_lay, _bps)
+        self.bp_card.setVisible(bool(_bps))
         self.review_card.setVisible(self.review_card.set_chain(report.review_chain, report.suggestion))
         cnt["review"] = cnt["unsure"] + cnt["lost"]
         self._save_review()
@@ -3110,7 +3369,9 @@ class FloatingWindow(QWidget):
                               duration=getattr(report, "duration", 0.0),
                               line_count=getattr(report, "line_count", 0),
                               char_count=getattr(report, "char_count", 0),
-                              graph=getattr(report, "graph", None))
+                              graph=getattr(report, "graph", None),
+                              breakpoints=getattr(report, "breakpoints", []),
+                              quiz=getattr(report, "quiz", {}))
         except Exception:
             pass
 

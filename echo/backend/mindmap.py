@@ -211,6 +211,108 @@ def build(lesson: dict, mistakes: list = None) -> dict:
             "has_real_graph": bool(raw and raw.get("nodes"))}
 
 
+def subject_of(title: str) -> str:
+    """从课程标题推断学科：取第一个分隔符之前的部分。
+
+    「初二数学 · 正比例函数」→「初二数学」；没有分隔符就用整条标题；仍空则「未分类」。
+    """
+    t = (title or "").strip()
+    if not t:
+        return "未分类"
+    for sep in ("·", "：", ":", "，", ",", "－", "-"):
+        head = t.split(sep, 1)[0].strip()
+        if head:
+            return head
+    return t
+
+
+def build_all(lessons: list, mistakes: list = None) -> dict:
+    """把所有历史课合并成一张大图，节点按「学科」分区。
+
+    遍历每节课调 build() 得单课图，按知识点名（_same）归并同名节点：
+    取最近一节课的 mastery/status，并记下学科（来自那节课标题）。边并集、保连通。
+    返回形状与 build() 一致，节点多 subject / subject_index，另附 subjects 列表和
+    skills_detail（伪 lesson，给节点详情面板用）。
+    """
+    lessons = [l for l in (lessons or []) if isinstance(l, dict) and l]
+    ordered = sorted(lessons, key=lambda l: l.get("time") or 0)   # 旧 → 新，后写的覆盖
+
+    nodes = {}        # norm_key -> 节点信息
+    edges = []        # (a, b)
+    subjects = []     # 学科（首次出现顺序）
+    subject_idx = {}  # norm(subject) -> index
+    all_skills = []   # 合并后的 skills_detail（供节点详情）
+
+    for lesson in ordered:
+        subj = subject_of(lesson.get("title"))
+        g = build(lesson, mistakes)
+        for n in (g.get("nodes") or []):
+            topic = (n.get("topic") or n.get("id") or "").strip()
+            if not topic or is_placeholder_topic(topic):
+                continue
+            key = _norm(topic)
+            rec = {
+                "topic": topic,
+                "status": n.get("status") or "ok",
+                "mastery": float(n.get("mastery") or 0.0),
+                "subject": subj,
+                "has_mistake": bool(n.get("has_mistake")),
+            }
+            nodes[key] = rec      # 后写覆盖，天然取「最近一节课」
+        for e in (g.get("edges") or []):
+            a, b = e.get("from"), e.get("to")
+            if a and b and _norm(a) != _norm(b):
+                edges.append((a, b))
+        all_skills.extend(_skills(lesson))
+
+    # 学科编号（按首次出现顺序）
+    for key, rec in nodes.items():
+        ns = _norm(rec["subject"])
+        if ns not in subject_idx:
+            subject_idx[ns] = len(subjects)
+            subjects.append(rec["subject"])
+
+    node_list = []
+    for key, rec in nodes.items():
+        node_list.append({
+            "id": rec["topic"],
+            "topic": rec["topic"],
+            "status": rec["status"],
+            "mastery": rec["mastery"],
+            "subject": rec["subject"],
+            "subject_index": subject_idx[_norm(rec["subject"])],
+            "has_mistake": rec["has_mistake"],
+        })
+
+    # 边：只留两端都在图里的，去自环、模糊去重
+    topics = {_norm(n["topic"]) for n in node_list}
+    seen = set()
+    clean_edges = []
+    for a, b in edges:
+        na, nb = _norm(a), _norm(b)
+        if na == nb or na not in topics or nb not in topics:
+            continue
+        kp = tuple(sorted((na, nb)))
+        if kp in seen:
+            continue
+        seen.add(kp)
+        clean_edges.append((a, b))
+
+    levels = _levels([n["topic"] for n in node_list], clean_edges)
+    for n in node_list:
+        n["level"] = levels.get(n["topic"], 0)
+
+    return {
+        "nodes": node_list,
+        "edges": [{"from": a, "to": b} for a, b in clean_edges],
+        "levels": levels,
+        "subjects": subjects,
+        "review_first": "",
+        "has_real_graph": False,
+        "skills_detail": all_skills,
+    }
+
+
 def _same_in(topic: str, nodes: list) -> bool:
     return any(_same(topic, n) for n in nodes)
 

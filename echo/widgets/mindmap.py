@@ -65,6 +65,10 @@ class _Canvas(QWidget):
         self._auto = {}           # topic -> QPointF（自动排布的原位置，用来算拖动偏移）
         self._levels = {}         # topic -> 依赖层级，重置视图时用来还原排布
         self._review_first = ""   # 复习链的根源概念，图上标出来告诉学生从哪开始补
+        self._subjects = []       # 分区模式下的学科列表（按列顺序）
+        self._subject_index = {}  # topic -> 学科列号
+        self._subject = {}        # topic -> 学科名
+        self._columns = {}        # 学科列号 -> 列左边界 x（画学科标签用）
         self._edges = []          # [(topic_a, topic_b)]
         self._world = QSizeF(1, 1)
         self._scale = 1.0
@@ -92,6 +96,10 @@ class _Canvas(QWidget):
                        for n in nodes]
         self._levels = {n["id"]: n.get("level", 0) for n in nodes}
         self._review_first = graph.get("review_first") or ""
+        self._subjects = list(graph.get("subjects") or [])
+        self._subject_index = {n["id"]: n.get("subject_index", 0) for n in nodes}
+        self._subject = {n["id"]: n.get("subject", "") for n in nodes}
+        self._columns = {}
         self._edges = [(e["from"], e["to"]) for e in edges
                        if e.get("from") is not None and e.get("to") is not None]
         if not keep_positions or set(self._pos) != set(topics):
@@ -103,7 +111,10 @@ class _Canvas(QWidget):
         self.update()
 
     def _auto_layout(self, nodes: list):
-        """默认排布：按依赖层级从上往下，同层横向均分。"""
+        """默认排布：按依赖层级从上往下，同层横向均分。分区模式（有学科）走 _layout_by_subject。"""
+        if self._subjects:
+            self._layout_by_subject(nodes)
+            return
         by_level = {}
         for n in nodes:
             by_level.setdefault(n.get("level", 0), []).append(n["id"])
@@ -119,6 +130,31 @@ class _Canvas(QWidget):
                 self._pos[topic] = QPointF(step * i + (step - NODE_W) / 2, y)
         self._world = QSizeF(width, PAD * 2 + max(1, len(levels)) * LEVEL_H)
         # 留一份原位置：拖动偏移是相对它算的，重置视图也靠它还原
+        self._auto = {t: QPointF(p) for t, p in self._pos.items()}
+
+    def _layout_by_subject(self, nodes: list):
+        """分区排布：每个学科一列，列内节点按依赖层级从上往下堆。"""
+        cols = {}   # subject_index -> [topic]
+        for n in nodes:
+            idx = self._subject_index.get(n["id"], 0)
+            cols.setdefault(idx, []).append(n["id"])
+        col_order = sorted(cols)
+        col_w = NODE_W + GAP_X
+        row_h = NODE_H + GAP_X
+        self._pos = {}
+        self._columns = {}
+        max_rows = 1
+        for ci, idx in enumerate(col_order):
+            x = PAD + ci * col_w
+            self._columns[idx] = x
+            # 列内按层级排序（再按名字稳定），从上往下堆
+            row = sorted(cols[idx], key=lambda t: (self._levels.get(t, 0), t))
+            for ri, topic in enumerate(row):
+                self._pos[topic] = QPointF(x, PAD + ri * row_h)
+            max_rows = max(max_rows, len(row))
+        width = PAD * 2 + len(col_order) * col_w
+        height = PAD * 2 + max_rows * row_h
+        self._world = QSizeF(max(width, 320.0), max(height, 320.0))
         self._auto = {t: QPointF(p) for t, p in self._pos.items()}
 
     def _apply_offsets(self, offsets: dict):
@@ -299,6 +335,16 @@ class _Canvas(QWidget):
             p.drawPath(arrow)
             p.setBrush(Qt.NoBrush)
 
+        # 分区模式：每列顶上标学科名
+        if self._subjects:
+            p.setPen(QPen(QColor(Colors.ACCENT)))
+            p.setFont(font(11, 700))
+            for idx, x in self._columns.items():
+                subj = self._subjects[idx] if idx < len(self._subjects) else ""
+                if subj:
+                    p.drawText(QRectF(x, 0, NODE_W, PAD),
+                               Qt.AlignLeft | Qt.AlignVCenter, subj)
+
         for topic, status, timecode in self._nodes:
             rect = self._rect(topic)
             border, fill, text = status_style(status)
@@ -375,14 +421,14 @@ class MindMapPage(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(Spacing.SM)
 
-        title = QLabel(tr("知识地图", "Knowledge map"))
-        title.setFont(font(14, 600))
+        self.title_lbl = QLabel(tr("知识地图", "Knowledge map"))
+        self.title_lbl.setFont(font(14, 600))
         self.sub = QLabel("")
         self.sub.setFont(font(11))
         self.sub.setWordWrap(True)
         head = QVBoxLayout()
         head.setSpacing(2)
-        head.addWidget(title)
+        head.addWidget(self.title_lbl)
         head.addWidget(self.sub)
         root.addLayout(head)
 
@@ -466,6 +512,7 @@ class MindMapPage(QWidget):
         self._mistakes = mistakes if mistakes is not None else []
         self._graph = mindmap.build(self._lesson, self._mistakes)
         self._key = self._lesson_key(self._lesson)
+        self.title_lbl.setText(tr("知识地图", "Knowledge map"))
 
         # 课程内容
         title = (self._lesson.get("title") or "").strip()
@@ -507,6 +554,45 @@ class MindMapPage(QWidget):
         self.reset_btn.setVisible(bool(nodes))
         self.canvas.set_graph(self._graph,
                               offsets=layout.get(self._key) if self._key else None)
+        self.detail.clear()
+        self.detail.setVisible(bool(nodes))
+        self.content_changed.emit()
+
+    def show_all(self, lessons: list, mistakes: list = None):
+        """喂全部历史课：合并成一张按学科分区的大图。"""
+        self._mistakes = mistakes if mistakes is not None else []
+        self._graph = mindmap.build_all(lessons or [], self._mistakes)
+        # 伪 lesson：只带合并后的 skills_detail，够 node_detail / 出题用
+        self._lesson = {"title": "", "summary": "", "highlights": [],
+                        "skills_detail": self._graph.get("skills_detail") or []}
+        self._key = ""   # 聚合图不记拖动位置（学科分区是自动排的）
+
+        nodes = self._graph["nodes"]
+        subjects = self._graph.get("subjects") or []
+        self.title_lbl.setText(tr("已学内容", "Learned so far"))
+        self.lesson_title.setText("")
+        self.lesson_summary.setText("")
+        self.lesson_points.setText("")
+        self.content_box.setVisible(False)
+
+        review = sum(1 for n in nodes if n["status"] == mindmap.STATUS_REVIEW)
+        if nodes:
+            bits = [tr(f"{len(nodes)} 个知识点", f"{len(nodes)} knowledge points"),
+                    tr(f"{len(subjects)} 个学科", f"{len(subjects)} subjects")]
+            if review:
+                bits.append(tr(f"{review} 个待回看", f"{review} to review"))
+            self.sub.setText(" · ".join(bits))
+            self.empty.setText("")
+        else:
+            self.sub.setText(tr("还没有学过的知识点", "No knowledge points yet"))
+            self.empty.setText(tr("上完一节课，这里会长出你的知识地图。",
+                                  "Finish a lesson and your map grows here."))
+
+        self.empty.setVisible(not nodes)
+        self.canvas.setVisible(bool(nodes))
+        self.legend.setVisible(bool(nodes))
+        self.reset_btn.setVisible(bool(nodes))
+        self.canvas.set_graph(self._graph)
         self.detail.clear()
         self.detail.setVisible(bool(nodes))
         self.content_changed.emit()

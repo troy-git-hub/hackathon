@@ -366,12 +366,15 @@ def _skill_fields(sk) -> dict:
 def save_lesson(title: str, skills: list, review_chain: list, suggestion: str = "",
                 summary: str = "", highlights: list = None,
                 duration: float = 0.0, line_count: int = 0, char_count: int = 0,
-                graph: dict = None) -> float:
+                graph: dict = None, breakpoints: list = None, quiz: dict = None) -> float:
     """存一节课的回响摘要，返回这条记录的 time 时间戳（给详情页定位用）。
     skills 支持元组 / dict / 对象列表。最多保留最近 50 条。
 
     graph 是可选的课前置关系（{"nodes": [...], "edges": [[前, 后], ...]}），
     给课后「知识地图」用；不传也能画，mindmap 会按复习链和讲课顺序推导。
+
+    breakpoints 是这节课的掉队时间线（[{tc,concept,lost_at,resolved_at,duration,outcome}]），
+    quiz 是课中抽问汇总（{total, correct}），都给历史课程详情页回放用。
     """
     skills = skills or []
     total = len(skills)
@@ -392,6 +395,9 @@ def save_lesson(title: str, skills: list, review_chain: list, suggestion: str = 
         "line_count": line_count,
         "char_count": char_count,
         "skills_detail": [_skill_fields(sk) for sk in skills],
+        "breakpoints": list(breakpoints or []),
+        "quiz": {"total": int((quiz or {}).get("total", 0)),
+                 "correct": int((quiz or {}).get("correct", 0))},
     }
     if graph and graph.get("nodes"):
         record["graph"] = {"nodes": [str(n) for n in graph.get("nodes") or []],
@@ -419,6 +425,42 @@ def list_lessons(limit: int = None) -> list:
     cur = _load_lessons()
     cur.sort(key=lambda it: it.get("time", 0), reverse=True)
     return cur if limit is None else cur[:limit]
+
+
+def weekly_skills(days: int = 7) -> list:
+    """最近 N 天学过的知识点，跨课去重合并。返回 [{name, mastery, status}]（最近在前）。
+
+    同名知识点（模糊匹配）取最近一次掌握度；状态取最差（review < fixed < ok）——
+    这一周在哪节课掉过队，比「最近一次看起来还行」更该让学生看到。
+    """
+    from echo.backend import mindmap   # 函数内 import，避免 store ↔ mindmap 顶层耦合
+    now = time.time()
+    cutoff = now - days * DAY
+    rank = {"review": 0, "fixed": 1, "ok": 2}   # 越小越该复习
+    by_name = {}      # 归一化名 -> {"name","mastery","status","time"}
+    for ls in list_lessons():
+        t = ls.get("time") or 0
+        if t < cutoff:
+            continue
+        for sk in ls.get("skills_detail") or []:
+            name = (sk.get("name") or "").strip()
+            if not name or mindmap.is_placeholder_topic(name):
+                continue
+            key = mindmap._norm(name)
+            st = sk.get("status") or "ok"
+            rec = by_name.get(key)
+            if rec is None:
+                by_name[key] = {"name": name, "mastery": sk.get("mastery", 0.0),
+                                "status": st, "time": t}
+                continue
+            if t > rec["time"]:                       # 更新为最近一次
+                rec["name"] = name
+                rec["mastery"] = sk.get("mastery", 0.0)
+                rec["time"] = t
+            if rank.get(st, 2) < rank.get(rec["status"], 2):   # 保留最差状态
+                rec["status"] = st
+    out = sorted(by_name.values(), key=lambda r: -r["time"])
+    return [{"name": r["name"], "mastery": r["mastery"], "status": r["status"]} for r in out]
 
 
 def _same_time(a, b) -> bool:

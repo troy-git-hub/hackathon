@@ -485,6 +485,34 @@ class SkillRow(QWidget):
         lay.addWidget(_MarkIcon(mark), 0, Qt.AlignVCenter)
 
 
+class SkillTile(QWidget):
+    """紧凑知识卡（一周回响用）：一行放两条。名字在上，下面是短进度条 + 三态图标。
+
+    和 SkillRow 的区别：名字不占固定宽、进度条跟着半列宽走，比全宽的条短，
+    正好「原来一条的位置放两条」。
+    """
+
+    def __init__(self, name, mastery, mark, parent=None):
+        super().__init__(parent)
+        _, _, _, bar_ck = MARK_STYLE[mark]
+        v = QVBoxLayout(self)
+        v.setContentsMargins(0, 4, 0, 4)
+        v.setSpacing(3)
+
+        n = QLabel(name)
+        n.setWordWrap(True)
+        n.setToolTip(name)
+        n.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-size: 12px;"
+                        f"font-weight: {600 if mark == 'lost' else 400}; background: transparent;")
+        v.addWidget(n)
+
+        row = QHBoxLayout()
+        row.setSpacing(Spacing.SM)
+        row.addWidget(_MasteryBar(mastery, getattr(Colors, bar_ck)), 1, Qt.AlignVCenter)
+        row.addWidget(_MarkIcon(mark), 0, Qt.AlignVCenter)
+        v.addLayout(row)
+
+
 class ReviewChain(QFrame):
     """你的掉队点 ↓ 前置 ↓ 建议复习：根源。chain 为「掉队点 → … → 根源」。"""
 

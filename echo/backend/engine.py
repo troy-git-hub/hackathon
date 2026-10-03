@@ -75,6 +75,8 @@ class EchoReport:
     line_count: int = 0               # 转写句数
     char_count: int = 0               # 转写总字数
     graph: dict = field(default_factory=dict)   # 知识点前置关系图，给课后「知识地图」用
+    breakpoints: List[dict] = field(default_factory=list)  # 掉队时间线：{tc,concept,lost_at,resolved_at,duration,outcome}
+    quiz: dict = field(default_factory=dict)   # 课中抽问汇总：{total, correct}，回响页「答题情况」用
 
 
 @dataclass
@@ -142,6 +144,7 @@ class EchoEngine:
             self.entries: List[_ConceptEntry] = []
             self.feedbacks: List[Feedback] = []
             self.breakpoints: List[BreakPoint] = []
+            self._pending_lost_at = 0.0         # 最近一次点「我掉队了」的墙钟时刻，等断点分析完挂上去
             self._pending_from = 0          # lines[_pending_from:] 还没抽过 concept
             self._last_extract = time.time()
             # 课堂抽问：学生久不互动就主动问一道，答错进错题本
@@ -371,6 +374,8 @@ class EchoEngine:
             cur = self.entries[-1] if self.entries else None
             self.feedbacks.append(Feedback(self.now(), kind, cur.concept.topic if cur else ""))
             self._last_interaction = time.time()   # 学生动手了，说明人在
+            if kind == "lost":
+                self._pending_lost_at = time.time()   # 掉队起点（墙钟），断点分析好之后挂到 BreakPoint 上
             sid = self.session
         if kind == "lost":
             self._emit(sid, "status", "analyzing")
@@ -450,6 +455,7 @@ class EchoEngine:
         with self._lock:
             if not self._live(sid):   # 分析期间已经下课/重开：不往新课里写断点
                 return
+            bp.lost_at = self._pending_lost_at or time.time()   # 掉队起点墙钟（没记到就用现在兜底）
             shown = self._attach_breakpoint(bp)
             self.breakpoints.append(bp)
         # 立刻落盘，不等下课：以前是整节课的断点都攒在内存里，下课时才一次性写进
@@ -569,6 +575,7 @@ class EchoEngine:
             if self.breakpoints:
                 bp = self.breakpoints[-1]
                 bp.fixed = True
+                bp.resolved_at = time.time()   # 补上那一刻的墙钟，回响里算掉队时长
                 for e in reversed(self.entries):
                     if e.is_bp and e.concept.timecode == bp.breakpoint_tc:
                         e.fixed = True
@@ -584,6 +591,7 @@ class EchoEngine:
             if self.breakpoints:
                 bp = self.breakpoints[-1]
                 bp.self_review = True
+                bp.resolved_at = time.time()   # 自己看也记个时间，掉队时长算到这里
         if bp is not None:
             self._persist_breakpoint(bp)
 
@@ -787,6 +795,8 @@ class EchoEngine:
         if report is None:
             report = self._heuristic_echo()
         report.graph = self._concept_graph()
+        report.breakpoints = self._breakpoint_rows()
+        report.quiz = self._quiz_summary()
         self._emit(sid, "status", "done")
         self._emit(sid, "echo", report)
 
@@ -867,6 +877,44 @@ class EchoEngine:
         return EchoReport(skills, chain, f"建议复习：{chain[-1]}" if chain else "今天都跟上了！",
                           summary=summary, highlights=highlights,
                           duration=duration, line_count=line_count, char_count=char_count)
+
+    def _breakpoint_rows(self) -> List[dict]:
+        """把整节课的断点整理成回响页的「掉队时间线」。
+
+        每个断点：掉队起点墙钟、恢复墙钟、真实耗时（秒）、结果三态（fixed / self / open）。
+        未补上的断点算到「当下」——下课后 stop() 会让 start_ts 停住，这里用当前墙钟近似下课时刻。
+        """
+        with self._lock:
+            bps = list(self.breakpoints)
+        end = time.time()
+        rows = []
+        for b in bps:
+            lost = b.lost_at or 0.0
+            resolved = b.resolved_at or 0.0
+            duration = max(0.0, (resolved or end) - lost) if lost else 0.0
+            if b.fixed:
+                outcome = "fixed"
+            elif b.self_review:
+                outcome = "self"
+            else:
+                outcome = "open"
+            rows.append({
+                "tc": b.breakpoint_tc,
+                "concept": b.concept,
+                "lost_at": lost,
+                "resolved_at": resolved,
+                "duration": duration,
+                "outcome": outcome,
+            })
+        return rows
+
+    def _quiz_summary(self) -> dict:
+        """课中抽问汇总：被抽问几次、答对几道。回响页「答题情况」用。"""
+        with self._lock:
+            checks = list(self.checkins)
+        total = len(checks)
+        correct = sum(1 for c in checks if c.get("result") == "right")
+        return {"total": total, "correct": correct}
 
     # ================= 工具 =================
     def _timeline_text(self) -> str:

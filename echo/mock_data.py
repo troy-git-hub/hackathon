@@ -31,6 +31,8 @@ class BreakPoint:
     now: str = ""          # ③所以现在能听懂什么
     fixed: bool = False    # 学生点了「补上了」
     self_review: bool = False  # 学生点了「我自己看看」，没用 AI 补
+    lost_at: float = 0.0     # 点「我掉队了」那一刻的墙钟 epoch 秒
+    resolved_at: float = 0.0 # 点「补上了」/「我自己看看」那一刻；0 = 未解决
 
 
 @dataclass
