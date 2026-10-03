@@ -731,5 +731,26 @@ finally:
     window._render_home()
     app.processEvents()
 
+# 离线/兜底跑出来的课不写进历史：engine 的 mock 每次产出同一套示例知识点，
+# 存进去就变成一节「真上过的课」——混在课程管理里，也污染统计和画像
+# （用户就这么攒了 50 节内容一模一样的假课）。
+class _MockReport:
+    from_mock = True
+    skills, review_chain, highlights = [], [], []
+    suggestion = summary = ""
+    duration = line_count = char_count = 0
+    graph = {}
+
+
+class _RealReport(_MockReport):
+    from_mock = False
+
+
+n_lessons = len(store.list_lessons())
+window._save_lesson(_MockReport())
+assert len(store.list_lessons()) == n_lessons, "离线兜底跑出来的课被写进课程历史了"
+window._save_lesson(_RealReport())
+assert len(store.list_lessons()) == n_lessons + 1, "真课反而没被存进去"
+
 window.close()
 print("UI smoke passed: one window, avatar and primary flow work")

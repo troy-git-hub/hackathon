@@ -2968,8 +2968,18 @@ class FloatingWindow(QWidget):
             else:
                 self.setMinimumSize(W, H)
                 self.resize(W, H)
-        do()
-        QTimer.singleShot(0, do)   # 换行文本需要一轮事件循环后才能算准高度
+        def apply():
+            # _fit 一次会改两回尺寸（现在一次、等换行文本落定再一次），中间那些帧
+            # 每张大小都不一样 —— 用户看到的就是「窗口在闪、而且每次大小不同」。
+            # 关掉重画把这一串并成最后那一帧。
+            self.setUpdatesEnabled(False)
+            try:
+                do()
+            finally:
+                self.setUpdatesEnabled(True)
+
+        apply()
+        QTimer.singleShot(0, apply)   # 换行文本需要一轮事件循环后才能算准高度
         self.update()
 
     def _back_to_listen(self):
@@ -3360,7 +3370,15 @@ class FloatingWindow(QWidget):
         return " · ".join(bits)
 
     def _save_lesson(self, report):
-        """把这节课存进历史，主页「课程管理」里能看到。没起名时 store 会用开课时间命名。"""
+        """把这节课存进历史，主页「课程管理」里能看到。没起名时 store 会用开课时间命名。
+
+        **离线/兜底跑出来的课不存**：那条路（engine 的 mock）每次都产出同一套
+        示例知识点，存进去就变成一节「真上过的课」，混在历史里、也污染统计和画像
+        （用户就攒了 50 节内容一模一样的假课）。它什么都没真听到，不该算一节课。
+        """
+        if getattr(report, "from_mock", False):
+            log.info("这节课是离线/兜底数据，不写进课程历史")
+            return
         try:
             title = (getattr(self.echo, "title", "") or "").strip()
             store.save_lesson(title, report.skills, report.review_chain, report.suggestion,

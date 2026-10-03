@@ -248,14 +248,16 @@ class EchoTray(QObject):
             self.win._restart()
 
     def review(self):
-        self.show_window()
+        # 先把页面切好再显示窗口。反过来的话，窗口会先按上一页的尺寸冒出来，
+        # 紧接着因为要重建复习页连改两回大小 —— 看着就是窗口在闪、大小不一。
         if hasattr(self.win, "_show_review"):
             self.win._show_review()
+        self.show_window()
 
     def home(self):
-        self.show_window()
         if hasattr(self.win, "_show_home"):
             self.win._show_home()
+        self.show_window()
 
     def toggle_offline(self, checked):
         echo = self.win.echo

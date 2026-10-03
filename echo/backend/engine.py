@@ -77,6 +77,7 @@ class EchoReport:
     graph: dict = field(default_factory=dict)   # 知识点前置关系图，给课后「知识地图」用
     breakpoints: List[dict] = field(default_factory=list)  # 掉队时间线：{tc,concept,lost_at,resolved_at,duration,outcome}
     quiz: dict = field(default_factory=dict)   # 课中抽问汇总：{total, correct}，回响页「答题情况」用
+    from_mock: bool = False           # 这份回响是离线/兜底规则拼的，不是真听懂这节课
 
 
 @dataclass
@@ -794,6 +795,7 @@ class EchoEngine:
                 log.warning("回响 LLM 失败，使用规则兜底: %s", e)
         if report is None:
             report = self._heuristic_echo()
+            report.from_mock = True
         report.graph = self._concept_graph()
         report.breakpoints = self._breakpoint_rows()
         report.quiz = self._quiz_summary()
