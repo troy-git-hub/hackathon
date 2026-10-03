@@ -8,10 +8,14 @@
 
 ```
 python scripts/build_release.py        # 默认在独立 worktree 里打（推荐）
+python scripts/build_release.py --with-model  # 把语音模型打进包（约 519MB 的胖包）
 python scripts/build_release.py --skip-iscc   # 只出 dist/Echo/，不编安装包
 ```
 
 产物落在 `dist/Echo-Setup-<版本>.exe`（**`dist/` 在 .gitignore 里，不进版本库**）。
+`--with-model` 出的是 `Echo-Setup-<版本>-with-model.exe`，跟瘦包**并存不覆盖**
+（靠 `setup.iss` 的 `MyAppSuffix`）。两个都是同一份代码，区别只是模型在不在包里：
+胖包给下不动那 483MB 的环境用。
 版本号写在 `installer/setup.iss` 的 `MyAppVersion`，`build_release.py` 从那里读。
 
 **必须在独立 worktree 里打**：PyInstaller 打的是「工作区源码」而不是 git HEAD。这个仓库
