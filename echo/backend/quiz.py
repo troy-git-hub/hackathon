@@ -56,14 +56,21 @@ def _clean_checkin(data, tc: str = "") -> dict:
     }
 
 
-def _self_checkin(topic: str, tc: str, why: str = "") -> dict:
-    """自评兜底题：不判断对错，让学生自己说跟没跟上。"""
-    topic = topic or "刚才讲的内容"
-    question = f"老师刚讲了「{topic}」，你现在还记得它是怎么回事吗？"
-    if why == "noconcept":
-        question = "刚才这段课你跟上节奏了吗？"
+def _self_checkin(topic: str, tc: str) -> dict:
+    """自评兜底题：不判断对错，让学生自己说跟没跟上。
+
+    知识点名拿不出手时（空、或 AI 填的「老师正在讲的内容」这类占位名）**不要往题干里塞**：
+    「老师刚讲了『老师正在讲的内容』，你现在还记得吗」读起来像机器坏了，学生也无从答起。
+    这种时候不点名地问一句就够了。
+    """
+    from echo.backend import mindmap
+    name = str(topic or "").strip()
+    if name and not mindmap.is_placeholder_topic(name):
+        question, shown = f"老师刚讲了「{name}」，你现在还记得它是怎么回事吗？", name
+    else:
+        question, shown = "刚才这段课你跟上节奏了吗？", ""
     return {
-        "topic": topic,
+        "topic": shown,
         "question": question,
         "options": list(SELF_OPTIONS),
         "answer": "",

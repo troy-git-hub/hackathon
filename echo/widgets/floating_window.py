@@ -2715,6 +2715,10 @@ class FloatingWindow(QWidget):
         self.tc_lbl.setText("00:00")
         self.progress.setValue(0)
         self._nav_history.clear()       # 新的一节课，上一节的来路作废
+        # 上一节没答完的抽查不能留到新的一节：后端 reset() 已经清掉了那道题，
+        # 但卡片是前端自己画着的，不清就会让学生对着上节课的题目发呆。
+        if hasattr(self, "checkin_card"):
+            self.checkin_card.dismiss()
         self._show_page(LISTEN, push=False)
 
     def _cat(self, emotion, hold_ms=0):

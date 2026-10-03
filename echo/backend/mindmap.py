@@ -31,8 +31,15 @@ def _norm(s: str) -> str:
 # 这种名字一旦进了时间轴，就会变成一个叫「（未知）」的知识点节点，
 # 还会被当成课程标题存下来 —— 看着像课程里真有这么个知识点。
 _PLACEHOLDER_TOPICS = {"未知", "未知知识点", "未知概念", "未命名", "未命名课程", "课堂内容",
-                       "内容", "无", "暂无", "不详", "待定", "其他", "其它", "略"}
+                       "内容", "无", "暂无", "不详", "待定", "其他", "其它", "略",
+                       "老师正在讲的内容", "正在讲的内容", "老师讲的内容", "现在讲的内容"}
 _PLACEHOLDER_RE = re.compile(r"^(未知|未命名|不详|待定|未明确|没有|无法确定|暂无)")
+# 「老师正在讲的内容」这种：AI 拿不准具体是什么知识点，就改去描述「现在正在发生什么」。
+# 它不是知识点名 —— 混进时间轴会变成一个真叫这名字的节点，抽查还会拿它当题干
+# （用户截图里那道「老师刚讲了『老师正在讲的内容』，你还记得吗？」就是这么来的）。
+# 中间那个动词是必须匹配的，否则这个正则会把空串也算进来。
+_PLACEHOLDER_FLOW_RE = re.compile(
+    r"^(老师|现在|刚才|当前)?(正在)?(讲|说|提到|讲解)(的)?(内容|知识点|东西|部分|这段|话)?$")
 
 
 def is_placeholder_topic(name: str) -> bool:
@@ -40,7 +47,8 @@ def is_placeholder_topic(name: str) -> bool:
     n = _norm(name)
     if not n:
         return True
-    return n in _PLACEHOLDER_TOPICS or bool(_PLACEHOLDER_RE.match(n))
+    return (n in _PLACEHOLDER_TOPICS or bool(_PLACEHOLDER_RE.match(n))
+            or bool(_PLACEHOLDER_FLOW_RE.match(n)))
 
 
 def _same(a: str, b: str) -> bool:
