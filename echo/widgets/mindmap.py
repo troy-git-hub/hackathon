@@ -452,6 +452,14 @@ class MindMapPage(QWidget):
         cb.addWidget(self.lesson_points)
         root.addWidget(self.content_box)
 
+        # 「已学内容」顶部的目录：每个学科一项，点开看它的小分支（知识点），点小分支定位到图里
+        self.catalog_box = QWidget()
+        self.catalog_box_lay = QVBoxLayout(self.catalog_box)
+        self.catalog_box_lay.setContentsMargins(0, 0, 0, 0)
+        self.catalog_box_lay.setSpacing(2)
+        self.catalog_box.hide()
+        root.addWidget(self.catalog_box)
+
         self.canvas = _Canvas()
         self.canvas.node_clicked.connect(self._on_node)
         self.canvas.node_moved.connect(self._save_positions)
@@ -527,6 +535,7 @@ class MindMapPage(QWidget):
         self.lesson_points.setText("\n".join("· " + p for p in points[:4]))
         self.lesson_points.setVisible(bool(points))
         self.content_box.setVisible(bool(title or summary or points))
+        self.catalog_box.setVisible(False)   # 目录只给「已学内容」聚合图用，单课地图不显示
 
         nodes = self._graph["nodes"]
         review = sum(1 for n in nodes if n["status"] == mindmap.STATUS_REVIEW)
@@ -593,9 +602,71 @@ class MindMapPage(QWidget):
         self.legend.setVisible(bool(nodes))
         self.reset_btn.setVisible(bool(nodes))
         self.canvas.set_graph(self._graph)
+        self._build_catalog()
+        self.catalog_box.setVisible(bool(nodes))
         self.detail.clear()
         self.detail.setVisible(bool(nodes))
         self.content_changed.emit()
+
+    def _build_catalog(self):
+        """「已学内容」顶部的目录：每个学科一项，点开看它的小分支（知识点）。"""
+        while self.catalog_box_lay.count():
+            it = self.catalog_box_lay.takeAt(0)
+            w = it.widget()
+            if w:
+                w.deleteLater()
+
+        head = QLabel(tr("目录", "Contents"))
+        head.setFont(font(11, 700))
+        head.setStyleSheet(f"color:{Colors.ACCENT};")
+        self.catalog_box_lay.addWidget(head)
+
+        nodes = self._graph.get("nodes") or []
+        subjects = self._graph.get("subjects") or []
+        by_subject = {}
+        for n in nodes:
+            by_subject.setdefault(n.get("subject_index", 0), []).append(n)
+
+        for idx, subj in enumerate(subjects):
+            group = sorted(by_subject.get(idx, []),
+                           key=lambda n: (n.get("level", 0), n.get("topic", "")))
+            label = f"{subj} · {len(group)}"
+            header = QPushButton("▸  " + label)
+            header.setObjectName("CatalogHead")
+            header.setCursor(Qt.PointingHandCursor)
+            header.setFlat(True)
+            header.setStyleSheet(
+                "QPushButton#CatalogHead { text-align: left; padding: 4px 6px;"
+                f" font-size: 12px; font-weight: 600; color: {Colors.TEXT_PRIMARY}; }}"
+                "QPushButton#CatalogHead:hover { color: " + Colors.ACCENT + "; }")
+
+            container = QWidget()
+            cl = QVBoxLayout(container)
+            cl.setContentsMargins(16, 0, 0, 4)
+            cl.setSpacing(1)
+            for n in group:
+                topic = n.get("topic", "")
+                _, _, text_color = status_style(n.get("status", "ok"))
+                item = QPushButton(topic)
+                item.setObjectName("CatalogItem")
+                item.setCursor(Qt.PointingHandCursor)
+                item.setFlat(True)
+                item.setStyleSheet(
+                    "QPushButton#CatalogItem { text-align: left; padding: 2px 6px;"
+                    f" font-size: 12px; color: {text_color}; }}"
+                    "QPushButton#CatalogItem:hover { color: " + Colors.ACCENT + "; }")
+                item.clicked.connect(lambda _=False, t=topic: self.select(t))
+                cl.addWidget(item)
+            container.hide()
+            header.clicked.connect(lambda _=False, c=container, h=header, l=label:
+                                   self._toggle_catalog(c, h, l))
+            self.catalog_box_lay.addWidget(header)
+            self.catalog_box_lay.addWidget(container)
+
+    def _toggle_catalog(self, container, header, label):
+        show = container.isHidden()
+        container.setVisible(show)
+        header.setText(("▾  " if show else "▸  ") + label)
 
     @staticmethod
     def _lesson_key(lesson: dict) -> str:
