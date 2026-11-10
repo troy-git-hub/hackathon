@@ -27,7 +27,7 @@ OutputBaseFilename=Echo-Installer-Preview
 OutputBaseFilename=Echo-Setup-{#MyAppVersion}{#MyAppSuffix}
 #endif
 SetupIconFile=..\assets\echo.ico
-Compression=lzma2/ultra64
+Compression=lzma2/normal
 SolidCompression=yes
 WizardStyle=modern dark hidebevels
 WizardBackColor=$001E1D1B
