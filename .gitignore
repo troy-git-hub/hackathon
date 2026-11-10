@@ -50,3 +50,5 @@ mindmap.json
 # Private imported study material and local QA output
 /knowledge.json
 /artifacts/
+/.build/
+/exports/

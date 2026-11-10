@@ -44,6 +44,9 @@ def run(argv):
             window._expand_mini()
             report["checks"]["window_navigation"] = window._page == HOME
             report["checks"]["assets"] = Path(paths.asset("assets", "echo.ico")).is_file()
+            from echo.backend.learning_export import export_json
+            exported = export_json(Path(folder) / "learning-profile.json")
+            report["checks"]["learning_export"] = exported["format"] == "echo.learning-profile" and exported["lessons"] == []
             from echo.widgets.web_lesson import HtmlLesson
             viewer = HtmlLesson()
             report["checks"]["webengine"] = viewer.view is not None

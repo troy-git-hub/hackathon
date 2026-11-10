@@ -139,7 +139,7 @@ def verify_installer(path: Path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in-place", action="store_true", help="就在当前工作区打，不另建目录")
-    ap.add_argument("--worktree", default="", help="构建目录（默认仓库旁边 echo-build）")
+    ap.add_argument("--worktree", default="", help="构建目录（默认项目内 .build/windows）")
     ap.add_argument("--iscc", default="", help="ISCC.exe 路径（默认自动找）")
     ap.add_argument("--skip-iscc", action="store_true", help="只出 dist/Echo/，不编安装包")
     ap.add_argument("--with-model", action="store_true",
@@ -164,13 +164,19 @@ def main():
             for line in dirty.splitlines():
                 say("   " + line)
     else:
-        build_dir = Path(args.worktree) if args.worktree else ROOT.parent / "echo-build"
-        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(ROOT),
-                              capture_output=True, text=True).stdout.strip()
+        build_dir = Path(args.worktree).resolve() if args.worktree else ROOT / ".build" / "windows"
+        build_dir.parent.mkdir(parents=True, exist_ok=True)
+        revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(ROOT),
+                                  capture_output=True, text=True)
+        if revision.returncode:
+            raise SystemExit("当前目录不是 Git 仓库。请先将源码提交到项目内的独立源码仓库，再从该仓库运行构建。")
+        head = revision.stdout.strip()
         say(f"准备构建目录 {build_dir} @ {head[:8]}")
         if build_dir.exists():
-            subprocess.run(["git", "checkout", "--detach", head], cwd=str(build_dir),
-                           capture_output=True)
+            checkout = subprocess.run(["git", "checkout", "--detach", head], cwd=str(build_dir),
+                                      capture_output=True, text=True)
+            if checkout.returncode:
+                raise SystemExit(f"不能切换构建目录，未开始打包：{checkout.stderr.strip()}")
         else:
             r = subprocess.run(["git", "worktree", "add", "--detach", str(build_dir), head],
                                cwd=str(ROOT), capture_output=True, text=True)
@@ -178,8 +184,7 @@ def main():
                 raise SystemExit(f"建构建目录失败：{r.stderr.strip()}")
     check_setup_tree(build_dir, args.with_model)
 
-    tmp = Path(os.environ.get("CLAUDE_JOB_DIR", "")) / "tmp"
-    tmp = tmp if tmp.parent.exists() else Path(os.environ.get("TEMP", "."))
+    tmp = ROOT / "artifacts" / "build-logs"
     tmp.mkdir(parents=True, exist_ok=True)
 
     say("PyInstaller 开跑（几分钟）…")

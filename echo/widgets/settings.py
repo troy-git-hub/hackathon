@@ -8,11 +8,12 @@ Echo - 设置
 语言和皮肤不用重启。
 """
 import os
+import datetime
 
-from PyQt5.QtCore import Qt, QSettings
+from PyQt5.QtCore import Qt, QSettings, QStandardPaths
 from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
                              QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                             QVBoxLayout, QWidget)
+                             QVBoxLayout, QWidget, QFileDialog, QScrollArea)
 
 from echo.backend import cache, paths, profile, providers
 from echo.theme import Colors, font, dialog_qss, apply_native_titlebar
@@ -132,16 +133,28 @@ class SettingsDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 18, 20, 14)
         root.setSpacing(10)
+        scroll = QScrollArea()
+        scroll.setObjectName("SettingsScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        content = QWidget()
+        content.setObjectName("SettingsContent")
+        content.setAttribute(Qt.WA_StyledBackground, True)
+        body = QVBoxLayout(content)
+        body.setContentsMargins(0, 0, 8, 0)
+        body.setSpacing(10)
+        scroll.setWidget(content)
+        root.addWidget(scroll)
 
         title = QLabel(tr("Echo 设置", "Echo Settings"))
         title.setFont(font(16, 600))
-        root.addWidget(title)
+        body.addWidget(title)
         sub = QLabel(tr("选一家，贴上 Key 就能用。模型名不用改，除非你想换。Key 只存在本机。",
                         "Pick a provider and paste the key. Leave the model name unless you "
                         "want a different one. The key stays on this computer."))
         sub.setStyleSheet(f"color:{Colors.TEXT_SECONDARY}; font-size:12px;")
         sub.setWordWrap(True)
-        root.addWidget(sub)
+        body.addWidget(sub)
 
         form = QFormLayout()
         form.setSpacing(10)
@@ -190,20 +203,29 @@ class SettingsDialog(QDialog):
         self._select(self.theme_combo, THEME_MODE)
         form.addRow(tr("界面主题（重启生效）：", "Theme (restart required):"), self.theme_combo)
 
-        root.addLayout(form)
+        body.addLayout(form)
 
         # 存储：攒了多少东西 + 一键清空
-        root.addSpacing(4)
+        body.addSpacing(4)
         self.storage_lbl = QLabel("")
         self.storage_lbl.setStyleSheet(f"color:{Colors.TEXT_SECONDARY}; font-size:12px;")
         self.storage_lbl.setWordWrap(True)
-        root.addWidget(self.storage_lbl)
+        body.addWidget(self.storage_lbl)
         srow = QHBoxLayout()
+        self.btn_export_data = QPushButton(tr("导出学习档案（JSON）", "Export learning profile (JSON)"))
+        self.btn_export_data.clicked.connect(self._export_learning_data)
+        self.btn_export_data.setToolTip(tr("包含个人资料、掌握情况、薄弱知识和复习记录；不导出模型密钥、音频或截图。",
+                                          "Includes your profile and learning indicators; excludes model keys, audio and screenshots."))
+        srow.addWidget(self.btn_export_data)
         self.btn_clear = QPushButton(tr("清除所有缓存", "Clear all data"))
         self.btn_clear.clicked.connect(self._clear_cache)
         srow.addWidget(self.btn_clear)
         srow.addStretch()
-        root.addLayout(srow)
+        body.addLayout(srow)
+        self.btn_export_help = QPushButton(tr("JSON 格式与其他项目接入说明", "JSON format and integration guide"))
+        self.btn_export_help.setObjectName("Link")
+        self.btn_export_help.clicked.connect(self._export_format_help)
+        body.addWidget(self.btn_export_help)
         self._refresh_storage()
 
         btns = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
@@ -213,9 +235,48 @@ class SettingsDialog(QDialog):
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
 
-        self.setStyleSheet(dialog_qss())
+        self.setStyleSheet(dialog_qss() + f"QScrollArea#SettingsScroll, QWidget#SettingsContent {{ background:{Colors.WINDOW_BG}; border:none; }}")
         self.setMinimumWidth(420)
         self.adjustSize()
+        screen = QApplication.primaryScreen()
+        height = screen.availableGeometry().height() if screen else 900
+        self.resize(max(540, self.sizeHint().width()), min(760, int(height * .85)))
+
+    def _export_learning_data(self):
+        from echo.backend import learning_export
+        from echo.widgets import dialogs
+        directory = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation) or os.path.expanduser("~")
+        default = os.path.join(directory, f"Echo-learning-profile-{datetime.date.today().isoformat()}.json")
+        filename, _ = QFileDialog.getSaveFileName(self, tr("导出个人学习档案", "Export personal learning profile"), default, "JSON (*.json)")
+        if not filename:
+            return
+        if not filename.lower().endswith(".json"):
+            filename += ".json"
+        try:
+            data = learning_export.export_json(filename)
+        except (OSError, ValueError) as exc:
+            dialogs.warn(self, tr("导出失败", "Export failed"), str(exc))
+            return
+        dialogs.info(self, tr("学习档案已导出", "Learning profile exported"),
+                     tr(f"已保存到：\n{filename}\n\n包含 {len(data['lessons'])} 节已保存课程、{len(data['knowledge_points'])} 个知识点和 {len(data['reviews'])} 条复习记录。\n格式：echo.learning-profile / 1.0.0。",
+                        f"Saved to:\n{filename}\n\n{len(data['lessons'])} saved lessons, {len(data['knowledge_points'])} topics, {len(data['reviews'])} review records.\nFormat: echo.learning-profile / 1.0.0."))
+
+    def _export_format_help(self):
+        from echo.widgets import dialogs
+        dialogs.info(self, tr("学习档案 JSON 格式", "Learning profile JSON format"), tr(
+            "UTF-8 JSON，format=echo.learning-profile，schema_version=1.0.0。\n\n"
+            "learner：个人资料与本地档案ID；summary：相对掌握/薄弱知识点的ID；\n"
+            "knowledge_points：掌握状态、课程证据及最近复习情况；\n"
+            "recurring_difficulties：多节课重复出现的困难线索；reviews：复习进度；lessons：课程摘要和抽问汇总。\n\n"
+            "其他项目可用 JSON.parse 或 json.load 读取，通过 knowledge_points[].id 关联。"
+            "state=weakness 表示薄弱，strength 表示相对掌握。时间为UTC ISO 8601，未知值为null。\n\n"
+            "这是学习指标，不是标准化考试成绩。当前只导出已保存记录，不包含正在上课的临时内容。"
+            "跨项目账号需由接入方绑定，本地ID不是登录凭证。完整字段说明见项目 docs/learning-profile-export.md。",
+            "UTF-8 JSON. format=echo.learning-profile, schema_version=1.0.0.\n\n"
+            "learner: profile; summary: strength/weakness IDs; knowledge_points: topic evidence and review state; "
+            "recurring_difficulties: repeated difficulty; reviews: review progress; lessons: saved lesson summaries.\n\n"
+            "Read with JSON.parse or json.load and join knowledge_points[].id. Dates are UTC ISO 8601; unknown values are null. "
+            "These are learning indicators, not exam scores. Only saved history is exported. Map the local ID to your own account; it is not an authentication token."))
 
     def _build_providers(self, form):
         """平时只露「哪家 + Key」。模型名和接口折起来，选自定义或豆包这种没有默认名的才展开。"""

@@ -22,6 +22,9 @@ python scripts/build_release.py --skip-iscc   # 只出 dist/Echo/，不编安装
 同时有多个 Claude 会话在改同一份工作区，半截改动会被打进安装包。脚本默认已经这么做了，
 别用 `--in-place` 省事。
 
+构建工作树必须位于项目内的 `.build/`（默认 `.build/windows`），发布文件放在 `dist/`。
+不得在磁盘根目录或项目的父目录创建构建、发布或临时源码目录。
+
 ## 语音识别模型：不随包分发（v2.1 起）
 
 **历史**：v2.0 及更早把 faster-whisper 的 `model.bin`（483MB）**塞进了安装包**，

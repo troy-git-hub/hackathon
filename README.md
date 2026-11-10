@@ -1,6 +1,6 @@
 # Echo — 网课里的 AI 学习副驾驶
 
-## Windows 2.2.0 发布版
+## Windows 2.2.1 发布版
 
 安装包使用 Echo 定制的深色安装界面，可选择路径与桌面快捷方式，默认安装到当前用户目录。
 应用内首次设置模型 API Key；安装包不包含密钥、课程记录或语音模型，语音模型在应用内按需下载。
@@ -9,6 +9,11 @@
 - 发布构建：`python scripts/build_release.py`（独立 worktree，需要 PyInstaller 与 Inno Setup 6.6+）
 - 打包自检：`Echo.exe --self-test --report check.json`（临时隔离数据，验证语音运行库、窗口和 HTML 交互）
 - 安装器脚本：`installer/setup.iss` 与 `installer/echo_wizard.iss`
+
+「设置 → 导出学习档案（JSON）」可保存个人资料、相对掌握/薄弱知识点、反复困难、复习记录和课程汇总。
+格式 `echo.learning-profile / 1.0.0`，不包含密钥、录音和截图。
+跨项目接入见 [格式说明](docs/learning-profile-export.md)、[JSON Schema](docs/learning-profile.schema.json) 和 [虚构样例](docs/examples/learning-profile.json)。
+构建目录统一放项目内 `.build/`，可交付 exe 与安装包放 `dist/`，不在磁盘根目录创建文件夹。
 
 当前板书默认跟随知识点；课堂抽问支持单选、判断、填空、连线和简答。语文/历史演示使用统一教学布局，
 包含角度探索、原话对照、概念比较与理解检查。笔记导出位于本节课的回响/回顾页面。
@@ -139,19 +144,16 @@ EchoBridge (echo/backend/qt_bridge.py) → Qt 信号（带 session 隔离）→ 
 
 ## 打包安装包
 
-安装包会**内置 Whisper `small` 模型**（约 480MB），装好即可离线转写，不联网下载模型。
+默认安装包不内置语音模型，首次启动可选择下载。使用独立 Git worktree 构建，构建目录放项目内 `.build/`，成品放 `dist/`。
 
 ```bash
 pip install pyinstaller
-# 0) 准备模型（models/ 在 .gitignore 里，不随 git 分发）
-#    先 python main.py 跑一次把模型下到 HF 缓存，再复制成：
-#    models/faster-whisper-small/{config.json, model.bin, tokenizer.json, vocabulary.txt}
-build.bat                        # 产出 dist/Echo/（内含模型）
-# 用 Inno Setup 打开 installer/setup.iss 编译 → dist/Echo-Setup-1.3.exe
+python scripts/build_release.py  # 需要已提交的 Git 源码仓库及 Inno Setup
+# 安装包输出 dist/Echo-Setup-2.2.1.exe
+# 目录版在 .build/windows/dist/Echo/
 ```
 
-> 克隆仓库后没放模型就 build.bat 会失败（找不到 `models/faster-whisper-small`），先按第 0 步准备。
-> 开发态不用管 models/：直接 `python main.py` 会自动下载，打包才需要把模型塞进去。
+如需预装语音模型，准备好 `models/faster-whisper-small/` 后使用 `--with-model`。发布前运行隔离自检，避免把个人学习记录或密钥打进包内。
 
 ---
 
