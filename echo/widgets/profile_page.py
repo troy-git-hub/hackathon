@@ -13,11 +13,11 @@ import time
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
-                             QPushButton, QVBoxLayout, QWidget)
+                             QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
-from echo.backend import gaps, persona, profile, store
+from echo.backend import awareness, gaps, persona, profile, providers, store
 from echo.components.avatar import AvatarView, load_normalized
-from echo.i18n import tr
+from echo.i18n import lang, tr
 from echo.theme import Colors, Radius, Spacing, font
 from echo.widgets import dialogs
 
@@ -67,7 +67,26 @@ class ProfilePage(QWidget):
 
     # ================= 构建 =================
     def _build(self):
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+            "QScrollBar:vertical { background: transparent; width: 8px; margin: 0; }"
+            f"QScrollBar::handle:vertical {{ background: {Colors.BORDER_STRONG};"
+            "border-radius: 3px; min-height: 24px; }}"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,"
+            "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical"
+            "{ background: transparent; height: 0; border: none; }"
+            "QScrollBar:horizontal { height: 0; }")
+        scroll.viewport().setAutoFillBackground(False)
+        body = QWidget()
+        body.setStyleSheet("background: transparent;")
+        root = QVBoxLayout(body)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(Spacing.MD)
 
@@ -83,6 +102,8 @@ class ProfilePage(QWidget):
         col.setSpacing(3)
         self.name_lbl = _label("", TITLE, wrap=True)
         col.addWidget(self.name_lbl)
+        self.model_lbl = _label("", CAPTION, wrap=True)
+        col.addWidget(self.model_lbl)
         self.sub_lbl = _label("", CAPTION, wrap=True)
         col.addWidget(self.sub_lbl)
         col.addSpacing(4)
@@ -90,6 +111,9 @@ class ProfilePage(QWidget):
         row.setSpacing(Spacing.SM)
         self.btn_pick = _btn(tr("换一张", "Change photo"), "Quiet", self._pick_avatar)
         row.addWidget(self.btn_pick)
+        self.btn_rename = _btn(tr("改称呼", "Rename"), "Quiet", self._rename,
+                               tr("开机问候和这一页用的名字", "The name Echo greets you with"))
+        row.addWidget(self.btn_rename)
         # 没设过自定义头像时，这个按钮没意义，自己藏起来
         self.btn_default = _btn(tr("用默认喵喵", "Use the default cat"), "Quiet",
                                 self._use_default)
@@ -156,6 +180,21 @@ class ProfilePage(QWidget):
         pl.addWidget(self.persona_when)
         root.addWidget(self.persona_card)
 
+        # 这节课各处问过的话：圈一下、掉队追问、答疑共用一份，这里让学生看见 Echo 记得
+        self.memory_head = _label(tr("这节课 Echo 记得", "What Echo remembers this lesson"), CAPTION)
+        root.addWidget(self.memory_head)
+        self.memory_card = QFrame()
+        self.memory_card.setObjectName("ProfileMemory")
+        self.memory_card.setStyleSheet(
+            f"QFrame#ProfileMemory {{ background: {Colors.SURFACE};"
+            f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.MD}px; }}")
+        ml = QVBoxLayout(self.memory_card)
+        ml.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        ml.setSpacing(6)
+        self.memory_lbl = _label("", CAPTION, wrap=True)
+        ml.addWidget(self.memory_lbl)
+        root.addWidget(self.memory_card)
+
         # 反复卡住的地方：跨课看出来的「你以为卡在这章，其实地基没打牢」。
         # 数据来自 backend/gaps.py（纯数据、无 Qt 依赖），这里只管画。
         self.gaps_head = _label(tr("反复卡住的地方", "Recurring gaps"), CAPTION)
@@ -170,6 +209,9 @@ class ProfilePage(QWidget):
         row2.addStretch()
         row2.addWidget(_btn(tr("回到主页", "Back to home"), "Link", self.back_requested.emit))
         root.addLayout(row2)
+        root.addStretch(1)
+        scroll.setWidget(body)
+        outer.addWidget(scroll)
 
     # ================= 数据 =================
     def refresh(self):
@@ -196,6 +238,8 @@ class ProfilePage(QWidget):
             bits.append(hob)
         self.sub_lbl.setText(" · ".join(bits))
         self.sub_lbl.setVisible(bool(bits))
+        self._render_model()
+        self._render_memory()
 
         try:
             st = store.stats()
@@ -236,6 +280,63 @@ class ProfilePage(QWidget):
             self.persona_lbl.setText(tr("画像暂时算不出来。", "Couldn't compute this right now."))
             self.persona_when.setVisible(False)
         self._render_gaps()
+
+    def _render_model(self):
+        """现在接的是哪家模型。没配 key 就直说，别让这一页看起来像已经连上了。"""
+        try:
+            spec = providers.text()
+            name = providers.label(spec["id"], en=(lang() == "en"))
+            if providers.configured(spec):
+                model = spec.get("model") or ""
+                self.model_lbl.setText(tr(f"正在用 {name}" + (f" · {model}" if model else ""),
+                                          f"Using {name}" + (f" · {model}" if model else "")))
+            else:
+                self.model_lbl.setText(tr("还没接上模型，到设置里选一家",
+                                          "No model connected yet — pick one in Settings"))
+        except Exception:
+            self.model_lbl.setText("")
+
+    def _render_memory(self):
+        """这节课圈一下 / 掉队追问 / 答疑记下来的几句。没有就说清楚：问过才会出现。"""
+        try:
+            items = awareness.recent()
+        except Exception:
+            items = []
+        if not items:
+            self.memory_lbl.setText(tr(
+                "这节课还没问过。圈一下、掉队里追问、答疑，都会记在这里，后面的回答会接着这些说。",
+                "Nothing yet this lesson. Circle-to-ask, lost-track follow-ups and Q&A "
+                "all land here, and later answers continue from them."))
+            return
+        labels = {
+            "circle": tr("圈一下", "Circled"),
+            "lost": tr("掉队追问", "Lost-track"),
+            "qa": tr("答疑", "Q&A"),
+            "dock": tr("挂边", "Dock"),
+            "break": tr("补课", "Catch-up"),
+        }
+        lines = []
+        for it in items:
+            tag = labels.get(it.get("kind"), it.get("kind") or "")
+            q = it.get("q") or ""
+            lines.append(f"· {tag}：{q}" if q else f"· {tag}")
+        self.memory_lbl.setText("\n".join(lines))
+
+    def _rename(self):
+        current = self.name_lbl.text()
+        if current == tr("同学", "there"):
+            current = ""
+        text, ok = dialogs.ask_text(self, tr("怎么称呼你", "What should Echo call you"),
+                                    tr("称呼", "Name"), current)
+        text = (text or "").strip()
+        if not ok or not text:
+            return
+        try:
+            profile.save({"username": text})
+        except OSError as e:
+            dialogs.warn(self, tr("没能保存", "Couldn't save"), str(e))
+            return
+        self.refresh()
 
     # ================= 反复卡住的地方 =================
     def _render_gaps(self):

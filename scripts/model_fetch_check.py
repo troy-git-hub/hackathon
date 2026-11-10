@@ -7,7 +7,7 @@ Echo - 语音识别模型按需下载自检
   A. 四个文件齐了才算就绪；缺一个就不算
   B. 没在下的时候 poll_progress 返回 -1（UI 定时器据此决定要不要占用状态栏）
   C. ensure() 幂等：已经就绪不重复起线程；重复调也只起一个
-  D. 下载过程中按钮/状态栏能拿到百分比（扫盘算字节），跨 10% 才往上跳
+  D. 下载过程中按钮/状态栏能拿到百分比（扫盘算字节）
   E. wait_ready：就绪时立刻返回；没起过下载时返回 False，不无限等
   F. 下载失败不抛、不影响上课（WhisperModel 还有兜底路径）
   G. whisper_model_path 优先用已下载好的用户目录
@@ -53,6 +53,8 @@ def wipe():
     model_fetch._done = False
     model_fetch._thread = None
     model_fetch._progress["percent"] = -1
+    model_fetch._progress["done"] = 0
+    model_fetch._progress["total"] = model_fetch.TOTAL_BYTES
 
 
 section("A. 齐了才算就绪")
@@ -104,7 +106,6 @@ try:
         fh.write(b"x" * (model_fetch.TOTAL_BYTES // 4))     # 约 25%
     pct = model_fetch.poll_progress()
     check("下载中有百分比 (0~99)", 0 <= pct < 100, str(pct))
-    # 进度是 10% 一档往上跳的（免得状态栏每秒刷），所以 25% 实际报 20~26 都算对
     check("约两成半的时候报 20%~26%", 20 <= pct <= 26, str(pct))
 
     check("wait_ready 最终等到就绪", model_fetch.wait_ready(timeout=10) is True)
@@ -167,6 +168,22 @@ model_fetch._materialize(elsewhere)
 check("拷完就绪", model_fetch.is_ready())
 with open(os.path.join(model_fetch.model_dir(), "model.bin"), "rb") as fh:
     check("考的是真内容不是空文件", fh.read(4) == b"yyyy")
+
+
+section("I. 进度跟着字节走，不等文件落盘")
+# huggingface_hub 2.x 把 41.9MB/484MB 画在自己的 tqdm 上，目标目录还是空的。
+# 以前只扫 model.bin.incomplete，界面会停在 0%。
+wipe()
+model_fetch._progress["percent"] = 0
+model_fetch._note_bytes(41_900_000, 484_000_000)
+pct = model_fetch.poll_progress()
+check("41.9MB/484MB 不是 0%", pct >= 8, str(pct))
+check("大约 8%", pct == 8, str(pct))
+model_fetch._note_bytes(1, 4)          # 「Fetching 4 files」那种计数条
+check("文件计数条不把百分比打回去", model_fetch.poll_progress() == 8,
+      str(model_fetch.poll_progress()))
+model_fetch._note_bytes(1_000_000, 484_000_000)
+check("更小的字节数不把进度打回去", model_fetch.progress()["done"] >= 41_900_000)
 
 
 print("\n" + "=" * 56)

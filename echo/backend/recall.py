@@ -191,7 +191,7 @@ def plan(items: list, root: str = "", llm=None, use_llm: bool = True) -> dict:
     if not root:
         _chosen, root = pick(items)
 
-    if llm is None and use_llm and not config.OFFLINE and config.DEEPSEEK_API_KEY:
+    if llm is None and use_llm and not config.OFFLINE and config.llm_configured():
         try:
             llm = LLM()
         except Exception as e:
@@ -265,7 +265,7 @@ def judge(items: list, answers: list, llm=None, use_llm: bool = True) -> dict:
     if not items or not answers:
         return {"results": [], "review": "", "offline": True}
 
-    if llm is None and use_llm and not config.OFFLINE and config.DEEPSEEK_API_KEY:
+    if llm is None and use_llm and not config.OFFLINE and config.llm_configured():
         try:
             llm = LLM()
         except Exception as e:

@@ -31,8 +31,8 @@ python scripts/build_release.py --skip-iscc   # 只出 dist/Echo/，不编安装
 **v2.1 起改成按需下载**：
 
 - `echo/backend/model_fetch.py` 负责下到 `%APPDATA%\Echo\models\faster-whisper-small`
-- **app 启动时就开始下**（`main.py` 里 `model_fetch.ensure()`），不等第一次开课
-- 进度由 UI 的定时器调 `poll_progress()` 扫盘算出来，显示在状态栏
+- **第一次启动问要不要下**（`win.offer_model_download()`）：前台进度条 / 后台 / 以后再说，记在 QSettings `whisper_download`。不要改回启动就 `ensure()`
+- 进度由 UI 定时器调 `poll_progress()`。huggingface_hub 2.x 先把字节下进自己的缓存，进度在 tqdm 上，目标目录要等整份下完才有文件 —— 只扫 `model.bin.incomplete` 界面会停在 0%
 - `_WhisperWorker.load` 会 `wait_ready()` 等下载完 —— 不等的话 WhisperModel 会拿模型名
   去 HF 缓存**再下一遍**，同样 483MB
 - **打包侧不许再带 `models/`**：`build.bat` / `installer/setup.iss` 里已经没有它，

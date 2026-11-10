@@ -16,6 +16,7 @@ import math
 import os
 import random
 import time
+from echo.pet_skins import PET_SKINS
 
 from PyQt5.QtCore import Qt, QPointF, QRectF, QSettings, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QCursor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
@@ -162,7 +163,7 @@ class DeskPet(QWidget):
         self._hover_expanded = False # 悬停临时展开：鼠标移开就收回
         self._hover_out_since = None
         self.skin = QSettings("Echo", "Echo").value("desktop_pet_skin", "cartoon")
-        if self.skin not in ("cartoon", "line"):
+        if self.skin not in PET_SKINS:
             self.skin = "cartoon"
         self.setFixedSize(self.W, self.H)
 
@@ -256,9 +257,10 @@ class DeskPet(QWidget):
             self.chat.set_emotion(emo)
 
     def set_skin(self, skin):
-        if skin not in ("cartoon", "line"):
+        if skin not in PET_SKINS:
             return
         self.skin = skin
+        self.cat.set_skin(skin)
         QSettings("Echo", "Echo").setValue("desktop_pet_skin", skin)
         self._layout_cat()
         self.update()
@@ -284,7 +286,8 @@ class DeskPet(QWidget):
         else:
             self.cat.setFixedSize(self.CAT, self.CAT)
             self.cat.move(4, self.H - self.CAT - 6)
-        self.cat.setVisible(self.skin == "line")
+        self.cat.set_skin(self.skin)
+        self.cat.setVisible(self.skin != "cartoon")
 
     def _orb_rect(self) -> QRectF:
         return QRectF(2, 2, self.ORB - 4, self.DOCK_H - 4)
@@ -485,7 +488,8 @@ class DeskPet(QWidget):
         if self.tray is not None:
             m.addAction(tr("设置…", "Settings…"), self.tray.open_settings)
         skins = m.addMenu(tr("桌宠皮肤", "Pet skin"))
-        for skin, label in (("cartoon", tr("原版卡通猫", "Cartoon cat")), ("line", tr("线稿猫", "Line-art cat"))):
+        for skin, (zh, en, _fill, _line) in PET_SKINS.items():
+            label = tr(zh, en)
             action = skins.addAction(label, lambda checked=False, choice=skin: self.set_skin(choice))
             action.setCheckable(True)
             action.setChecked(self.skin == skin)

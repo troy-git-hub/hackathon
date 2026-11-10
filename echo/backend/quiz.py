@@ -16,7 +16,7 @@ Echo - 出题
 import logging
 import threading
 
-from echo.backend import config, prompts
+from echo.backend import config, prompts, assessment
 from echo.backend.llm import LLM
 
 log = logging.getLogger("echo.quiz")
@@ -28,12 +28,19 @@ UNSURE = "unsure"    # 自评「有点模糊」—— 也算需要复习，但�
 # 离线自评题的选项：选第一项算跟上，其余都记进错题本
 SELF_OPTIONS = ["A. 记得，能说个大概", "B. 有点模糊", "C. 完全没跟上"]
 SELF_GRADE = [RIGHT, UNSURE, WRONG]
+CHECKIN_TYPES = ("true_false", "fill_blank", "single_choice", "matching", "short_answer")
 
 
 def _clean_checkin(data, tc: str = "") -> dict:
     """把 LLM 返回的单道抽问题规范化；不适合出题时返回 {}。"""
     if not isinstance(data, dict):
         return {}
+    if data.get("type"):
+        question = assessment.clean_question(data)
+        if not question:
+            return {}
+        question.update(topic=str(data.get("topic") or "").strip(), tc=tc, self_report=False)
+        return question
     question = str(data.get("question") or "").strip()
     if not question:
         return {}
@@ -81,14 +88,14 @@ def _self_checkin(topic: str, tc: str) -> dict:
 
 
 def make_checkin_sync(timeline: str, transcript: str, current: str,
-                      tc: str = "", focus: str = "", llm=None, use_llm: bool = True) -> dict:
+                      tc: str = "", focus: str = "", llm=None, use_llm: bool = True, question_type=None) -> dict:
     """同步生成一道抽问题。永远返回非空 dict（最差也有自评题兜底）。
 
     use_llm=False 表示调用方明确要求不走 AI（离线模式），此时不再自己造 LLM。
     focus 是学生此刻的状态（刚掉队过的地方、之前抽问答错的知识点），
     出题时带上它，题目才接得上学生正在补的内容。
     """
-    if llm is None and use_llm and not config.OFFLINE and config.DEEPSEEK_API_KEY:
+    if llm is None and use_llm and not config.OFFLINE and config.llm_configured():
         try:
             llm = LLM()
         except Exception as e:
@@ -96,16 +103,18 @@ def make_checkin_sync(timeline: str, transcript: str, current: str,
     if llm is not None:
         try:
             data = llm.json(
-                prompts.system("CHECKIN_SYSTEM"),
+                prompts.system("CHECKIN_SYSTEM", include_memory=False),
                 prompts.CHECKIN_USER.format(
                     timeline=timeline or "（暂无）",
                     transcript=transcript or "（暂无）",
                     current=current or "（还没识别到知识点）",
                     focus=focus or "（没什么特别的，正常听课）",
-                ),
-                temperature=0.6, max_tokens=500,
+                ) + (f"\n本题必须使用题型 {question_type}，不得替换为单选。" if question_type else ""),
+                temperature=0.6, max_tokens=1200,
                 timeout=config.CHECKIN_TIMEOUT, attempts=1)
             q = _clean_checkin(data, tc)
+            if q and question_type and q.get("type", "single_choice") != question_type:
+                q = {}
             if q:
                 return q
             # LLM 说「这段还不适合出题」→ 不硬出选择题，退成自评题
@@ -128,6 +137,8 @@ def grade(question: dict, choice: int) -> str:
 
 def correct_text(question: dict) -> str:
     """正确答案的文字，用于错题本和讲解。"""
+    if question.get("type") in ("fill_blank", "short_answer", "matching", "true_false"):
+        return assessment.reference(question)
     options = question.get("options") or []
     answer = (question.get("answer") or "").upper()[:1]
     if answer and options:
@@ -167,7 +178,7 @@ def lesson_quiz_sync(lesson: dict, n: int = 4, llm=None) -> list:
     lesson = lesson or {}
     if config.OFFLINE:                    # 离线演示不联网
         return []
-    if llm is None and config.DEEPSEEK_API_KEY:
+    if llm is None and config.llm_configured():
         try:
             llm = LLM()
         except Exception as e:
@@ -181,13 +192,13 @@ def lesson_quiz_sync(lesson: dict, n: int = 4, llm=None) -> list:
     highlights = lesson.get("highlights") or []
     try:
         data = llm.json(
-            prompts.system("LESSON_QUIZ_SYSTEM", n=n),
+            prompts.system("LESSON_QUIZ_SYSTEM", n=n, include_memory=False),
             prompts.LESSON_QUIZ_USER.format(
                 summary=lesson.get("summary") or "（无）",
                 highlights="\n".join(f"- {h}" for h in highlights) or "（无）",
                 skills=skills_text,
-                n=n),
-            max_tokens=1400, temperature=0.5)
+                n=n) + assessment.type_plan(n),
+            max_tokens=3500, temperature=0.5)
     except Exception as e:
         log.exception("课后练习出题失败: %s", e)
         return []
@@ -196,27 +207,8 @@ def lesson_quiz_sync(lesson: dict, n: int = 4, llm=None) -> list:
 
 def clean_questions(data, n: int) -> list:
     """规范化一批练习题；形状与 practice.py 的输出保持一致。"""
-    items = data.get("questions") if isinstance(data, dict) else None
-    if not isinstance(items, list):
-        return []
-    out = []
-    for raw in items:
-        if not isinstance(raw, dict):
-            continue
-        question = str(raw.get("question") or "").strip()
-        if not question:
-            continue
-        opts = raw.get("options")
-        options = [str(o).strip() for o in opts if str(o).strip()] if isinstance(opts, list) else []
-        out.append({
-            "question": question,
-            "options": options,
-            "answer": str(raw.get("answer") or "").strip(),
-            "explain": str(raw.get("explain") or "").strip(),
-        })
-        if len(out) >= n:
-            break
-    return out
+    from echo.backend.assessment import clean_questions as clean
+    return clean(data, n)
 
 
 def ask(timeline: str, transcript: str, current: str, tc: str = "",

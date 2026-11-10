@@ -8,6 +8,10 @@ import os
 # 确保项目根目录在 path 中
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+if "--self-test" in sys.argv:
+    from echo.release_check import run
+    raise SystemExit(run(sys.argv[1:]))
+
 # !!! 必须在 import PyQt5 之前预加载 Whisper 模型 !!!
 # PyQt5 与 ctranslate2 的 native 库加载顺序冲突：先 import PyQt5 再加载 WhisperModel 会访问违例
 # 必须在主线程、QApplication 创建之前、且未 import 任何 PyQt5 模块时加载
@@ -45,6 +49,8 @@ def main():
     # 高分屏（如 2880x1800 @200%）按系统缩放渲染，否则整个界面只有一半大
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    # The HTML lesson viewer is imported lazily after app startup.
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
     if hasattr(QApplication, "setHighDpiScaleFactorRoundingPolicy"):
         QApplication.setHighDpiScaleFactorRoundingPolicy(
             Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
@@ -70,13 +76,12 @@ def main():
              screen.center().y() - win.height() // 2)
     win.show()
 
-    # 语音识别模型不再随安装包分发（483MB 的大头），改成按需下载。启动就开始下 ——
-    # 等到第一次开课才下就太晚了。不阻塞：窗口已经出来了，进度显示在状态栏。
+    # 语音识别模型不再随安装包分发。第一次启动问要不要下：前台看进度、后台下，
+    # 或者先不下一。已经选过的下次直接按那个来，不再弹。不阻塞窗口。
     try:
-        from echo.backend import model_fetch
-        model_fetch.ensure()
+        win.offer_model_download()
     except Exception as e:
-        print(f"[Echo] 触发模型下载失败（不影响使用）: {e}")
+        print(f"[Echo] 语音模型下载询问失败（不影响使用）: {e}")
 
     tray = EchoTray(app, win)   # 托盘 + 关闭到托盘 + 全局快捷键（Ctrl+Alt+L 掉队 / Ctrl+Alt+E 显示隐藏 / Ctrl+Alt+Q 圈一下问 AI）
 

@@ -40,6 +40,7 @@ class CatAvatar(QWidget):
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.StrongFocus)
         self._pressed = False
+        self.skin = "line"
         self._emotion = "idle"
         self._blink = False
         self._blink_timer = QTimer(self)
@@ -81,6 +82,10 @@ class CatAvatar(QWidget):
             self._revert.start(hold_ms)
         self.update()
 
+    def set_skin(self, skin):
+        self.skin = skin
+        self.update()
+
     def _do_blink(self):
         if self._emotion != "idle":
             return
@@ -106,6 +111,11 @@ class CatAvatar(QWidget):
         elif emo in ("ok", "fixed"):
             line = QColor(Colors.OK_FG)
         fill = QColor(Colors.SURFACE)
+        from echo.pet_skins import PET_SKINS
+        skin = PET_SKINS.get(self.skin)
+        if skin and skin[2]:
+            fill = QColor(skin[2])
+            line = QColor(skin[3])
 
         # 头 + 两只耳朵（一条闭合路径，线稿风格）
         head = QPainterPath()

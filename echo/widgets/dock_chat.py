@@ -79,7 +79,7 @@ class DockChat(QWidget):
         super().__init__(parent, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.engine = engine
-        self._ask = LessonAsk(engine) if engine is not None else None
+        self._ask = LessonAsk(engine, kind="dock") if engine is not None else None
         self._stream_lbl = None
 
         self._delta.connect(self._on_delta)

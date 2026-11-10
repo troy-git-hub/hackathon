@@ -1,18 +1,20 @@
 """
 Echo - 设置
 
-一个简单的设置窗口：填 API key（DeepSeek / 百炼 Qwen-VL 视觉）、音频来源、Whisper 模型、
-界面语言、桌宠皮肤。保存后写回项目根目录的 .env（保留原有注释和其它配置项）。
+一个简单的设置窗口：选模型厂商并填 API key（文本 / 视觉分开）、音频来源、Whisper 模型、
+界面语言、桌宠皮肤。保存后写回 .env（保留原有注释和其它配置项），并写进当前进程的环境变量，
+下一次提问就换厂商。已经开着的这节课是启动时接上的，要重新开一节或重启才换。
 「用户：」一栏写到用户资料 profile.json（见 echo.backend.profile），下次开机问候就用新名字。
-改完需要重启 Echo 生效（语言和皮肤除外，皮肤即时生效）。
+语言和皮肤不用重启。
 """
 import os
 
 from PyQt5.QtCore import Qt, QSettings
-from PyQt5.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
-                             QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget)
+from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+                             QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+                             QVBoxLayout, QWidget)
 
-from echo.backend import cache, paths, profile
+from echo.backend import cache, paths, profile, providers
 from echo.theme import Colors, font, dialog_qss, apply_native_titlebar
 from echo.i18n import tr, lang, set_lang
 
@@ -21,12 +23,6 @@ ROOT = paths.app_dir()
 ENV_PATH = paths.ensure_env()
 ENV_EXAMPLE = paths.example_env()
 
-FIELDS = [
-    ("DEEPSEEK_API_KEY", "DeepSeek API Key",
-     tr("课堂理解 / 掉队分析（deepseek-chat）", "Lesson understanding / breakpoint analysis (deepseek-chat)")),
-    ("DASHSCOPE_API_KEY", tr("百炼 API Key", "DashScope API Key"),
-     tr("圈一下问 AI 的视觉模型（Qwen-VL，选填）", "Vision model for circle-to-ask AI (Qwen-VL, optional)")),
-]
 COMBOS = [
     ("ECHO_SOURCE", tr("音频来源", "Audio source"), ["system", "mic"],
      [tr("系统声音（网课/会议）", "System audio (courses / meetings)"), tr("麦克风", "Microphone")]),
@@ -79,6 +75,50 @@ def _write_env(updates: dict):
 # profile_setup.py 原来 `from echo.widgets.settings import dialog_qss` 的写法不用跟着改。
 
 
+class _Combo(QComboBox):
+    """下拉列表给实底、按文字撑开。不然深色界面里弹层是透明的，字会叠成两行。"""
+
+    def __init__(self):
+        super().__init__()
+        self.setFont(font(12))
+        self.setMaxVisibleItems(14)
+        self.view().setAutoFillBackground(True)
+        self.setStyleSheet(f"""
+            QComboBox QAbstractItemView {{
+                background: {Colors.SURFACE};
+                color: {Colors.TEXT_PRIMARY};
+                border: 1px solid {Colors.BORDER_STRONG};
+                outline: 0;
+                padding: 0px;
+                selection-background-color: {Colors.ACCENT};
+                selection-color: {Colors.ON_ACCENT};
+            }}
+            QComboBox QAbstractItemView::item {{
+                min-height: 28px;
+                padding: 4px 10px;
+                background: {Colors.SURFACE};
+                color: {Colors.TEXT_PRIMARY};
+            }}
+            QComboBox QAbstractItemView::item:selected {{
+                background: {Colors.ACCENT};
+                color: {Colors.ON_ACCENT};
+            }}
+        """)
+
+    def showPopup(self):
+        w = self.width()
+        fm = self.fontMetrics()
+        for i in range(self.count()):
+            w = max(w, fm.horizontalAdvance(self.itemText(i)) + 36)
+        self.view().setMinimumWidth(w)
+        super().showPopup()
+        popup = self.view().window()
+        if popup is not None and popup is not self:
+            popup.setMinimumWidth(w)
+            if popup.width() < w:
+                popup.resize(w, popup.height())
+
+
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -96,9 +136,9 @@ class SettingsDialog(QDialog):
         title = QLabel(tr("Echo 设置", "Echo Settings"))
         title.setFont(font(16, 600))
         root.addWidget(title)
-        sub = QLabel(tr("API key 保存在本地 .env 文件，不会上传。改完重启 Echo 生效。",
-                        "API keys are stored in a local .env file and never uploaded. "
-                        "Changes take effect after restarting Echo."))
+        sub = QLabel(tr("选一家，贴上 Key 就能用。模型名不用改，除非你想换。Key 只存在本机。",
+                        "Pick a provider and paste the key. Leave the model name unless you "
+                        "want a different one. The key stays on this computer."))
         sub.setStyleSheet(f"color:{Colors.TEXT_SECONDARY}; font-size:12px;")
         sub.setWordWrap(True)
         root.addWidget(sub)
@@ -114,20 +154,11 @@ class SettingsDialog(QDialog):
         self.user_edit.setFont(font(12))
         form.addRow(tr("用户：", "User:"), self.user_edit)
 
-        self.inputs = {}
-        for key, label, tip in FIELDS:
-            ed = QLineEdit(self._kv.get(key, ""))
-            ed.setEchoMode(QLineEdit.Password)
-            ed.setPlaceholderText(tr("sk-…（留空则离线/退回另一家）", "sk-… (leave blank for offline / fallback)"))
-            ed.setToolTip(tip)
-            ed.setFont(font(12))
-            form.addRow(f"{label}：", ed)
-            self.inputs[key] = ed
+        self._build_providers(form)
 
         self.combos = {}
         for key, label, values, labels in COMBOS:
-            cb = QComboBox()
-            cb.setFont(font(12))
+            cb = _Combo()
             for v, t in zip(values, labels):
                 cb.addItem(t, v)
             cur = self._kv.get(key, values[0])
@@ -138,18 +169,26 @@ class SettingsDialog(QDialog):
             self.combos[key] = cb
 
         # 界面语言：改完重启 Echo 生效
-        self.lang_combo = QComboBox()
+        self.lang_combo = _Combo()
         self.lang_combo.addItem("中文", "zh")
         self.lang_combo.addItem("English", "en")
         self.lang_combo.setCurrentIndex(1 if lang() == "en" else 0)
         form.addRow(tr("语言：", "Language:"), self.lang_combo)
 
-        self.pet_skin = QComboBox()
-        self.pet_skin.addItem(tr("原版圆脸卡通猫（桌面＋磁吸）", "Original cartoon cat (desktop + docked)"), "cartoon")
-        self.pet_skin.addItem(tr("线稿猫（桌面＋磁吸）", "Line-art cat (desktop + docked)"), "line")
+        self.pet_skin = _Combo()
+        from echo.pet_skins import PET_SKINS
+        for ident, (zh, en, _fill, _line) in PET_SKINS.items():
+            self.pet_skin.addItem(tr(zh, en), ident)
         current_skin = QSettings("Echo", "Echo").value("desktop_pet_skin", "cartoon")
-        self.pet_skin.setCurrentIndex(1 if current_skin == "line" else 0)
+        self._select(self.pet_skin, current_skin)
         form.addRow(tr("桌宠皮肤：", "Pet skin:"), self.pet_skin)
+
+        from echo.theme import THEMES, THEME_MODE
+        self.theme_combo = _Combo()
+        for ident, title in THEMES.items():
+            self.theme_combo.addItem(title, ident)
+        self._select(self.theme_combo, THEME_MODE)
+        form.addRow(tr("界面主题（重启生效）：", "Theme (restart required):"), self.theme_combo)
 
         root.addLayout(form)
 
@@ -175,7 +214,152 @@ class SettingsDialog(QDialog):
         root.addWidget(btns)
 
         self.setStyleSheet(dialog_qss())
-        self.resize(480, 440)        # 比原来高：「清除缓存」那一段占了一行
+        self.setMinimumWidth(420)
+        self.adjustSize()
+
+    def _build_providers(self, form):
+        """平时只露「哪家 + Key」。模型名和接口折起来，选自定义或豆包这种没有默认名的才展开。"""
+        en = lang() == "en"
+        kv = self._kv
+
+        self.prov = _Combo()
+        for p in providers.PRESETS:
+            self.prov.addItem(p[2] if en else p[1], p[0])
+        pid = kv.get("ECHO_LLM_PROVIDER") or "deepseek"
+        if pid not in {p[0] for p in providers.PRESETS}:
+            pid = "deepseek"
+        self._select(self.prov, pid)
+        form.addRow(tr("用哪家：", "Provider:"), self.prov)
+
+        preset = providers.preset(pid)
+        legacy_key = ""
+        if pid == "deepseek":
+            legacy_key = kv.get("DEEPSEEK_API_KEY", "")
+        elif pid == "qwen":
+            legacy_key = kv.get("DASHSCOPE_API_KEY", "")
+        self.key_edit = QLineEdit(kv.get("ECHO_LLM_API_KEY") or legacy_key)
+        self.key_edit.setEchoMode(QLineEdit.Password)
+        self.key_edit.setFont(font(12))
+        form.addRow(tr("API Key：", "API key:"), self.key_edit)
+
+        saved_model = kv.get("ECHO_LLM_MODEL") or preset[4]
+        saved_base = kv.get("ECHO_LLM_BASE_URL") or preset[3]
+        saved_model = providers.current_model(pid, saved_base, saved_model)
+        self.adv = QCheckBox(tr("自己填模型名和接口", "Set the model name and URL myself"))
+        self.adv.setChecked(
+            pid == "custom" or not preset[4]
+            or saved_model != preset[4] or (saved_base != preset[3] and bool(saved_base)))
+        form.addRow(self.adv)
+
+        self.adv_box = QWidget()
+        adv = QFormLayout(self.adv_box)
+        adv.setContentsMargins(0, 0, 0, 0)
+        adv.setSpacing(8)
+        self.model_edit = QLineEdit(saved_model)
+        self.model_edit.setFont(font(12))
+        self.base_edit = QLineEdit(saved_base)
+        self.base_edit.setFont(font(12))
+        self.base_edit.setPlaceholderText("https://…/v1")
+        adv.addRow(tr("模型名：", "Model:"), self.model_edit)
+        adv.addRow(tr("接口：", "URL:"), self.base_edit)
+        form.addRow(self.adv_box)
+        self.prov.currentIndexChanged.connect(self._on_text_provider)
+        self.adv.toggled.connect(self._on_adv)
+        self._sync_provider_fields()
+
+        self.vprov = _Combo()
+        self.vprov.addItem(tr("跟上面同一家", "Same provider"), "same")
+        for p in providers.PRESETS:
+            if p[5] or p[0] == "custom":
+                self.vprov.addItem(p[2] if en else p[1], p[0])
+        vid = kv.get("ECHO_VISION_PROVIDER") or ""
+        if not vid:
+            vid = "qwen" if kv.get("DASHSCOPE_API_KEY") and not kv.get("ECHO_LLM_PROVIDER") else "same"
+        self._select(self.vprov, vid)
+        form.addRow(tr("视觉模型：", "Vision provider:"), self.vprov)
+
+        self.vision_box = QWidget()
+        vf = QFormLayout(self.vision_box)
+        vf.setContentsMargins(0, 0, 0, 0)
+        vf.setSpacing(8)
+        vkey = kv.get("ECHO_VISION_API_KEY", "")
+        if not vkey and vid == "qwen":
+            vkey = kv.get("DASHSCOPE_API_KEY", "")
+        self.vkey_edit = QLineEdit(vkey)
+        self.vkey_edit.setEchoMode(QLineEdit.Password)
+        self.vkey_edit.setFont(font(12))
+        self.vkey_edit.setPlaceholderText(tr("留空就用上面的 Key", "Blank = use the key above"))
+        vf.addRow(tr("Key：", "Key:"), self.vkey_edit)
+        vmodel = kv.get("ECHO_VISION_MODEL") or (providers.preset(vid)[5] if vid != "same" else "")
+        if vid != "same":
+            vmodel = providers.current_model(vid, kv.get("ECHO_VISION_BASE_URL") or providers.preset(vid)[3], vmodel)
+        self.vmodel_edit = QLineEdit(vmodel)
+        self.vmodel_edit.setFont(font(12))
+        vf.addRow(tr("模型名：", "Model:"), self.vmodel_edit)
+        self.vbase_lbl = QLabel(tr("接口：", "URL:"))
+        self.vbase_edit = QLineEdit(kv.get("ECHO_VISION_BASE_URL", ""))
+        self.vbase_edit.setFont(font(12))
+        self.vbase_edit.setPlaceholderText("https://…/v1")
+        vf.addRow(self.vbase_lbl, self.vbase_edit)
+        form.addRow(self.vision_box)
+        self.vprov.currentIndexChanged.connect(self._on_vision_provider)
+        self._sync_vision_fields()
+
+    @staticmethod
+    def _select(combo, value):
+        for i in range(combo.count()):
+            if combo.itemData(i) == value:
+                combo.setCurrentIndex(i)
+                return
+
+    def _sync_provider_fields(self):
+        pid = self.prov.currentData()
+        custom = pid == "custom"
+        self.adv.setVisible(not custom)
+        self.adv_box.setVisible(custom or self.adv.isChecked())
+        if pid == "ollama":
+            self.key_edit.setPlaceholderText(tr("本地不用填", "Not needed for local Ollama"))
+        elif pid == "doubao":
+            self.key_edit.setPlaceholderText(tr("火山方舟的 API Key", "Volcengine API key"))
+            self.model_edit.setPlaceholderText(tr("接入点，例如 ep-xxxx", "Endpoint id, e.g. ep-xxxx"))
+        else:
+            self.key_edit.setPlaceholderText("sk-…")
+            self.model_edit.setPlaceholderText("")
+        if self.isVisible():
+            self.adjustSize()
+
+    def _on_adv(self, on):
+        if not on and self.prov.currentData() != "custom":
+            p = providers.preset(self.prov.currentData())
+            self.model_edit.setText(p[4])
+            self.base_edit.setText(p[3])
+        self._sync_provider_fields()
+
+    def _on_text_provider(self):
+        """换一家就换成那家的默认模型。展开着的输入框跟着变，省得还留着上一家的名字。"""
+        p = providers.preset(self.prov.currentData())
+        self.model_edit.setText(p[4])
+        self.base_edit.setText(p[3])
+        self.adv.setChecked(not p[4])
+        self._sync_provider_fields()
+
+    def _sync_vision_fields(self):
+        vid = self.vprov.currentData()
+        self.vision_box.setVisible(vid != "same")
+        custom = vid == "custom"
+        self.vbase_lbl.setVisible(custom)
+        self.vbase_edit.setVisible(custom)
+        if self.isVisible():
+            self.adjustSize()
+
+    def _on_vision_provider(self):
+        vid = self.vprov.currentData()
+        if vid != "same":
+            p = providers.preset(vid)
+            self.vmodel_edit.setText(p[5])
+            if vid != "custom":
+                self.vbase_edit.clear()
+        self._sync_vision_fields()
 
     # ================= 存储 =================
     def _refresh_storage(self):
@@ -226,9 +410,28 @@ class SettingsDialog(QDialog):
         self._refresh_storage()
 
     def _save(self):
-        updates = {k: ed.text().strip() for k, ed in self.inputs.items()}
-        for key, cb in self.combos.items():
-            updates[key] = cb.currentData()
+        pid = self.prov.currentData()
+        vid = self.vprov.currentData()
+        updates = {k: cb.currentData() for k, cb in self.combos.items()}
+        updates.update({
+            "ECHO_LLM_PROVIDER": pid,
+            "ECHO_LLM_API_KEY": self.key_edit.text().strip(),
+            "ECHO_LLM_MODEL": self.model_edit.text().strip(),
+            "ECHO_LLM_BASE_URL": self.base_edit.text().strip(),
+            "ECHO_VISION_PROVIDER": vid,
+            "ECHO_VISION_API_KEY": self.vkey_edit.text().strip(),
+            "ECHO_VISION_MODEL": self.vmodel_edit.text().strip() if vid != "same" else "",
+            "ECHO_VISION_BASE_URL": self.vbase_edit.text().strip() if vid == "custom" else "",
+        })
+        # 老字段继续写一份：没升级过的代码、以及「没填新字段就用 DEEPSEEK_*」的回退还认它们
+        if pid == "deepseek":
+            updates["DEEPSEEK_API_KEY"] = updates["ECHO_LLM_API_KEY"]
+            updates["DEEPSEEK_MODEL"] = updates["ECHO_LLM_MODEL"] or providers.preset("deepseek")[4]
+            updates["DEEPSEEK_BASE_URL"] = updates["ECHO_LLM_BASE_URL"] or "https://api.deepseek.com"
+        if vid == "qwen" and updates["ECHO_VISION_API_KEY"]:
+            updates["DASHSCOPE_API_KEY"] = updates["ECHO_VISION_API_KEY"]
+            if updates["ECHO_VISION_MODEL"]:
+                updates["ECHO_QWEN_VL_MODEL"] = updates["ECHO_VISION_MODEL"]
         try:
             _write_env(updates)
         except OSError as e:
@@ -236,6 +439,8 @@ class SettingsDialog(QDialog):
             dialogs.warn(self, tr("保存失败", "Save failed"),
                          f"{tr('写 .env 失败：', 'Failed to write .env: ')}{e}")
             return
+        for k, v in updates.items():
+            os.environ[k] = v
         username = self.user_edit.text().strip()
         if username != str(self._profile.get("username") or ""):
             try:
@@ -250,6 +455,7 @@ class SettingsDialog(QDialog):
         from echo.backend import config as backend_config
         backend_config.set_ui_lang(self.lang_combo.currentData())
         skin = self.pet_skin.currentData()
+        QSettings("Echo", "Echo").setValue("interface_theme", self.theme_combo.currentData())
         QSettings("Echo", "Echo").setValue("desktop_pet_skin", skin)
         from echo.widgets.desk_pet import DeskPet
         for widget in QApplication.topLevelWidgets():

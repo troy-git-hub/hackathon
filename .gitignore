@@ -46,3 +46,7 @@ profile.json
 
 # 知识地图上记住的节点位置（纯缓存，删了只是回到自动排布）
 mindmap.json
+
+# Private imported study material and local QA output
+/knowledge.json
+/artifacts/

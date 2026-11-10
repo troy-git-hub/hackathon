@@ -182,7 +182,7 @@ def narrate(findings: list) -> str:
     """
     if not findings:
         return ""
-    if config.OFFLINE or not config.DEEPSEEK_API_KEY:
+    if config.OFFLINE or not config.llm_configured():
         return ""
     try:
         system = prompts.system("GAPS_SYSTEM")

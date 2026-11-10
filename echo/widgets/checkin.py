@@ -14,10 +14,13 @@ Echo - 课堂抽查卡片
 """
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton,
-                             QSizePolicy, QVBoxLayout, QWidget)
+                             QSizePolicy, QVBoxLayout, QWidget, QLineEdit)
 
 from echo.i18n import tr
 from echo.theme import Colors, Radius, Spacing, font
+from echo.components.wrapped_choice import WrappedOption
+from echo.widgets.matching import MatchingAnswer
+from echo.backend import assessment
 
 # 自评题（AI 没出成题时的兜底）三个选项是后端 quiz.SELF_OPTIONS 给的固定文案，
 # 在这里按当前语言换个说法。不让 backend 直接引 i18n —— 那会把 PyQt5 拖进
@@ -34,6 +37,7 @@ class CheckinCard(QFrame):
     """课堂抽查浮层。默认隐藏，ask() 时才出现。"""
 
     answered = pyqtSignal(int)
+    submitted = pyqtSignal(object)
     skipped = pyqtSignal()
     # 卡片收起来了（叉掉、或答完再叉掉）。宿主据此重排窗口 ——
     # 卡片一藏，听课页就矮回去，窗口不跟着缩会留一大块空白。
@@ -45,6 +49,11 @@ class CheckinCard(QFrame):
         self._question = {}
         self._option_buttons = []
         self._locked = False
+        self._input = None
+        self._matching = None
+        self._submit = None
+        self._last_answer = None
+        self._grading_pending = False
         self._build()
         self.hide()
 
@@ -61,6 +70,8 @@ class CheckinCard(QFrame):
         self.tag.setFont(font(11, 600))
         self.topic = QLabel("")
         self.topic.setFont(font(11))
+        self.topic.setWordWrap(True)
+        self.topic.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         head.addWidget(self.tag)
         head.addWidget(self.topic)
         head.addStretch(1)
@@ -76,6 +87,7 @@ class CheckinCard(QFrame):
         self.question_lbl = QLabel("")
         self.question_lbl.setWordWrap(True)
         self.question_lbl.setFont(font(13, 600))
+        self.question_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         root.addWidget(self.question_lbl)
 
         self.options_box = QVBoxLayout()
@@ -99,11 +111,15 @@ class CheckinCard(QFrame):
         self.note_lbl.setWordWrap(True)
         self.note_lbl.setFont(font(11))
         for w in (self.verdict, self.answer_lbl, self.explain_lbl, self.note_lbl):
+            w.setTextFormat(Qt.PlainText)
+            w.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
             rl.addWidget(w)
         self.result_box.hide()
         root.addWidget(self.result_box)
 
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Maximum)
+        self.setMinimumWidth(0)
+        self.question_lbl.setTextFormat(Qt.PlainText)
         self._apply_style()
 
     def _apply_style(self):
@@ -128,7 +144,7 @@ class CheckinCard(QFrame):
                 background: {Colors.SURFACE};
                 border: 1px solid {Colors.BORDER};
                 border-radius: {Radius.MD}px;
-                padding: 7px 10px;
+                padding: 0;
                 text-align: left;
                 font-size: 12px;
             }}
@@ -137,6 +153,9 @@ class CheckinCard(QFrame):
                 border-color: {Colors.ACCENT};
             }}
             QPushButton#CheckinOption:disabled {{ color: {Colors.TEXT_SECONDARY}; }}
+            QPushButton#CheckinOption QLabel {{color:{Colors.TEXT_PRIMARY};}}
+            QPushButton#CheckinOption[state="right"] QLabel {{color:{Colors.OK_FG};}}
+            QPushButton#CheckinOption[state="wrong"] QLabel {{color:{Colors.DANGER};}}
             QPushButton#CheckinOption[state="right"] {{
                 background: {Colors.OK_SOFT};
                 border-color: {Colors.OK_FG};
@@ -177,6 +196,7 @@ class CheckinCard(QFrame):
     def ask(self, question: dict):
         """弹出一道抽问题。question 来自 bridge.checkin 信号。"""
         self._question = question or {}
+        self._grading_pending = False
         self._locked = False
         self.topic.setText(self._question.get("topic") or "")
         self.question_lbl.setText(self._question.get("question") or "")
@@ -184,9 +204,29 @@ class CheckinCard(QFrame):
         self._clear_options()
 
         options = self._question.get("options") or []
+        kind = self._question.get("type")
+        self.tag.setText(tr("课堂抽查", "Quick check") + (" · " + assessment.TYPES[kind] if kind in assessment.TYPES else ""))
+        if kind in ("fill_blank", "short_answer", "matching"):
+            if kind == "matching":
+                self._matching = MatchingAnswer(self._question["left"], self._question["right"])
+                self.options_box.addWidget(self._matching)
+                hint = QLabel(tr("先选左边，再点对应的右边。", "Choose left, then right."))
+                hint.setWordWrap(True)
+                self.options_box.addWidget(hint)
+            else:
+                self._input = QLineEdit()
+                self._input.setMaxLength(1500)
+                self._input.setPlaceholderText(tr("输入答案，AI 按意思批改", "Answer here for AI grading"))
+                self._input.returnPressed.connect(self._submit_written)
+                self.options_box.addWidget(self._input)
+            self._submit = QPushButton(tr("提交答案", "Submit answer"))
+            self._submit.clicked.connect(self._submit_written)
+            self.options_box.addWidget(self._submit)
+            self.show()
+            return
         for i, text in enumerate(options):
             # 认识的自评选项翻成英文，其它（AI 出的题）原样放过
-            btn = QPushButton(tr(str(text), _SELF_OPTIONS_EN.get(str(text), "")))
+            btn = WrappedOption(tr(str(text), _SELF_OPTIONS_EN.get(str(text), "")))
             btn.setObjectName("CheckinOption")
             btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect(lambda _, idx=i: self._on_answer(idx))
@@ -208,13 +248,23 @@ class CheckinCard(QFrame):
         self._locked = True
         choice = record.get("choice", -1)
         result = record.get("result")
-        right_letter = (self._question.get("answer") or "").upper()[:1]
+        self._grading_pending = result == "pending"
+        if self._input:
+            self._input.setEnabled(False)
+        if self._matching:
+            self._matching.setEnabled(False)
+        if self._submit:
+            self._submit.setVisible(result == "pending")
+            self._submit.setEnabled(bool(record.get("retry")))
+            self._submit.setText(tr("重试 AI 批改" if record.get("retry") else "AI 批改中…",
+                                    "Retry grading" if record.get("retry") else "Grading…"))
+        right_letter = str(self._question.get("answer") or "").upper()[:1]
 
         for i, btn in enumerate(self._option_buttons):
             btn.setEnabled(False)
             state = ""
             if not self._question.get("self_report") and right_letter:
-                if str(btn.text()).strip().upper().startswith(right_letter):
+                if i == ord(right_letter) - ord("A"):
                     state = "right"
             if i == choice:
                 state = "right" if result == "right" else "wrong"
@@ -222,7 +272,11 @@ class CheckinCard(QFrame):
             btn.style().unpolish(btn)
             btn.style().polish(btn)
 
-        if result == "right":
+        if result == "pending":
+            self.verdict.setText(tr("暂未批改，可重试" if record.get("retry") else "AI 正在批改…",
+                                    "Pending — retry" if record.get("retry") else "AI is grading…"))
+            self.verdict.setStyleSheet(f"color:{Colors.ACCENT};")
+        elif result == "right":
             self.verdict.setText(tr("✓ 跟上了", "✓  Got it"))
             self.verdict.setStyleSheet(f"color:{Colors.OK_FG};")
         elif result == "unsure":
@@ -239,7 +293,7 @@ class CheckinCard(QFrame):
         explain = record.get("explain") or ""
         self.explain_lbl.setText(explain)
         self.explain_lbl.setVisible(bool(explain))
-        if result == "right":
+        if result in ("right", "pending"):
             self.note_lbl.setText("")
         else:
             self.note_lbl.setText(tr("已记进错题本，课后复习时会带上它。",
@@ -259,8 +313,28 @@ class CheckinCard(QFrame):
             item = self.options_box.takeAt(0)
             w = item.widget()
             if w is not None:
+                w.hide()
                 w.deleteLater()
         self._option_buttons = []
+        self._input = self._matching = self._submit = None
+        self._last_answer = None
+
+    def _submit_written(self):
+        if self._locked:
+            if self._submit and self._submit.isEnabled() and self._last_answer is not None:
+                self._submit.setEnabled(False)
+                self.submitted.emit(self._last_answer)
+            return
+        answer = self._matching.answers() if self._matching else self._input.text().strip()
+        if not answer or isinstance(answer, list) and any(i < 0 for i in answer):
+            if self._submit:
+                self._submit.setText(tr("请先完成作答", "Complete your answer first"))
+            return
+        self._last_answer = answer
+        self._locked = True
+        if self._submit:
+            self._submit.setEnabled(False)
+        self.submitted.emit(answer)
 
     def _on_answer(self, idx: int):
         if self._locked:
@@ -272,6 +346,8 @@ class CheckinCard(QFrame):
 
     def _on_skip(self):
         if self._locked:
+            if self._grading_pending:
+                self.skipped.emit()
             self.dismiss()
             return
         self.skipped.emit()

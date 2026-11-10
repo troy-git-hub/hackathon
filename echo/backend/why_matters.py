@@ -79,7 +79,7 @@ def plan_batch(items) -> dict:
     if not items:
         return {}
     # 离线模式（ECHO_OFFLINE=1）下不许联网，理由同 practice.generate_sync
-    if config.OFFLINE or not config.DEEPSEEK_API_KEY:
+    if config.OFFLINE or not config.llm_configured():
         return {}
     try:
         system = prompts.system("WHY_MATTERS_SYSTEM")

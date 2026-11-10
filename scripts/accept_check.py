@@ -4,6 +4,7 @@ Echo 验收总入口：一条命令跑完所有自检。
     python scripts/accept_check.py               # 默认项（不需要 API key、不需要桌面）
     python scripts/accept_check.py --with-tray   # 追加托盘/全局快捷键（需要真实桌面，会模拟按键）
     python scripts/accept_check.py --with-ai     # 追加真实 DeepSeek 链路（会消耗 token）
+    python scripts/accept_check.py --with-web    # 追加真实 HTML 浏览器与自动截图时序验收（Windows 需桌面）
     python scripts/accept_check.py --full        # 全部
 
 退出码：全部通过为 0。任何一项失败都会打印该步的末尾输出。
@@ -19,8 +20,14 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 
 
-def suite(with_tray, with_ai):
+def suite(with_tray, with_ai, with_web=False):
     steps = [
+        ("演示教学设计（阅读角度 / 对照 / 统一风格）", ["lesson_design_check.py"], "不调用真实模型"),
+        ("课堂多题型（轮换 / AI 批改 / 长文本换行）", ["checkin_types_check.py"], "不调用真实模型"),
+        ("已学内容（课程分支 / 依赖分层 / 聚焦）", ["learned_map_check.py"], "不调用真实模型"),
+        ("板书跟随知识点（后台生成 / 图解 / 整课导出）", ["board_follow_check.py"], "不调用真实模型"),
+        ("多题型练习（自动判分 / AI 批改 / 解析 / 隔离）", ["assessment_check.py"], "不调用真实模型"),
+        ("AI 黑板与知识库（检索 / 来源 / 切课 / 导入）", ["studio_check.py"], "不需要网络"),
         ("课程隔离（重开课程不串课）", ["session_check.py"], "不需要网络"),
         ("课堂抽问（触发 / 判分 / 入错题本）", ["checkin_check.py"], "不需要网络"),
         ("间隔重复复习（三档自评 / 到期调度）", ["review_check.py"], "不需要网络"),
@@ -32,7 +39,7 @@ def suite(with_tray, with_ai):
         ("反复缺失的前置知识（跨课聚合 / 归一 / 阈值）", ["gaps_check.py"], "不需要网络"),
         ("提示词模板（转义 / 占位符 / 语言指令）", ["prompts_check.py"], "不需要网络"),
         ("离线 UI 冒烟（页面切换 / 主按钮）", ["smoke_ui.py"], "offscreen"),
-        ("主题回归（深色 + 浅色）", ["theme_check.py"], "off-screen 逐页取色"),
+        ("主题回归（6 套配色）", ["theme_check.py"], "off-screen 逐页取色"),
         ("右键菜单（样式 / 对比度 / 真渲染）", ["menu_check.py"], "offscreen"),
         ("知识地图（建图 / 分层 / 详情 / 出题）", ["mindmap_check.py"], "不需要网络"),
         ("桌宠提醒（课上抽问 / 红点）", ["pet_checkin_check.py"], "offscreen"),
@@ -40,6 +47,8 @@ def suite(with_tray, with_ai):
     ]
     if with_ai:
         steps.append(("后端链路（真实 DeepSeek）", ["smoke_backend.py"], "会消耗 token"))
+    if with_web:
+        steps.append(("HTML 交互与重点捕捉（真实浏览器）", ["blackboard_visual_check.py"], "Windows 需要桌面，不调用模型"))
     if with_tray:
         steps.append(("托盘与全局快捷键", ["tray_check.py"], "需要真实桌面，会模拟按键"))
     return steps
@@ -74,6 +83,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--with-tray", action="store_true", help="追加托盘/快捷键检查")
     ap.add_argument("--with-ai", action="store_true", help="追加真实 DeepSeek 链路")
+    ap.add_argument("--with-web", action="store_true", help="追加 HTML 交互与重点捕捉（Windows需桌面）")
     ap.add_argument("--full", action="store_true", help="全部检查")
     ap.add_argument("-v", "--verbose", action="store_true", help="打印每一步的完整输出")
     args = ap.parse_args()
@@ -82,7 +92,7 @@ def main():
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-    steps = suite(args.with_tray or args.full, args.with_ai or args.full)
+    steps = suite(args.with_tray or args.full, args.with_ai or args.full, args.with_web or args.full)
     print(f"Echo 验收 — {len(steps)} 项\n" + "=" * 64, flush=True)
 
     before = _data_fingerprint()

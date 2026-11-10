@@ -53,6 +53,7 @@ pyinstaller --noconfirm --clean --windowed --name Echo --icon assets\echo.ico ^
   --hidden-import echo.widgets.desk_pet ^
   --hidden-import echo.widgets.snip ^
   --hidden-import echo.widgets.settings ^
+  --hidden-import PyQt5.QtWebEngineWidgets ^
   --collect-all faster_whisper ^
   --collect-all tokenizers ^
   --collect-binaries ctranslate2 ^

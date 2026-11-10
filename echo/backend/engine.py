@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
-from echo.backend import config, mindmap, prompts, quiz, store
+from echo.backend import awareness, config, mindmap, prompts, quiz, store
 from echo.backend.llm import LLM, LLMError
 from echo.mock_data import (BreakPoint, Concept, EchoSkill, SAMPLE_BREAKPOINT,
                             SAMPLE_CONCEPTS)
@@ -78,6 +78,7 @@ class EchoReport:
     breakpoints: List[dict] = field(default_factory=list)  # 掉队时间线：{tc,concept,lost_at,resolved_at,duration,outcome}
     quiz: dict = field(default_factory=dict)   # 课中抽问汇总：{total, correct}，回响页「答题情况」用
     from_mock: bool = False           # 这份回响是离线/兜底规则拼的，不是真听懂这节课
+    blackboards: List[dict] = field(default_factory=list)  # 本节课堂黑板（文字与来源，无原始图片）
 
 
 @dataclass
@@ -136,6 +137,7 @@ class EchoEngine:
     # ================= 生命周期 =================
     def reset(self):
         """开一个新 session：清空课堂数据，之前发起的后台任务全部作废。"""
+        awareness.clear()          # 新的一节课，上一节问过的不再带进来
         with self._lock:
             self.session += 1
             self.active = False            # 尚未开始上课（拍题/反馈这时不记入课程）
@@ -145,6 +147,7 @@ class EchoEngine:
             self.entries: List[_ConceptEntry] = []
             self.feedbacks: List[Feedback] = []
             self.breakpoints: List[BreakPoint] = []
+            self.blackboards: List[dict] = []
             self._pending_lost_at = 0.0         # 最近一次点「我掉队了」的墙钟时刻，等断点分析完挂上去
             self._pending_from = 0          # lines[_pending_from:] 还没抽过 concept
             self._last_extract = time.time()
@@ -154,6 +157,7 @@ class EchoEngine:
             self._last_interaction = time.time()    # 学生最近一次动手（反馈/补课/答题）
             self._last_checkin_at = 0.0             # 上一次抽问的墙钟时间
             self._checkin_asking = False            # 有一道正在出（防抖：出题要几秒，别重复派）
+            self._checkin_sequence = 0
 
     def start(self):
         self._stop.set()                 # 先停掉上一节课的 ticker
@@ -471,6 +475,9 @@ class EchoEngine:
             bp.lost_at = self._pending_lost_at or time.time()   # 掉队起点墙钟（没记到就用现在兜底）
             shown = self._attach_breakpoint(bp)
             self.breakpoints.append(bp)
+        # 让后面的圈一下 / 追问知道：刚才已经给学生补过这一步
+        awareness.note("break", bp.missing or bp.concept or "掉队",
+                       bp.step or bp.micro_lesson or bp.reason)
         # 立刻落盘，不等下课：以前是整节课的断点都攒在内存里，下课时才一次性写进
         # 错题本——中途重开课程、应用崩溃、或者没点「下课」就关窗口，这节课已经找到
         # 的断点（包括已经花 API 调用生成的补课讲解）就全没了，找不回来。
@@ -655,10 +662,12 @@ class EchoEngine:
                 use_llm = self.llm is not None
             q = quiz.make_checkin_sync(timeline=timeline, transcript=transcript,
                                        current=concept.topic, tc=concept.timecode,
-                                       focus=focus, llm=self.llm, use_llm=use_llm)
+                                       focus=focus, llm=self.llm, use_llm=use_llm,
+                                       question_type=quiz.CHECKIN_TYPES[self._checkin_sequence % len(quiz.CHECKIN_TYPES)])
             with self._lock:
                 if not self._live(sid) or not self.active:   # 出题期间下课/重开
                     return
+                self._checkin_sequence += 1
                 q["id"] = len(self.checkins) + 1
                 self.pending_checkin = q
                 self._last_checkin_at = time.time()
@@ -700,30 +709,68 @@ class EchoEngine:
             # 所以这里照标不误；等新知识点进来它就按 _status_of 重新结算。
             hit.status = "warn"
 
-    def answer_checkin(self, choice: int) -> Optional[dict]:
-        """学生答了抽问题。返回作答结果（含对错和讲解）；当前没有待答的题则返回 None。
-        答错 / 答「有点模糊」的记进错题本，课后「错题复习」会带上它。"""
+    def answer_checkin(self, choice) -> Optional[dict]:
+        """Objective checks are immediate; written answers are graded off the UI thread."""
+        from echo.backend import assessment
         with self._lock:
             q = self.pending_checkin
-            if q is None:
+            if q is None or q.get("_grading"):
                 return None
             sid = self.session
+            if q.get("self_report") or not q.get("type"):
+                result = quiz.grade(q, choice) if type(choice) is int else quiz.WRONG
+                grade = {}
+            else:
+                answer = chr(65 + choice) if type(choice) is int and 0 <= choice < 26 else choice
+                grade = assessment.local_grade(q, answer)
+                if grade["status"] == "unanswered":
+                    return None
+                result = {"correct": quiz.RIGHT, "partial": quiz.UNSURE,
+                          "incorrect": quiz.WRONG}.get(grade["status"], "pending")
+            if result == "pending":
+                q["_grading"] = True
+                llm = self.llm
+        if result != "pending":
+            return self._complete_checkin(sid, q, choice, result, grade)
+        pending = self._checkin_record(q, choice, "pending", {})
+        self._emit(sid, "checkin_result", pending)
+
+        def grade_written():
+            grades = assessment.grade_sync([dict(q, id=0, student_answer=str(choice))], llm=llm)
+            with self._lock:
+                if not self._live(sid) or self.pending_checkin is not q:
+                    return
+                q["_grading"] = False
+            if 0 not in grades:
+                record = self._checkin_record(q, choice, "pending", {})
+                record["retry"] = True
+                self._emit(sid, "checkin_result", record)
+                return
+            grade = grades[0]
+            result = {"correct": quiz.RIGHT, "partial": quiz.UNSURE, "incorrect": quiz.WRONG}[grade["status"]]
+            self._complete_checkin(sid, q, choice, result, grade)
+        self._pool.submit(self._safe, sid, grade_written)
+        return pending
+
+    @staticmethod
+    def _checkin_record(q, choice, result, grade):
+        options = q.get("options") or []
+        index = choice if type(choice) is int else -1
+        explanation = q.get("explain") or ""
+        if grade.get("feedback"):
+            explanation += "\n" + grade["feedback"]
+        return {"id": q.get("id"), "topic": q.get("topic") or "", "question": q.get("question") or "",
+                "choice": index, "choice_text": options[index] if 0 <= index < len(options) else str(choice),
+                "answer_text": quiz.correct_text(q), "result": result, "explain": explanation,
+                "score": grade.get("score"), "tc": q.get("tc") or "", "time": time.time()}
+
+    def _complete_checkin(self, sid, q, choice, result, grade):
+        with self._lock:
+            if not self._live(sid) or self.pending_checkin is not q:
+                return None
             self.pending_checkin = None
             self._last_interaction = time.time()
-            result = quiz.grade(q, choice)
-            options = q.get("options") or []
-            record = {
-                "id": q.get("id"),
-                "topic": q.get("topic") or "",
-                "question": q.get("question") or "",
-                "choice": choice,
-                "choice_text": options[choice] if 0 <= choice < len(options) else "",
-                "answer_text": quiz.correct_text(q),
-                "result": result,
-                "explain": q.get("explain") or "",
-                "tc": q.get("tc") or "",
-                "time": time.time(),
-            }
+            record = self._checkin_record(q, choice, result, grade)
             self.checkins.append(record)
             if result in (quiz.WRONG, quiz.UNSURE):
                 self._mark_weak(record["topic"], record["tc"])
@@ -733,7 +780,7 @@ class EchoEngine:
         if mistake:
             try:
                 store.add([mistake])
-            except Exception as e:      # 错题本写失败不该影响上课
+            except Exception as e:
                 log.warning("抽问结果写入错题本失败: %s", e)
         self._emit(sid, "checkin_result", record)
         return record
@@ -811,6 +858,10 @@ class EchoEngine:
         report.graph = self._concept_graph()
         report.breakpoints = self._breakpoint_rows()
         report.quiz = self._quiz_summary()
+        with self._lock:
+            if not self._live(sid):
+                return
+            report.blackboards = list(self.blackboards)
         self._emit(sid, "status", "done")
         self._emit(sid, "echo", report)
 

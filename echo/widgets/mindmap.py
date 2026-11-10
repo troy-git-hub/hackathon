@@ -28,7 +28,7 @@ NODE_W, NODE_H = 118, 54
 LEVEL_H = 96
 GAP_X = 20
 PAD = 24
-MIN_SCALE, MAX_SCALE = 0.45, 2.4
+MIN_SCALE, MAX_SCALE = 0.08, 2.4
 DRAG_SLOP = 4          # 超过这个位移才算拖动，不然算点击
 
 
@@ -81,6 +81,8 @@ class _Canvas(QWidget):
         self._moved = False
         self._need_fit = False
         self._user_moved = False   # 学生自己拖过/缩放过之后，就别再自动改他的视图
+        self._course = {}
+        self._course_headers = []
 
     # ---------------- 数据 ----------------
     def set_graph(self, graph: dict, selected: str = "", keep_positions: bool = False,
@@ -100,11 +102,12 @@ class _Canvas(QWidget):
         self._subjects = list(graph.get("subjects") or [])
         self._subject_index = {n["id"]: n.get("subject_index", 0) for n in nodes}
         self._subject = {n["id"]: n.get("subject", "") for n in nodes}
-        self._columns = {}
-        self._focus_subject = None
+        self._course = {n["id"]: n.get("course") or n.get("subject", "") for n in nodes}
         self._edges = [(e["from"], e["to"]) for e in edges
                        if e.get("from") is not None and e.get("to") is not None]
         if not keep_positions or set(self._pos) != set(topics):
+            self._columns = {}
+            self._focus_subject = None
             self._auto_layout(nodes)
             self._apply_offsets(offsets)
             self._need_fit = True
@@ -117,6 +120,7 @@ class _Canvas(QWidget):
         if self._subjects:
             self._layout_by_subject(nodes)
             return
+        self._course_headers = []
         by_level = {}
         for n in nodes:
             by_level.setdefault(n.get("level", 0), []).append(n["id"])
@@ -135,27 +139,43 @@ class _Canvas(QWidget):
         self._auto = {t: QPointF(p) for t, p in self._pos.items()}
 
     def _layout_by_subject(self, nodes: list):
-        """分区排布：每个学科一列，列内节点按依赖层级从上往下堆。"""
-        cols = {}   # subject_index -> [topic]
+        """Subject → course branches; dependencies share a row, never an arbitrary list."""
+        cols = {}
         for n in nodes:
             idx = self._subject_index.get(n["id"], 0)
             cols.setdefault(idx, []).append(n["id"])
-        col_order = sorted(cols)
-        col_w = NODE_W + GAP_X
-        row_h = NODE_H + GAP_X
         self._pos = {}
         self._columns = {}
-        max_rows = 1
-        for ci, idx in enumerate(col_order):
-            x = PAD + ci * col_w
+        self._course_headers = []
+        x, height = float(PAD), 320.0
+        for idx in sorted(cols):
             self._columns[idx] = x
-            # 列内按层级排序（再按名字稳定），从上往下堆
-            row = sorted(cols[idx], key=lambda t: (self._levels.get(t, 0), t))
-            for ri, topic in enumerate(row):
-                self._pos[topic] = QPointF(x, PAD + ri * row_h)
-            max_rows = max(max_rows, len(row))
-        width = PAD * 2 + len(col_order) * col_w
-        height = PAD * 2 + max_rows * row_h
+            groups = {}
+            for topic in cols[idx]:
+                groups.setdefault(self._course.get(topic, ""), []).append(topic)
+            # Keep a compact branch wide enough to show siblings side by side.
+            columns = min(3, max(len(row) for row in groups.values()))
+            width = columns * (NODE_W + GAP_X) - GAP_X
+            y = float(PAD + 12)
+            for course, topics in groups.items():
+                header = QRectF(x, y, width, 30)
+                self._course_headers.append((idx, course, header))
+                y += 54
+                by_level = {}
+                for topic in topics:
+                    by_level.setdefault(self._levels.get(topic, 0), []).append(topic)
+                for level in sorted(by_level):
+                    row = by_level[level]
+                    for start in range(0, len(row), columns):
+                        chunk = row[start:start + columns]
+                        offset = (width - (len(chunk) * (NODE_W + GAP_X) - GAP_X)) / 2
+                        for i, topic in enumerate(chunk):
+                            self._pos[topic] = QPointF(x + offset + i * (NODE_W + GAP_X), y)
+                        y += LEVEL_H
+                y += 20
+            height = max(height, y + PAD)
+            x += width + PAD * 2
+        width = x
         self._world = QSizeF(max(width, 320.0), max(height, 320.0))
         self._auto = {t: QPointF(p) for t, p in self._pos.items()}
 
@@ -198,6 +218,8 @@ class _Canvas(QWidget):
         if idx == self._focus_subject:
             return
         self._focus_subject = idx
+        self._user_moved = False
+        self.fit()
         self.update()
 
     def _dimmed(self, topic: str) -> bool:
@@ -213,11 +235,21 @@ class _Canvas(QWidget):
 
     def fit(self):
         w, h = max(self.width(), 40), max(self.height(), 40)
-        sx = w / max(self._world.width(), 1.0)
-        sy = h / max(self._world.height(), 1.0)
-        self._scale = max(MIN_SCALE, min(MAX_SCALE, min(sx, sy, 1.0)))
-        self._offset = QPointF((w - self._world.width() * self._scale) / 2,
-                               (h - self._world.height() * self._scale) / 2)
+        bounds = QRectF(0, 0, self._world.width(), self._world.height())
+        if self._focus_subject is not None:
+            selected = [self._rect(t) for t, _s, _tc in self._nodes if not self._dimmed(t)]
+            if selected:
+                bounds = selected[0]
+                for rect in selected[1:]:
+                    bounds = bounds.united(rect)
+                for idx, _course, header in self._course_headers:
+                    if idx == self._focus_subject:
+                        bounds = bounds.united(header)
+                bounds = bounds.adjusted(-PAD, -PAD, PAD, PAD)
+        sx, sy = w / max(bounds.width(), 1), h / max(bounds.height(), 1)
+        self._scale = max(MIN_SCALE, min(MAX_SCALE, sx, sy, 1.0))
+        self._offset = QPointF((w - bounds.width() * self._scale) / 2 - bounds.left() * self._scale,
+                               (h - bounds.height() * self._scale) / 2 - bounds.top() * self._scale)
         self.update()
 
     def _ensure_fit(self):
@@ -319,6 +351,27 @@ class _Canvas(QWidget):
         self._ensure_fit()
         p.translate(self._offset)
         p.scale(self._scale, self._scale)
+
+        for idx, course, header in self._course_headers:
+            dim = self._focus_subject is not None and idx != self._focus_subject
+            p.setPen(QPen(QColor(Colors.BORDER if dim else Colors.ACCENT_BORDER), 1))
+            p.setBrush(QBrush(QColor(Colors.SURFACE if dim else Colors.ACCENT_SOFT)))
+            p.drawRoundedRect(header, 8, 8)
+            p.setPen(QColor(Colors.TEXT_DISABLED if dim else Colors.ACCENT))
+            p.setFont(font(11, 600))
+            text = QFontMetrics(p.font()).elidedText(course, Qt.ElideRight, int(header.width()) - 16)
+            p.drawText(header.adjusted(8, 0, -8, 0), Qt.AlignCenter, text)
+            topics = [t for t, _s, _tc in self._nodes if self._subject_index.get(t) == idx and self._course.get(t) == course]
+            top = min((self._pos[t].y() for t in topics), default=0)
+            p.setPen(QPen(QColor(Colors.BORDER if dim else Colors.ACCENT_BORDER), 1, Qt.DashLine))
+            for topic in topics:
+                node = self._rect(topic)
+                if node.top() != top:
+                    continue
+                path = QPainterPath(QPointF(header.center().x(), header.bottom()))
+                mid = (header.bottom() + node.top()) / 2
+                path.cubicTo(header.center().x(), mid, node.center().x(), mid, node.center().x(), node.top())
+                p.drawPath(path)
 
         p.setBrush(Qt.NoBrush)
         for a, b in self._edges:
@@ -613,6 +666,8 @@ class MindMapPage(QWidget):
         nodes = self._graph["nodes"]
         subjects = self._graph.get("subjects") or []
         self.title_lbl.setText(tr("已学内容", "Learned so far"))
+        self.legend.setText(tr("虚线：课程归属 · 箭头：已有前置关系 · 红色：待回看",
+                               "Dashed: course grouping · arrows: recorded prerequisites · red: review"))
         self.lesson_title.setText("")
         self.lesson_summary.setText("")
         self.lesson_points.setText("")

@@ -385,7 +385,8 @@ def _skill_fields(sk) -> dict:
 def save_lesson(title: str, skills: list, review_chain: list, suggestion: str = "",
                 summary: str = "", highlights: list = None,
                 duration: float = 0.0, line_count: int = 0, char_count: int = 0,
-                graph: dict = None, breakpoints: list = None, quiz: dict = None) -> float:
+                graph: dict = None, breakpoints: list = None, quiz: dict = None,
+                blackboards: list = None) -> float:
     """存一节课的回响摘要，返回这条记录的 time 时间戳（给详情页定位用）。
     skills 支持元组 / dict / 对象列表。最多保留最近 50 条。
 
@@ -415,6 +416,7 @@ def save_lesson(title: str, skills: list, review_chain: list, suggestion: str = 
         "char_count": char_count,
         "skills_detail": [_skill_fields(sk) for sk in skills],
         "breakpoints": list(breakpoints or []),
+        "blackboards": list(blackboards or [])[-80:],
         "quiz": {"total": int((quiz or {}).get("total", 0)),
                  "correct": int((quiz or {}).get("correct", 0))},
     }
@@ -434,10 +436,14 @@ def save_lesson(title: str, skills: list, review_chain: list, suggestion: str = 
 
 def get_lesson(ts: float) -> dict:
     """按 time 时间戳取一条课程归档，找不到返回 {}。"""
-    for it in _load_lessons():
-        if abs(it.get("time", 0) - ts) < 0.001:
+    lessons = _load_lessons()
+    for it in lessons:
+        if it.get("time") == ts:
             return it
-    return {}
+    # Older position keys round to milliseconds. Select the nearest archive,
+    # rather than accidentally taking the previous lesson saved within 1 ms.
+    candidates = [it for it in lessons if abs(it.get("time", 0) - ts) < 0.001]
+    return min(candidates, key=lambda it: abs(it["time"] - ts)) if candidates else {}
 
 
 def list_lessons(limit: int = None) -> list:

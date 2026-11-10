@@ -6,14 +6,20 @@ import os
 import sys
 
 from PyQt5.QtGui import QColor, QFont, QPalette
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QSettings
+
+THEMES = {"auto": "跟随系统", "light": "纸白", "dark": "石墨夜读",
+          "forest": "森林书屋", "ocean": "海盐蓝", "sakura": "樱花手记", "parchment": "羊皮纸"}
+THEME_MODE = os.getenv("ECHO_THEME") or str(QSettings("Echo", "Echo").value("interface_theme", "auto"))
 
 
 # ---------- 调色板：跟随 Windows 深浅色（ECHO_THEME=dark/light 可强制） ----------
 def _system_dark() -> bool:
-    mode = os.getenv("ECHO_THEME", "auto").lower()
+    mode = THEME_MODE.lower()
     if mode in ("dark", "light"):
         return mode == "dark"
+    if mode in THEMES and mode != "auto":
+        return False
     try:
         import winreg
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
@@ -92,6 +98,24 @@ class Colors:
 for _k, _v in {**(_DARK if IS_DARK else _LIGHT), **(_STUDY_DARK if IS_DARK else _STUDY_LIGHT)}.items():
     setattr(Colors, _k, _v)
 Colors.INFO = Colors.PRIMARY
+
+_SKIN_PALETTES = {
+    "forest": ("#F2F7F3", "#FCFFFC", "#216345", "#E0EFE5", "#B5D6C1"),
+    "ocean": ("#F1F6FC", "#FCFEFF", "#235E9D", "#E1ECF9", "#B8CCE7"),
+    "sakura": ("#FCF3F6", "#FFFCFD", "#9D3D66", "#F7E1EB", "#E9BED0"),
+    "parchment": ("#F7F1E4", "#FFFCF4", "#79532C", "#EEE1C8", "#D8C4A0"),
+}
+if THEME_MODE in _SKIN_PALETTES:
+    bg, surface, accent, soft, border = _SKIN_PALETTES[THEME_MODE]
+    for _k, _v in dict(WINDOW_BG=bg, MICA_LIGHT=bg, SURFACE=surface,
+                       ACCENT=accent, ACCENT_HOVER=accent, ACCENT_PRESSED=accent,
+                       ACCENT_SOFT=soft, ACCENT_BORDER=border, ON_ACCENT="#FFFFFF",
+                       PRIMARY=accent, PRIMARY_HOVER=accent, PRESSED=accent,
+                       PRIMARY_LIGHT=soft, INFO=accent, INFO_BORDER=border,
+                       BORDER=border, WINDOW_BORDER=border, BORDER_STRONG=border,
+                       SURFACE_HOVER=soft, CODE_BG=soft, BUBBLE_BG=surface,
+                       BUBBLE_BORDER=border).items():
+        setattr(Colors, _k, _v)
 
 
 # ---------- 圆角与间距 ----------
@@ -390,6 +414,41 @@ QPushButton#IconBtn {{
     padding: 0px;
 }}
 QPushButton#IconBtn:hover {{ background: {Colors.HOVER_OVERLAY}; color: {Colors.TEXT_PRIMARY}; }}
+
+/* 滚动条。给 QScrollArea 设了样式却不写滚动条时，Qt 会画一条很宽的白槽，深色界面上就是一条白带。 */
+QScrollBar:vertical {{
+    background: transparent;
+    width: 8px;
+    margin: 0;
+}}
+QScrollBar::handle:vertical {{
+    background: {Colors.BORDER_STRONG};
+    border-radius: 3px;
+    min-height: 24px;
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+    background: transparent;
+    height: 0;
+    border: none;
+}}
+QScrollBar:horizontal {{
+    background: transparent;
+    height: 8px;
+    margin: 0;
+}}
+QScrollBar::handle:horizontal {{
+    background: {Colors.BORDER_STRONG};
+    border-radius: 3px;
+    min-width: 24px;
+}}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal,
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+    background: transparent;
+    width: 0;
+    height: 0;
+    border: none;
+}}
 """
 
 
@@ -484,13 +543,34 @@ def dialog_qss() -> str:
     """
     return f"""
         QDialog, QMessageBox {{ background:{Colors.WINDOW_BG}; }}
-        QLabel {{ color:{Colors.TEXT_PRIMARY}; font-size:13px; min-width: 260px; }}
+        QMessageBox QLabel {{ color:{Colors.TEXT_PRIMARY}; font-size:13px; min-width: 260px; }}
+        QDialog QLabel {{ color:{Colors.TEXT_PRIMARY}; font-size:13px; background: transparent; }}
+        QCheckBox {{ color:{Colors.TEXT_PRIMARY}; spacing: 6px; }}
         QLineEdit, QComboBox, QSpinBox {{
             background:{Colors.SURFACE}; color:{Colors.TEXT_PRIMARY};
             border:1px solid {Colors.BORDER}; border-radius:6px; padding:6px 8px;
         }}
         QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color:{Colors.ACCENT}; }}
         QComboBox::drop-down {{ border:none; width:22px; }}
+        QComboBox QAbstractItemView {{
+            background:{Colors.SURFACE};
+            color:{Colors.TEXT_PRIMARY};
+            border:1px solid {Colors.BORDER_STRONG};
+            outline: 0;
+            padding: 0;
+            selection-background-color:{Colors.ACCENT};
+            selection-color:{Colors.ON_ACCENT};
+        }}
+        QComboBox QAbstractItemView::item {{
+            min-height: 28px;
+            padding: 4px 10px;
+            background:{Colors.SURFACE};
+            color:{Colors.TEXT_PRIMARY};
+        }}
+        QComboBox QAbstractItemView::item:selected {{
+            background:{Colors.ACCENT};
+            color:{Colors.ON_ACCENT};
+        }}
         QPushButton {{
             background:{Colors.SURFACE}; color:{Colors.TEXT_PRIMARY};
             border:1px solid {Colors.BORDER}; border-radius:6px; padding:7px 20px;

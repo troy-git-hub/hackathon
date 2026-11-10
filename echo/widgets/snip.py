@@ -629,11 +629,11 @@ class AskPanel(QWidget):
 _busy = False
 
 
-def start_circle_ask(bridge=None, hide=(), on_finish=None):
+def start_circle_ask(bridge=None, hide=(), on_finish=None, on_capture=None, confirm_text=None):
     """开始一次圈选。hide：截图前临时藏起来的 Echo 窗口（桌宠 / 主窗口），圈完恢复。"""
     global _busy
     if _busy:
-        return
+        return False
     _busy = True
     hidden = [w for w in hide if w is not None and w.isVisible()]
     for w in hidden:
@@ -650,6 +650,9 @@ def start_circle_ask(bridge=None, hide=(), on_finish=None):
 
     def done(crop, rect):
         restore()
+        if on_capture is not None:
+            on_capture(crop, rect)
+            return
         panel = AskPanel(crop, rect, bridge)
         _alive.append(panel)
         panel.show()
@@ -657,8 +660,15 @@ def start_circle_ask(bridge=None, hide=(), on_finish=None):
         panel.raise_()
 
     def grab():
+        if screen is None:
+            restore()
+            return
         ov = SnipOverlay(screen, done, restore)
+        if confirm_text:
+            ov.confirm.setText(confirm_text)
         _alive.append(ov)
+        ov.destroyed.connect(lambda: _alive.remove(ov) if ov in _alive else None)
         ov.show()
 
     QTimer.singleShot(180 if hidden else 0, grab)   # 等窗口真正消失再截图
+    return True

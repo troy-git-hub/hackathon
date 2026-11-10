@@ -20,7 +20,7 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-THEMES = ("dark", "light")
+THEMES = ("dark", "light", "forest", "ocean", "sakura", "parchment")
 
 # 页面内部允许作为「主色」的底色 token（页面被卡片铺满时主色会是 SURFACE）
 BG_TOKENS = ("WINDOW_BG", "SURFACE", "ACCENT_SOFT", "CODE_BG", "SURFACE_PRESSED")

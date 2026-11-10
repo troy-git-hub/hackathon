@@ -51,6 +51,27 @@ def confirm(parent, title: str, text: str, ok_text: str = "") -> bool:
     return box.clickedButton() is ok
 
 
+def choose(parent, title: str, text: str, options):
+    """多选一。options 是 [(返回值, 按钮文案), ...]。关掉窗口返回 None。"""
+    box = QMessageBox(parent)
+    apply_native_titlebar(box)
+    box.setStyleSheet(dialog_qss())
+    box.setIcon(QMessageBox.Question)
+    box.setWindowTitle(title)
+    box.setText(text)
+    buttons = []
+    for key, label in options:
+        buttons.append((box.addButton(label, QMessageBox.AcceptRole), key))
+    if buttons:
+        box.setDefaultButton(buttons[0][0])
+    box.exec_()
+    clicked = box.clickedButton()
+    for btn, key in buttons:
+        if clicked is btn:
+            return key
+    return None
+
+
 def ask_text(parent, title: str, label: str, default: str = ""):
     """单行输入框。返回 (文本, 是否确认)。"""
     dlg = QInputDialog(parent)

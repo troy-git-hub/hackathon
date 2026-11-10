@@ -78,7 +78,7 @@ def _mistake_of(mistakes: list, topic: str) -> dict:
     return {}
 
 
-def _derive_graph(lesson: dict) -> dict:
+def _derive_graph(lesson: dict, include_sequence=True) -> dict:
     """没有 graph 时的推导：复习链当主干，其余知识点按讲课顺序串起来。"""
     nodes = [s["name"] for s in _skills(lesson)]
     edges = []
@@ -93,6 +93,8 @@ def _derive_graph(lesson: dict) -> dict:
                 nodes.append(t)
 
     # 剩下的知识点按课堂顺序接在前一个后面，保证图是连通的
+    if not include_sequence:
+        return {"nodes": nodes, "edges": edges}
     prev = ordered_chain[-1] if ordered_chain else None
     for s in _skills(lesson):
         name = s["name"]
@@ -148,7 +150,7 @@ def _connect_isolated(nodes: list, edges: list) -> list:
     return out
 
 
-def build(lesson: dict, mistakes: list = None) -> dict:
+def build(lesson: dict, mistakes: list = None, include_sequence=True) -> dict:
     """把一节课变成可画的图：nodes（含状态/层级）+ edges。
 
     lesson 传 store.get_lesson(ts) 或 list_lessons() 里的记录；
@@ -161,7 +163,7 @@ def build(lesson: dict, mistakes: list = None) -> dict:
     edges_src = [(str(a), str(b)) for a, b in (raw or {}).get("edges") or []
                  if not is_placeholder_topic(a) and not is_placeholder_topic(b)]
     if not nodes_src:
-        derived = _derive_graph(lesson)
+        derived = _derive_graph(lesson, include_sequence=include_sequence)
         nodes_src, edges_src = derived["nodes"], derived["edges"]
 
     # 去重但保序，方便稳定渲染
@@ -177,7 +179,8 @@ def build(lesson: dict, mistakes: list = None) -> dict:
             continue
         seen.add(key)
         edges.append([a, b])
-    edges = _connect_isolated(nodes_src, edges)
+    if include_sequence:
+        edges = _connect_isolated(nodes_src, edges)
     edges = [{"from": a, "to": b} for a, b in edges]
 
     levels = _levels(nodes_src, [(e["from"], e["to"]) for e in edges])
@@ -245,7 +248,7 @@ def build_all(lessons: list, mistakes: list = None) -> dict:
 
     for lesson in ordered:
         subj = subject_of(lesson.get("title"))
-        g = build(lesson, mistakes)
+        g = build(lesson, mistakes, include_sequence=False)
         for n in (g.get("nodes") or []):
             topic = (n.get("topic") or n.get("id") or "").strip()
             if not topic or is_placeholder_topic(topic):
@@ -256,6 +259,7 @@ def build_all(lessons: list, mistakes: list = None) -> dict:
                 "status": n.get("status") or "ok",
                 "mastery": float(n.get("mastery") or 0.0),
                 "subject": subj,
+                "course": lesson.get("title") or subj,
                 "has_mistake": bool(n.get("has_mistake")),
             }
             nodes[key] = rec      # 后写覆盖，天然取「最近一节课」
@@ -280,23 +284,25 @@ def build_all(lessons: list, mistakes: list = None) -> dict:
             "status": rec["status"],
             "mastery": rec["mastery"],
             "subject": rec["subject"],
+            "course": rec["course"],
             "subject_index": subject_idx[_norm(rec["subject"])],
             "has_mistake": rec["has_mistake"],
         })
 
     # 边：只留两端都在图里的，去自环、模糊去重
     topics = {_norm(n["topic"]) for n in node_list}
+    canonical = {_norm(n["topic"]): n["topic"] for n in node_list}
     seen = set()
     clean_edges = []
     for a, b in edges:
         na, nb = _norm(a), _norm(b)
         if na == nb or na not in topics or nb not in topics:
             continue
-        kp = tuple(sorted((na, nb)))
+        kp = (na, nb)
         if kp in seen:
             continue
         seen.add(kp)
-        clean_edges.append((a, b))
+        clean_edges.append((canonical[na], canonical[nb]))
 
     levels = _levels([n["topic"] for n in node_list], clean_edges)
     for n in node_list:
@@ -310,6 +316,7 @@ def build_all(lessons: list, mistakes: list = None) -> dict:
         "review_first": "",
         "has_real_graph": False,
         "skills_detail": all_skills,
+        "grouped": True,
     }
 
 

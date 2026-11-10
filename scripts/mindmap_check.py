@@ -242,6 +242,12 @@ check("读回来的记录能建图", len(mindmap.build(back, [])["nodes"]) >= 1)
 ts2 = store.save_lesson("没有图的课", [EchoSkill("乙", 0.9, "ok")], [])
 check("不传 graph 也能存（向后兼容）", not store.get_lesson(ts2).get("graph"))
 check("没有图的课也能建图", len(mindmap.build(store.get_lesson(ts2), [])["nodes"]) == 1)
+from unittest.mock import patch
+with patch.object(store.time, "time", side_effect=[1940000000.0, 1940000000.0002]):
+    close_a = store.save_lesson("相邻归档甲", [EchoSkill("甲", .5, "review")], [], graph=graph)
+    close_b = store.save_lesson("相邻归档乙", [EchoSkill("乙", .9, "ok")], [])
+check("毫秒内连续归档也能取回各自课程", store.get_lesson(close_a)["title"] == "相邻归档甲"
+      and store.get_lesson(close_b)["title"] == "相邻归档乙")
 
 eng.shutdown()
 
@@ -303,7 +309,7 @@ for _ in range(60):
 check("缩放有上限", abs(c._scale - 2.4) < 0.01, f"{c._scale:.2f}")
 for _ in range(80):
     wheel(-120)
-check("缩放有下限", abs(c._scale - 0.45) < 0.01, f"{c._scale:.2f}")
+check("缩放有下限（大图允许完整总览）", abs(c._scale - mm_view.MIN_SCALE) < 0.01, f"{c._scale:.2f}")
 
 r = c._rect("贝叶斯公式")
 center = c._from_world(r.center())

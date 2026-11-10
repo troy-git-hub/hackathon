@@ -24,6 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ISCC_CANDIDATES = [
+    os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Inno Setup 6", "ISCC.exe"),
     r"D:\Program Files (x86)\Inno Setup 6\ISCC.exe",
     r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
     r"C:\Program Files\Inno Setup 6\ISCC.exe",
@@ -60,7 +61,7 @@ def pyinstaller_argv(build_dir: Path, with_model: bool = False):
     m = re.search(r"(pyinstaller\b.*?main\.py)", text, re.S)
     if not m:
         raise SystemExit("没从 build.bat 里解析出 pyinstaller 命令")
-    argv = shlex.split(m.group(1).replace("\\", "/"))
+    argv = [sys.executable, "-m", "PyInstaller"] + shlex.split(m.group(1).replace("\\", "/"))[1:]
     if with_model:
         # 插在 main.py 之前：PyInstaller 的位置参数只认脚本，选项得在它前面
         argv[-1:-1] = ["--add-data", "models/faster-whisper-small;models/faster-whisper-small"]

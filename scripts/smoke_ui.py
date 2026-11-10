@@ -118,11 +118,22 @@ for _ in range(4):
 
 top = [w for w in app.topLevelWidgets() if w.isVisible()]
 assert top == [window], f"启动后出现了额外顶层窗口：{top}"
+assert window.studio_btn.isHidden(), "未上课时不应显示 AI 黑板入口"
+window._open_studio()
+assert not getattr(window, "_studio", None), "未上课时不应创建课堂黑板"
+window.echo.engine.active = True
+window._show_page(ui.LISTEN)
+app.processEvents()
+assert window.studio_btn.isVisible(), "上课时应显示 AI 黑板入口"
+window.echo.engine.active = False
+window._show_home()
 
 window._show_page(ui.MINI)
 QTest.mouseClick(window.mini_cat, Qt.LeftButton)
 app.processEvents()
-assert window._page == ui.LISTEN, "点击折叠头像没有打开听课页面"
+assert window._page == ui.HOME, "从主页折叠后点击头像应恢复主页"
+
+window._show_page(ui.LISTEN)
 
 QTest.mouseClick(window.btn_lost, Qt.LeftButton)
 app.processEvents()
@@ -344,6 +355,20 @@ expand_btns = [b for b in window.findChildren(QPushButton)
                if b.toolTip() == "展开" and b.isVisible()]
 assert expand_btns, "折叠页上没找到「展开」按钮"
 assert expand_btns[0].text() == "+", f"折叠页展开按钮图标不对：{expand_btns[0].text()!r}"
+# 真实点击减号、加号：折叠不应改变当前页面或污染返回路径。
+for page in (ui.HOME, ui.REVIEW, ui.LISTEN):
+    window._show_page(page)
+    app.processEvents()
+    history = list(window._nav_history)
+    QTest.mouseClick(window.fold_btn, Qt.LeftButton)
+    app.processEvents()
+    assert window._page == ui.MINI
+    window._show_page(ui.MINI)  # 重复折叠不能覆盖原页面
+    QTest.mouseClick(expand_btns[0], Qt.LeftButton)
+    app.processEvents()
+    assert window._page == page, f"页面 {page} 折叠再展开跳到了 {window._page}"
+    assert window._nav_history == history, "折叠/展开不应添加返回记录"
+    assert not window.echo.engine.active, "折叠/展开不应开启课程"
 window._show_page(ui.LISTEN)
 app.processEvents()
 
@@ -568,41 +593,24 @@ window.profile_page.back_requested.emit()
 app.processEvents()
 assert window._page == ui.HOME, "没在听课时，资料页「回到主页」应该正常回主页"
 
+# 课堂答疑统一进入黑板，不再显示重复的答疑按钮。
+window.echo.engine.active = True
 window._show_page(ui.LISTEN)
 app.processEvents()
-QTest.mouseClick(window.btn_qa, Qt.LeftButton)
-for _ in range(20):
-    app.processEvents()
-assert window._page == ui.ASK, "点「答题」没进问答页"
-assert window.qa_box_lay.count() >= 1, "问答页没有开场白"
-
-# 提问 → 学生的话和 Echo 的回应都出现在对话里（离线时是"连不上"的说明）
-n0 = window.qa_box_lay.count()
-window.qa_input.setText("老师刚说的「虚拟语气」是什么意思？")
-QTest.mouseClick(window.qa_send, Qt.LeftButton)
-for _ in range(40):
-    app.processEvents()
-    QTest.qWait(10)
-    if not window._qa_busy and window.qa_box_lay.count() > n0:
-        break
-assert window.qa_box_lay.count() > n0, "提问后对话里没有新内容"
-assert window._qa_busy is False, "提问后一直卡在忙碌状态"
-assert window.qa_input.isEnabled(), "回答结束后输入框没恢复"
-# 别把 API key 这类内部信息甩到界面上
-_bubble_txt = " ".join(l.text() for l in window.qa_box.findChildren(QLabel))
-assert "DEEPSEEK_API_KEY" not in _bubble_txt, f"把内部错误信息露给学生了：{_bubble_txt[:80]}"
-
-# 对话实例要留着：课后回来接着问，上下文还在
-_chat = window._qa_chat
-window._show_page(ui.LISTEN)
-window._show_qa()
+assert window.studio_btn.isVisible() and window.btn_lost.isVisible()
+assert not any(b.text() == "答疑" for b in window.findChildren(QPushButton))
+window._show_page(ui.MINI)
 app.processEvents()
-assert window._qa_chat is _chat, "回到问答页时换了对话实例，之前的上下文丢了"
-assert window._qa_started is True
-
+assert window.mini_second.text() == "黑板"
+_open_studio = window._open_studio
+_board_calls = []
+window._open_studio = lambda: _board_calls.append(True)
+QTest.mouseClick(window.mini_second, Qt.LeftButton)
+assert _board_calls, "折叠条没有打开黑板"
+window._open_studio = _open_studio
+window.echo.engine.active = False
 window._show_page(ui.LISTEN)
 app.processEvents()
-assert window.btn_qa.isVisible() and window.btn_lost.isVisible(), "听课页的两个主按钮有一个不见了"
 
 # 错题卡：折叠 + 「为什么要复习它」
 # 到期那组默认展开（自评按钮不该多一次点击）「过几天再复习」那组默认收起——

@@ -29,6 +29,10 @@ paths.config_dir = lambda: _DIR
 
 from echo.backend import config, store, why_matters   # noqa: E402
 
+# Provider settings now come from the environment, not config's import-time key.
+# Keep this fake-LLM check independent of the developer's configured provider.
+config.llm_configured = lambda: bool(config.DEEPSEEK_API_KEY)
+
 FAILED = []
 
 

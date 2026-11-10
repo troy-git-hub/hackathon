@@ -31,13 +31,13 @@ def _int(name, default):
 # ---------- LLM (DeepSeek, OpenAI 兼容) ----------
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-flash")
 LLM_TIMEOUT = _int("ECHO_LLM_TIMEOUT", 40)
 # ---------- 「圈一下问 AI」视觉模型 ----------
 # 优先用 Qwen-VL（阿里云百炼），真正的视觉模型，能读屏/OCR 公式；没有 key 时退回 DeepSeek 视觉
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
 DASHSCOPE_BASE_URL = os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-QWEN_VL_MODEL = os.getenv("ECHO_QWEN_VL_MODEL", "qwen-vl-plus")   # 更准可换 qwen-vl-max
+QWEN_VL_MODEL = os.getenv("ECHO_QWEN_VL_MODEL", "qwen3-vl-plus")
 VISION_MODEL = os.getenv("ECHO_VISION_MODEL", "deepseek-flash")
 
 # ---------- 课堂引擎 ----------
@@ -139,3 +139,9 @@ def set_ui_lang(value: str):
     """UI 层告诉后端当前界面语言（"zh" / "en"），AI 的回答跟着走。"""
     global UI_LANG
     UI_LANG = "en" if str(value) == "en" else "zh"
+
+
+def llm_configured() -> bool:
+    """文本模型接上了没有。看 providers（含老的 DEEPSEEK_API_KEY），不看启动时的快照。"""
+    from echo.backend import providers
+    return providers.configured()
