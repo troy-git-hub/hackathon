@@ -10,7 +10,7 @@ REM 必须显式排除没用到的 Qt 绑定。
 REM ctranslate2 / onnxruntime 不能用 --collect-all：ctranslate2\converters\transformers.py
 REM 与 onnxruntime\transformers\* 会 import transformers，把 datasets / pyarrow / librosa /
 REM h5py 整条链路拖进来，体积涨到几 GB 并触发 PyInstaller 递归崩溃。
-pyinstaller --noconfirm --clean --windowed --name Echo --icon assets\echo.ico ^
+python scripts\freeze_app.py --noconfirm --clean --windowed --name Echo --icon assets\echo.ico ^
   --exclude-module PyQt6 ^
   --exclude-module PySide2 ^
   --exclude-module PySide6 ^

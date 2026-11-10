@@ -103,8 +103,13 @@ end;
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
+#ifdef ECHO_PREVIEW
+  Result := False;
+  Exit;
+#endif
   if CurPageID = EchoPage.ID then begin
-    if (Trim(InstallPath.Text) = '') or not IsPathRooted(InstallPath.Text) then begin
+    if (Length(Trim(InstallPath.Text)) < 3) or
+       ((Copy(InstallPath.Text, 2, 2) <> ':\') and (Copy(InstallPath.Text, 1, 2) <> '\\')) then begin
       MsgBox('请选择一个完整的安装路径。', mbError, MB_OK);
       Result := False;
     end else WizardForm.DirEdit.Text := InstallPath.Text;

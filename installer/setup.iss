@@ -13,6 +13,7 @@
 
 [Setup]
 AppId={code:EchoAppId}
+UsePreviousLanguage=no
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -20,7 +21,11 @@ DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\dist
+#ifdef ECHO_PREVIEW
+OutputBaseFilename=Echo-Installer-Preview
+#else
 OutputBaseFilename=Echo-Setup-{#MyAppVersion}{#MyAppSuffix}
+#endif
 SetupIconFile=..\assets\echo.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -43,7 +48,9 @@ Name: "chinesesimp"; MessagesFile: "ChineseSimplified.isl"
 
 [Files]
 ; 语音识别模型不再随包分发（483MB 的大头）—— 第一次开课时后台下载到 %APPDATA%\Echo\models
+#ifndef ECHO_PREVIEW
 Source: "..\dist\Echo\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+#endif
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Check: not IsQAInstall

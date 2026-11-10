@@ -58,10 +58,14 @@ def pyinstaller_argv(build_dir: Path, with_model: bool = False):
             continue
         keep.append(line)
     text = re.sub(r"\^\s*\n", " ", "\n".join(keep))          # 拼接 ^ 续行
-    m = re.search(r"(pyinstaller\b.*?main\.py)", text, re.S)
+    m = re.search(r"((?:pyinstaller\b|python\s+scripts[\\/]freeze_app\.py).*?main\.py)", text, re.S)
     if not m:
         raise SystemExit("没从 build.bat 里解析出 pyinstaller 命令")
-    argv = [sys.executable, "-m", "PyInstaller"] + shlex.split(m.group(1).replace("\\", "/"))[1:]
+    parsed = shlex.split(m.group(1).replace("\\", "/"))
+    if parsed[0] == "python":
+        argv = [sys.executable, str(build_dir / parsed[1])] + parsed[2:]
+    else:
+        argv = [sys.executable, "-m", "PyInstaller"] + parsed[1:]
     if with_model:
         # 插在 main.py 之前：PyInstaller 的位置参数只认脚本，选项得在它前面
         argv[-1:-1] = ["--add-data", "models/faster-whisper-small;models/faster-whisper-small"]
