@@ -4,6 +4,7 @@ REM  Echo 打包脚本：用 PyInstaller 生成独立 exe（dist\Echo\Echo.exe�
 REM  需要先：pip install pyinstaller
 REM ============================================================
 setlocal
+set PYTHONHASHSEED=0
 
 REM 环境里同时装了 PyQt5 和 PyQt6 时，PyInstaller 会直接中止打包，
 REM 必须显式排除没用到的 Qt 绑定。

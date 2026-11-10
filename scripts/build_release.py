@@ -38,7 +38,8 @@ def say(msg):
 def run(argv, cwd, log_path):
     say(" ".join(str(a) for a in argv[:4]) + " …")
     with open(log_path, "w", encoding="utf-8", errors="replace") as log:
-        p = subprocess.run(argv, cwd=str(cwd), stdout=log, stderr=subprocess.STDOUT, text=True)
+        p = subprocess.run(argv, cwd=str(cwd), stdout=log, stderr=subprocess.STDOUT, text=True,
+                           env=dict(os.environ, PYTHONHASHSEED="0"))
     return p.returncode, Path(log_path)
 
 
@@ -198,7 +199,7 @@ def main():
     if not iscc or not iscc.exists():
         raise SystemExit("找不到 ISCC.exe，用 --iscc 指定，例如 "
                          r'--iscc "D:\Program Files (x86)\Inno Setup 6\ISCC.exe"')
-    say(f"Inno Setup：{iscc.name} 正在压缩（lzma2/ultra64，这次约 3 分钟）…")
+    say(f"Inno Setup：{iscc.name} 正在压缩安装文件…")
     rc, log = run([str(iscc), f"/DMyAppSuffix={suffix}",
                    str(build_dir / "installer" / "setup.iss")],
                   build_dir, tmp / "build_release_iscc.log")
