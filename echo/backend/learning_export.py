@@ -11,8 +11,9 @@ from echo.backend import paths
 from echo.backend.mindmap import is_placeholder_topic
 
 FORMAT = "echo.learning-profile"
-SCHEMA_VERSION = "1.0.0"
-APP_VERSION = "2.2.1"
+SCHEMA_VERSION = "2.0.0"
+APP_VERSION = "2.3.0"
+SECTIONS = ("profile", "mastery", "difficulties", "reviews", "preferences")
 
 
 def _id(kind, value):
@@ -81,7 +82,7 @@ def _state(point):
     return "unknown", ["暂无足够记录"]
 
 
-def build_export(now=None):
+def _build_evidence_snapshot(now=None):
     profile = _read("profile.json", dict)
     raw_lessons = _read("lessons.json", list)
     raw_reviews = _read("review.json", list)
@@ -199,13 +200,46 @@ def build_export(now=None):
             "warnings": warnings}
 
 
-def export_json(destination):
+def build_export(now=None, sections=None):
+    """Export selected personal indicators, never the per-lesson history."""
+    chosen = set(SECTIONS if sections is None else sections)
+    if not chosen or chosen - set(SECTIONS):
+        raise ValueError("请至少选择一个有效的个人数据项。")
+    snapshot = _build_evidence_snapshot(now)
+    points = []
+    for point in snapshot["knowledge_points"]:
+        points.append({key: point[key] for key in ("id", "topic", "subject", "state", "reasons", "latest_mastery")}
+                      | {"learning_sessions": len({o["lesson_id"] for o in point["observations"]}),
+                         "difficulty_sessions": len(point["difficulty_lesson_ids"])})
+    data = {key: snapshot[key] for key in ("format", "exported_at", "producer", "methodology", "warnings")}
+    data.update(schema_version=SCHEMA_VERSION, selected_sections=[s for s in SECTIONS if s in chosen],
+                coverage={"scope": "personal_aggregate", "saved_lesson_count": len(snapshot["lessons"]),
+                          "lesson_storage_limit": 50, "active_lesson_included": False,
+                          "per_question_history_available": False, "lesson_details_included": False})
+    data["excluded"] = snapshot["excluded"] + ["lesson_details", "lesson_summaries", "lesson_ids"]
+    if "profile" in chosen:
+        data["learner"] = snapshot["learner"]
+    if "mastery" in chosen:
+        data["knowledge_points"] = points
+    if "difficulties" in chosen:
+        data["difficulties"] = {
+            "weaknesses": [p for p in points if p["state"] == "weakness"],
+            "recurring": [{key: item[key] for key in ("knowledge_id", "topic", "affected_lesson_count", "basis")}
+                          for item in snapshot["recurring_difficulties"]]}
+    if "reviews" in chosen:
+        data["reviews"] = snapshot["reviews"]
+    if "preferences" in chosen:
+        data["learning_preferences"] = snapshot["learning_preferences"]
+    return data
+
+
+def export_json(destination, sections=None):
     target = Path(destination).expanduser().resolve()
     # A save dialog may point anywhere; prevent overwriting Echo's own live files.
     private_names = {"profile.json", "review.json", "lessons.json", "knowledge.json", "mindmap.json", ".env", ".env.example"}
     if target.parent == Path(paths.config_dir()).resolve() and target.name.lower() in private_names:
         raise ValueError("请选择新的导出文件名，不能覆盖 Echo 正在使用的数据文件。")
-    data = build_export()
+    data = build_export(sections=sections)
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=target.parent, prefix=".echo-export-", suffix=".tmp", delete=False) as stream:

@@ -80,11 +80,12 @@ with patch.object(blackboard, "generate_board", side_effect=generate):
     assert "用HTML" in calls[-1][1]
     assert not board.focus.text()
     # New knowledge point can produce its own board after the bounded interval.
+    w.echo.engine.automatic_budget.last -= 51
     next_concept = Concept(concepts=[], prerequisites=[], timecode="00:40", topic="外角和", summary="三角形外角和为360度")
     w.echo.engine.entries.append(SimpleNamespace(t=40, concept=next_concept))
     w.echo.engine.lines.append(Line(45, "三角形的每个顶点取一个外角，外角和为360度。"))
     board._follow_hold_until = 0
-    board._topic_gate.last_attempt -= 31
+    board._topic_gate.last_attempt -= 51
     board.follow_current()
     board._topic_gate.since -= 3
     board.follow_current()

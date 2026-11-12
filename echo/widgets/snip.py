@@ -635,16 +635,15 @@ def start_circle_ask(bridge=None, hide=(), on_finish=None, on_capture=None, conf
     if _busy:
         return False
     _busy = True
-    hidden = [w for w in hide if w is not None and w.isVisible()]
-    for w in hidden:
-        w.hide()
+    from echo.widgets.capture_exclusion import CaptureExclusion
+    from echo.widgets.lesson_capture import echo_windows
+    exclusion = CaptureExclusion(list(hide) + echo_windows())
     screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
 
     def restore():
         global _busy
         _busy = False
-        for w in hidden:
-            w.show()
+        exclusion.restore()
         if on_finish:
             on_finish()
 
@@ -663,12 +662,17 @@ def start_circle_ask(bridge=None, hide=(), on_finish=None, on_capture=None, conf
         if screen is None:
             restore()
             return
-        ov = SnipOverlay(screen, done, restore)
+        try:
+            ov = SnipOverlay(screen, done, restore)
+        except Exception:
+            restore()
+            raise
+        exclusion.restore()
         if confirm_text:
             ov.confirm.setText(confirm_text)
         _alive.append(ov)
         ov.destroyed.connect(lambda: _alive.remove(ov) if ov in _alive else None)
         ov.show()
 
-    QTimer.singleShot(180 if hidden else 0, grab)   # 等窗口真正消失再截图
+    QTimer.singleShot(180, grab)
     return True

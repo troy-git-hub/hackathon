@@ -548,6 +548,11 @@ class FloatingWindow(QWidget):
         head.addSpacing(Spacing.SM)
         head.addWidget(_label(tr("老师正在讲", "Teacher is speaking"), CAPTION))
         head.addStretch()
+        self.subtitle_btn = _btn(tr("字幕", "Captions"), "Quiet", self._toggle_subtitles,
+                                 tr("显示置顶字幕 · 使用本地转写，不额外调用AI", "Show local ASR captions"))
+        self.subtitle_btn.setCheckable(True)
+        self.subtitle_btn.setChecked(QSettings("Echo", "Echo").value("subtitles_enabled", False, type=bool))
+        head.addWidget(self.subtitle_btn)
         self.tc_lbl = _label("00:00", f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;"
                                       "font-family: Consolas, 'Cascadia Mono', monospace;")
         head.addWidget(self.tc_lbl)
@@ -3600,7 +3605,34 @@ class FloatingWindow(QWidget):
         QTimer.singleShot(1000, restore)
 
     # ================= 后端信号 =================
+    def _toggle_subtitles(self):
+        QSettings("Echo", "Echo").setValue("subtitles_enabled", self.subtitle_btn.isChecked())
+        self._sync_subtitles()
+
+    def _sync_subtitles(self, tc="", text=""):
+        window = getattr(self, "_subtitles", None)
+        if not self._in_class() or not self.subtitle_btn.isChecked():
+            if window:
+                window.hide()
+            return
+        engine = self.echo.engine
+        if window is None or window.session != engine.session or not window.timer.isActive():
+            if window:
+                window.timer.stop()
+                window.hide()
+                window.deleteLater()
+            from echo.widgets.subtitles import SubtitleWindow
+            def closed():
+                self.subtitle_btn.setChecked(False)
+                QSettings("Echo", "Echo").setValue("subtitles_enabled", False)
+            window = self._subtitles = SubtitleWindow(engine, closed)
+            self.subtitle_btn.setChecked(True)
+        if text:
+            window.update_caption(tc, text)
+        window.show()
+
     def _on_transcript(self, tc, text):
+        self._sync_subtitles(tc, text)
         self.current_tc = tc
         self.tc_lbl.setText(tc)
         short = text if len(text) <= 56 else text[:54] + "…"
@@ -3797,6 +3829,7 @@ class FloatingWindow(QWidget):
     }
 
     def _on_status(self, st):
+        self._sync_subtitles()
         self._had_lesson = True         # 引擎发了状态，说明这节课真的在跑
         text, busy = self.STATUS.get(st, self.STATUS["listening"])
         self.status_lbl.setText(text)
@@ -3924,6 +3957,9 @@ class FloatingWindow(QWidget):
         return super().nativeEvent(eventType, message)
 
     def closeEvent(self, e):
+        if getattr(self, "_subtitles", None):
+            self._subtitles.timer.stop()
+            self._subtitles.hide()
         self.echo.shutdown()
         super().closeEvent(e)
 

@@ -22,6 +22,7 @@ SCRIPTS = ROOT / "scripts"
 
 def suite(with_tray, with_ai, with_web=False):
     steps = [
+        ("字幕与调用节流（本地转写 / 50秒 / 上下文 / 截图排除）", ["lesson_features_check.py"], "不调用真实模型"),
         ("学习档案导出（JSON / 隐私 / 数据关联 / 设置按钮）", ["learning_export_check.py"], "隔离数据，不调用模型"),
         ("演示教学设计（阅读角度 / 对照 / 统一风格）", ["lesson_design_check.py"], "不调用真实模型"),
         ("课堂多题型（轮换 / AI 批改 / 长文本换行）", ["checkin_types_check.py"], "不调用真实模型"),

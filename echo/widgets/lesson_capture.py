@@ -5,6 +5,7 @@ from PyQt5.QtCore import Qt, QRect, QTimer, pyqtSignal
 from PyQt5.QtGui import QGuiApplication, QCursor, QPainter, QColor, QPen
 from PyQt5.QtWidgets import QWidget, QApplication, QLabel, QPushButton, QHBoxLayout, QFrame
 from echo.theme import Colors
+from echo.widgets.capture_exclusion import CaptureExclusion
 
 _selectors = []
 
@@ -119,10 +120,10 @@ class RegionSelector(QWidget):
 
 def select_region(on_selected, on_cancel=None, screen=None):
     screen = screen or QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
-    saved = _hide(echo_windows())
+    exclusion = CaptureExclusion(echo_windows())
 
     def finish(region=None):
-        _restore(saved)
+        exclusion.restore()
         if region:
             on_selected(region)
         elif on_cancel:
@@ -132,7 +133,11 @@ def select_region(on_selected, on_cancel=None, screen=None):
         if screen is None:
             finish()
             return
-        selector = RegionSelector(screen, lambda region: finish(region), finish)
+        try:
+            selector = RegionSelector(screen, lambda region: finish(region), finish)
+        except Exception:
+            finish()
+            return
         _selectors.append(selector)
         selector.destroyed.connect(lambda: _selectors.remove(selector) if selector in _selectors else None)
         selector.show()
@@ -143,7 +148,7 @@ def select_region(on_selected, on_cancel=None, screen=None):
 
 
 def grab_region(region, on_done, on_error, valid=lambda: True):
-    """Hide Echo briefly, grab only the chosen rectangle, and restore without activation."""
+    """Exclude Echo from capture, falling back to a brief hide when unavailable."""
     screens = [s for s in QGuiApplication.screens() if s.name() == region.screen_name]
     if not screens or screens[0].geometry() != region.screen_geometry:
         on_error("屏幕布局已改变，请重新选择课件范围")
@@ -152,7 +157,7 @@ def grab_region(region, on_done, on_error, valid=lambda: True):
     if not QRect(0, 0, screen.geometry().width(), screen.geometry().height()).contains(region.rect):
         on_error("课件范围超出屏幕，请重新选择")
         return
-    saved = _hide(echo_windows())
+    exclusion = CaptureExclusion(echo_windows())
 
     def grab():
         result, error = None, None
@@ -169,10 +174,10 @@ def grab_region(region, on_done, on_error, valid=lambda: True):
         except Exception as exc:
             error = str(exc)
         finally:
-            _restore(saved)
+            exclusion.restore()
         if error:
             on_error(error)
         elif result is not None and valid():
             on_done(result)
 
-    QTimer.singleShot(180 if saved else 0, grab)
+    QTimer.singleShot(180, grab)

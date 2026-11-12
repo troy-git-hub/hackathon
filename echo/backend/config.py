@@ -42,7 +42,7 @@ VISION_MODEL = os.getenv("ECHO_VISION_MODEL", "deepseek-flash")
 
 # ---------- 课堂引擎 ----------
 # 每隔多少秒把新 transcript 交给 LLM 抽一次 concept
-CONCEPT_INTERVAL = _int("ECHO_CONCEPT_INTERVAL", 30)
+CONCEPT_INTERVAL = max(50, _int("ECHO_CONCEPT_INTERVAL", 50))
 # 新 transcript 至少多少字才值得抽 concept
 CONCEPT_MIN_CHARS = _int("ECHO_CONCEPT_MIN_CHARS", 40)
 # 点「我掉队了」时回看多少秒 transcript

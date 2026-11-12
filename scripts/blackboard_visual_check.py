@@ -113,7 +113,7 @@ with tempfile.TemporaryDirectory(prefix="echo-visual-") as folder:
     gate.checked(moment, 0)
     assert not gate.eligible(moment, 40)
     later = dict(moment, end="00:40")
-    assert gate.eligible(later, 40)
+    assert gate.eligible(later, 50)
     assert gate.accept({"important": True, "topic": "一次函数斜率"}, 40)
     assert not gate.eligible(dict(later, end="00:50"), 60)
     assert not gate.accept({"important": True, "topic": "一次函数斜率"}, 140)
@@ -257,7 +257,7 @@ button:getComputedStyle(document.querySelector('#answers button')).backgroundCol
         return result
     with patch.object(config, "OFFLINE", False), patch.object(blackboard.providers, "configured", return_value=True), \
             patch.object(lesson_capture, "grab_region", side_effect=lambda r, done, err, valid: done(frame)), \
-            patch.object(blackboard, "judge_importance", side_effect=judge), patch.object(blackboard, "generate_board", side_effect=generate):
+            patch.object(blackboard, "local_importance", side_effect=judge), patch.object(blackboard, "generate_board", side_effect=generate):
         auto.auto_toggle.setChecked(True)
         assert entered.wait(1)
         freeze_engine.lines = engine.lines + [SimpleNamespace(t=80, tc="01:20", text="老师已经翻页，开始讲下一部分。")]

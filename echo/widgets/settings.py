@@ -245,6 +245,10 @@ class SettingsDialog(QDialog):
     def _export_learning_data(self):
         from echo.backend import learning_export
         from echo.widgets import dialogs
+        from echo.widgets.export_options import ExportOptionsDialog
+        options = ExportOptionsDialog(self)
+        if options.exec_() != QDialog.Accepted:
+            return
         directory = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation) or os.path.expanduser("~")
         default = os.path.join(directory, f"Echo-learning-profile-{datetime.date.today().isoformat()}.json")
         filename, _ = QFileDialog.getSaveFileName(self, tr("导出个人学习档案", "Export personal learning profile"), default, "JSON (*.json)")
@@ -253,28 +257,28 @@ class SettingsDialog(QDialog):
         if not filename.lower().endswith(".json"):
             filename += ".json"
         try:
-            data = learning_export.export_json(filename)
+            data = learning_export.export_json(filename, sections=options.selected_sections())
         except (OSError, ValueError) as exc:
             dialogs.warn(self, tr("导出失败", "Export failed"), str(exc))
             return
         dialogs.info(self, tr("学习档案已导出", "Learning profile exported"),
-                     tr(f"已保存到：\n{filename}\n\n包含 {len(data['lessons'])} 节已保存课程、{len(data['knowledge_points'])} 个知识点和 {len(data['reviews'])} 条复习记录。\n格式：echo.learning-profile / 1.0.0。",
-                        f"Saved to:\n{filename}\n\n{len(data['lessons'])} saved lessons, {len(data['knowledge_points'])} topics, {len(data['reviews'])} review records.\nFormat: echo.learning-profile / 1.0.0."))
+                     tr(f"已保存到：\n{filename}\n\n已导出 {len(data['selected_sections'])} 项个人数据，不含逐课明细。\n格式：echo.learning-profile / 2.0.0。",
+                        f"Saved to:\n{filename}\n\n{len(data['selected_sections'])} personal categories. No per-lesson details.\nFormat: echo.learning-profile / 2.0.0."))
 
     def _export_format_help(self):
         from echo.widgets import dialogs
         dialogs.info(self, tr("学习档案 JSON 格式", "Learning profile JSON format"), tr(
-            "UTF-8 JSON，format=echo.learning-profile，schema_version=1.0.0。\n\n"
-            "learner：个人资料与本地档案ID；summary：相对掌握/薄弱知识点的ID；\n"
+            "UTF-8 JSON，format=echo.learning-profile，schema_version=2.0.0。\n\n"
+            "learner：个人资料与本地档案ID；selected_sections：本次勾选的数据项；\n"
             "knowledge_points：掌握状态、课程证据及最近复习情况；\n"
-            "recurring_difficulties：多节课重复出现的困难线索；reviews：复习进度；lessons：课程摘要和抽问汇总。\n\n"
+            "difficulties：薄弱与反复困难；reviews：复习进度。只包含你勾选的个人数据项，不包含每课摘要、原文或笔记。\n\n"
             "其他项目可用 JSON.parse 或 json.load 读取，通过 knowledge_points[].id 关联。"
             "state=weakness 表示薄弱，strength 表示相对掌握。时间为UTC ISO 8601，未知值为null。\n\n"
             "这是学习指标，不是标准化考试成绩。当前只导出已保存记录，不包含正在上课的临时内容。"
             "跨项目账号需由接入方绑定，本地ID不是登录凭证。完整字段说明见项目 docs/learning-profile-export.md。",
-            "UTF-8 JSON. format=echo.learning-profile, schema_version=1.0.0.\n\n"
+            "UTF-8 JSON. format=echo.learning-profile, schema_version=2.0.0.\n\n"
             "learner: profile; summary: strength/weakness IDs; knowledge_points: topic evidence and review state; "
-            "recurring_difficulties: repeated difficulty; reviews: review progress; lessons: saved lesson summaries.\n\n"
+            "difficulties: weak topics and repeated difficulty; reviews: review progress. Only selected categories; no per-lesson details.\n\n"
             "Read with JSON.parse or json.load and join knowledge_points[].id. Dates are UTC ISO 8601; unknown values are null. "
             "These are learning indicators, not exam scores. Only saved history is exported. Map the local ID to your own account; it is not an authentication token."))
 

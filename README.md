@@ -1,6 +1,6 @@
 # Echo — 网课里的 AI 学习副驾驶
 
-## Windows 2.2.1 发布版
+## Windows 2.3.0 发布版
 
 安装包使用 Echo 定制的深色安装界面，可选择路径与桌面快捷方式，默认安装到当前用户目录。
 应用内首次设置模型 API Key；安装包不包含密钥、课程记录或语音模型，语音模型在应用内按需下载。
@@ -10,8 +10,10 @@
 - 打包自检：`Echo.exe --self-test --report check.json`（临时隔离数据，验证语音运行库、窗口和 HTML 交互）
 - 安装器脚本：`installer/setup.iss` 与 `installer/echo_wizard.iss`
 
-「设置 → 导出学习档案（JSON）」可保存个人资料、相对掌握/薄弱知识点、反复困难、复习记录和课程汇总。
-格式 `echo.learning-profile / 1.0.0`，不包含密钥、录音和截图。
+课堂页新增可开关的独立字幕浮窗，支持移动和字号调整，使用本地转写。
+后台自动任务统一至少间隔 50 秒，截图排除 Echo 自身。见 [字幕与后台 AI](docs/captions-and-background-ai.md)。
+「设置 → 导出学习档案（JSON）」可勾选个人资料、知识掌握、薄弱与反复困难、复习进度和学习偏好。
+格式 `echo.learning-profile / 2.0.0`，不包含逐课明细、密钥、录音和截图。
 跨项目接入见 [格式说明](docs/learning-profile-export.md)、[JSON Schema](docs/learning-profile.schema.json) 和 [虚构样例](docs/examples/learning-profile.json)。
 构建目录统一放项目内 `.build/`，可交付 exe 与安装包放 `dist/`，不在磁盘根目录创建文件夹。
 
@@ -149,7 +151,7 @@ EchoBridge (echo/backend/qt_bridge.py) → Qt 信号（带 session 隔离）→ 
 ```bash
 pip install pyinstaller
 python scripts/build_release.py  # 需要已提交的 Git 源码仓库及 Inno Setup
-# 安装包输出 dist/Echo-Setup-2.2.1.exe
+# 安装包输出 dist/Echo-Setup-2.3.0.exe
 # 目录版在 .build/windows/dist/Echo/
 ```
 

@@ -86,6 +86,9 @@ class BlackboardWindow(QDialog):
     def __init__(self, engine=None, parent=None, archived=None):
         super().__init__(parent, Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.engine = engine
+        if engine is not None and not hasattr(engine, "automatic_budget"):
+            from echo.backend.context import AutomaticBudget
+            engine.automatic_budget = AutomaticBudget()
         self.archived = archived is not None
         self.session = getattr(engine, "session", None)
         self._request = 0
@@ -521,6 +524,14 @@ class BlackboardWindow(QDialog):
         except ValueError:
             return
         if not self._gate.eligible(moment, time.monotonic()):
+            self.engine.automatic_budget.discard("screen_board")
+            return
+        topic_key = "".join(moment.get("current", "").lower().split())
+        if topic_key in self._gate.topics:
+            self._gate.checked(moment, time.monotonic())
+            self.engine.automatic_budget.discard("screen_board")
+            return
+        if not self.engine.automatic_budget.reserve("screen_board"):
             return
         self._gate.checked(moment, time.monotonic())
         self._auto_request += 1
@@ -542,7 +553,9 @@ class BlackboardWindow(QDialog):
             def judge():
                 decision, error = None, ""
                 try:
-                    decision = blackboard.judge_importance(frozen)
+                    # The existing concept and explicit emphasis are enough to
+                    # decide locally. Only the resulting visual board uses AI.
+                    decision = blackboard.local_importance(frozen)
                 except Exception as exc:
                     error = str(exc)
                 try:
@@ -629,15 +642,19 @@ class BlackboardWindow(QDialog):
 
     def follow_current(self):
         """Runs while hidden/folded too; never captures a screen or opens a window."""
-        if (not self.active() or not self.follow_toggle.isChecked() or self._busy or self._auto_working
+        if (not self.active() or not self.follow_toggle.isChecked() or self.auto_toggle.isChecked() or self._busy or self._auto_working
                 or self._visual_busy or self._selecting_region or self._capture is not None
                 or self.focus.text().strip() or time.monotonic() < self._follow_hold_until):
+            if self.engine is not None and hasattr(self.engine, "automatic_budget"):
+                self.engine.automatic_budget.discard("topic_board")
             return
         try:
             moment = blackboard.snapshot(self.engine, current_only=True)
         except ValueError:
             return
         if self._topic_gate.ready(moment, time.monotonic()):
+            if not self.engine.automatic_budget.reserve("topic_board"):
+                return
             self._topic_gate.started(time.monotonic())
             self._start_generation(moment, "整理当前知识点：" + moment["current"], automatic=True, topic_follow=True)
 
@@ -771,7 +788,6 @@ class BlackboardWindow(QDialog):
         self.render_sources(board.get("sources", []))
         if self.visual_page.isVisible():
             self.display_visual()
-            self.maybe_generate_visual()
         self.scroll.verticalScrollBar().setValue(0)
         image = self._images.get(board.get("created"))
         if image:

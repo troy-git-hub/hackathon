@@ -2,7 +2,7 @@
 ; 先运行 build.bat 生成 dist\Echo\Echo.exe，再用本脚本编译。
 
 #define MyAppName "Echo"
-#define MyAppVersion "2.2.1"
+#define MyAppVersion "2.3.0"
 #define MyAppPublisher "Echo"
 #define MyAppExeName "Echo.exe"
 ; 产物名后缀。build_release.py --with-model 会传 /DMyAppSuffix=-with-model，

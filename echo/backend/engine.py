@@ -21,6 +21,7 @@ from typing import Callable, List, Optional
 
 from echo.backend import awareness, config, mindmap, prompts, quiz, store
 from echo.backend.llm import LLM, LLMError
+from echo.backend.context import AutomaticBudget, bounded_text
 from echo.mock_data import (BreakPoint, Concept, EchoSkill, SAMPLE_BREAKPOINT,
                             SAMPLE_CONCEPTS)
 
@@ -141,6 +142,7 @@ class EchoEngine:
         with self._lock:
             self.session += 1
             self.active = False            # 尚未开始上课（拍题/反馈这时不记入课程）
+            self.automatic_budget = AutomaticBudget()
             self._concept_lock = threading.Lock()   # 每节课一把，旧任务卡住也不会挡新课
             self.start_ts = time.time()
             self.lines: List[Line] = []
@@ -272,12 +274,12 @@ class EchoEngine:
                 chars = sum(len(l.text) for l in pending)
                 due = time.time() - self._last_extract >= self.concept_interval
                 checkin = self._checkin_due()
-            if pending and (chars >= config.CONCEPT_MIN_CHARS and due or chars >= 400):
+            if pending and chars >= config.CONCEPT_MIN_CHARS and due and self.automatic_budget.reserve("concept"):
                 try:
                     self._pool.submit(self._safe, sid, self._extract_concept, False, sid)
                 except RuntimeError:      # 程序退出时线程池已关闭
                     return
-            if checkin:
+            if checkin and self.automatic_budget.reserve("checkin"):
                 # 出题要几秒，这中间 _checkin_due 还一直是真 —— 先占住，别连着派好几道
                 with self._lock:
                     busy = self._checkin_asking
@@ -309,7 +311,7 @@ class EchoEngine:
                 end_idx = len(self.lines)
                 timeline = self._timeline_text()
                 prev = self.entries[-1] if self.entries else None
-            chunk = "\n".join(f"[{l.tc}] {l.text}" for l in pending)
+            chunk = bounded_text("\n".join(f"[{l.tc}] {l.text}" for l in pending), 7000)
             preview = (chunk[:30] + "…") if len(chunk) > 30 else chunk
             self._emit(sid, "thinking", True, f"正在理解：{preview}")
 
@@ -317,7 +319,7 @@ class EchoEngine:
                 data = self.llm.json(prompts.system("CONCEPT_SYSTEM"),
                                      prompts.CONCEPT_USER.format(timeline=timeline or "（暂无）",
                                                                  chunk=chunk),
-                                     max_tokens=700)
+                                     max_tokens=700, attempts=1)
             else:
                 data = self._mock_concept(chunk)
             segs = data.get("segments") if isinstance(data.get("segments"), list) else [data]
@@ -425,7 +427,7 @@ class EchoEngine:
                     timeline=timeline or "（暂无）",
                     feedback=feedback or "（无）",
                     window=f"{config.LOST_WINDOW // 60} 分钟",
-                    transcript="\n".join(f"[{l.tc}] {l.text}" for l in window),
+                    transcript=bounded_text("\n".join(f"[{l.tc}] {l.text}" for l in window), 8500),
                     current=current, now=fmt_tc(now)),
                 temperature=0.4, max_tokens=800,
                 timeout=config.BREAKPOINT_TIMEOUT, attempts=1)
@@ -984,15 +986,20 @@ class EchoEngine:
     # ================= 工具 =================
     def _timeline_text(self) -> str:
         out = []
-        for i, e in enumerate(self.entries):
+        indices = list(range(len(self.entries)))
+        if len(indices) > 16:
+            gaps = [i for i, e in enumerate(self.entries[:-10]) if e.is_bp and not e.fixed][-4:]
+            indices = sorted(set(indices[:2] + gaps + indices[-10:]))
+        for i in indices:
+            e = self.entries[i]
             c = e.concept
             fb = "、".join(FEEDBACK_LABEL[f] for f in self._feedback_of(i) if f in FEEDBACK_LABEL)
             if e.is_bp:
                 fb = (fb + "、" if fb else "") + ("⚠ 掉队断点（已补上）" if e.fixed else "⚠ 掉队断点")
-            out.append(f"[{c.timecode}] {c.topic} —— {c.summary}"
+            out.append(f"[{c.timecode}] {c.topic} —— {str(c.summary)[:300]}"
                        f"（前置：{'、'.join(c.prerequisites) or '无'}）"
                        + (f"  学生反馈：{fb}" if fb else ""))
-        return "\n".join(out)
+        return bounded_text("\n".join(out), 6000)
 
     def _feedback_of(self, i: int) -> List[str]:
         """按时间把学生反馈归属到第 i 个 concept（避免 LLM 抽取延迟导致归属错误）。"""

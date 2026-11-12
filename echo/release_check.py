@@ -46,7 +46,19 @@ def run(argv):
             report["checks"]["assets"] = Path(paths.asset("assets", "echo.ico")).is_file()
             from echo.backend.learning_export import export_json
             exported = export_json(Path(folder) / "learning-profile.json")
-            report["checks"]["learning_export"] = exported["format"] == "echo.learning-profile" and exported["lessons"] == []
+            report["checks"]["learning_export"] = exported["format"] == "echo.learning-profile" and "lessons" not in exported and exported["schema_version"] == "2.0.0"
+            selected = export_json(Path(folder) / "weaknesses.json", sections=["difficulties"])
+            from echo.widgets.export_options import ExportOptionsDialog
+            choices = ExportOptionsDialog()
+            report["checks"]["personal_export_selection"] = selected["selected_sections"] == ["difficulties"] and "learner" not in selected and len(choices.selected_sections()) == 5
+            choices.close()
+            from echo.widgets.subtitles import SubtitleWindow
+            window.echo.engine.active = True
+            captions = SubtitleWindow(window.echo.engine, lambda: None)
+            captions.update_caption("00:12", "字幕运行检查")
+            report["checks"]["local_captions"] = captions.caption.text() == "字幕运行检查"
+            captions.close()
+            window.echo.engine.active = False
             from echo.widgets.web_lesson import HtmlLesson
             viewer = HtmlLesson()
             report["checks"]["webengine"] = viewer.view is not None

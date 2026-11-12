@@ -7,6 +7,7 @@ import time
 from echo.backend import knowledge, config, providers
 from echo.backend.llm import LLM, parse_json
 from echo.backend.lesson_design import DESIGN_RULES, guided_html
+from echo.backend.context import bounded_text
 
 BOARD_SYSTEM = """你是课堂中的板书助教。把这一小段讲解整理成一块可扫读的黑板，而不是一篇文章。
 用户可能同时圈选并批注了课件截图；先读圈画区域，再结合老师原话解释。图中看不清的字不猜。
@@ -45,11 +46,21 @@ def snapshot(engine, seconds=300, current_only=False):
         has_llm = engine.has_llm
         manually_offline = getattr(engine, "_online_llm", None) is not None
         previous = (getattr(engine, "blackboards", None) or [{}])[-1]
-        previous = {"title": previous.get("title", ""), "gist": previous.get("gist", "")}
+        previous = {key: bounded_text(previous.get(key, ""), 600) for key in ("title", "gist", "focus")}
     now = lines[-1].t if lines else 0
-    recent = [line for line in lines if line.t >= now - seconds][-40:]
+    recent = [line for line in lines if line.t >= now - seconds][-24:]
     if current_only and current_start is not None:
         recent = [line for line in recent if line.t >= current_start]
+    selected, size = [], 0
+    for line in reversed(recent):
+        text = line.text[:500]
+        if size + len(text) > 6500:
+            break
+        if selected and selected[-1].text.strip() == line.text.strip():
+            continue
+        selected.append(line)
+        size += len(text)
+    recent = list(reversed(selected))
     sources = [{"id": f"T{i+1}", "kind": "transcript", "label": f"老师原话 · {line.tc}",
                 "text": line.text[:500]} for i, line in enumerate(recent)]
     return {"session": sid, "title": title, "sources": sources,
@@ -196,7 +207,7 @@ class TopicBoardGate:
             return False
         if key != self.candidate:
             self.candidate, self.since = key, now
-        return key not in self.done and now - self.since >= 2 and now - self.last_attempt >= 30
+        return key not in self.done and now - self.since >= 2 and now - self.last_attempt >= 50
 
     def started(self, now):
         self.last_attempt = now
@@ -204,6 +215,16 @@ class TopicBoardGate:
     def completed(self, key):
         if key:
             self.done.add(key)
+
+
+def local_importance(moment):
+    """Reuse recognized concepts and teacher emphasis; no extra model request."""
+    text = "".join(source["text"] for source in moment.get("sources", [])[-8:])
+    concepts = moment.get("concepts") or []
+    emphasized = any(word in text for word in ("重点", "注意", "关键", "公式", "因此", "为什么", "定义"))
+    important = bool(concepts or emphasized) and len(text) >= 45
+    return {"important": important, "topic": moment.get("current") or moment.get("title", "课堂重点"),
+            "reason": "结合当前知识点与老师原话保留课件；画面内容以视觉模型读取为准"}
 
 
 def judge_importance(moment):
@@ -283,7 +304,7 @@ class ImportanceGate:
     def eligible(self, moment, now):
         text = "".join(s["text"] for s in moment["sources"][-8:])
         return (moment.get("online") and len(text) >= 45 and self.captures < 12
-                and moment.get("end") != self.last_end and now - self.checked_at >= 30
+                and moment.get("end") != self.last_end and now - self.checked_at >= 50
                 and now - self.captured_at >= 90)
 
     def checked(self, moment, now):
