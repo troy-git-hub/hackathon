@@ -10,6 +10,7 @@ from echo.version import VERSION
 
 def redact(text):
     text = str(text)
+    text = re.sub(r"(?i)(https?://)[^/@\s]+@", r"\1[redacted]@", text)
     text = re.sub(r"(?i)(https?://[^\s?'\"]+)\?[^\s'\"]+", r"\1?[redacted]", text)
     text = re.sub(r"(?i)(bearer\s+)[\w.\-]+", r"\1[redacted]", text)
     text = re.sub(r"\b(?:sk-|ghp_|hf_)[A-Za-z0-9_\-]{8,}", "[redacted-key]", text)

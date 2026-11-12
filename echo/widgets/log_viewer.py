@@ -3,7 +3,7 @@ from PyQt5.QtCore import QUrl
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QPlainTextEdit, QFileDialog
 from echo.backend import diagnostics
-from echo.theme import dialog_qss
+from echo.theme import dialog_qss, Colors
 
 
 class LogViewer(QDialog):
@@ -17,6 +17,7 @@ class LogViewer(QDialog):
         label.setWordWrap(True)
         root.addWidget(label)
         self.content = QPlainTextEdit()
+        self.content.setStyleSheet(f'background:{Colors.SURFACE};color:{Colors.TEXT_PRIMARY};border:1px solid {Colors.BORDER};padding:10px;font-family:Consolas,"Microsoft YaHei UI";')
         self.content.setReadOnly(True)
         self.content.setPlainText(diagnostics.report())
         root.addWidget(self.content)
