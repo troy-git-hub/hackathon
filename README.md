@@ -1,9 +1,13 @@
 # Echo — 网课里的 AI 学习副驾驶
 
-## Windows 2.3.0 发布版
+## Windows 2.4.0 发布版
 
 安装包使用 Echo 定制的深色安装界面，可选择路径与桌面快捷方式，默认安装到当前用户目录。
 应用内首次设置模型 API Key；安装包不包含密钥、课程记录或语音模型，语音模型在应用内按需下载。
+
+2.4.0 新增低延迟字幕、带进度与验签的更新中心，以及 Echo 猫 / 声波插画安装界面。
+本地更新服务见 [Docker 服务与版本发布](update-server/README.md)。
+语音包先复用本地缓存，镜像失败后切换官方源；下载失败原因和运行日志可在「设置 → 日志与诊断」查看或导出。
 
 - 源码运行：`python main.py`
 - 发布构建：`python scripts/build_release.py`（独立 worktree，需要 PyInstaller 与 Inno Setup 6.6+）
@@ -151,7 +155,7 @@ EchoBridge (echo/backend/qt_bridge.py) → Qt 信号（带 session 隔离）→ 
 ```bash
 pip install pyinstaller
 python scripts/build_release.py  # 需要已提交的 Git 源码仓库及 Inno Setup
-# 安装包输出 dist/Echo-Setup-2.3.0.exe
+# 安装包输出 dist/Echo-Setup-2.4.0.exe
 # 目录版在 .build/windows/dist/Echo/
 ```
 

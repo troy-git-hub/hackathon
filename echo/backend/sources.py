@@ -19,7 +19,7 @@ SR = 16000
 
 # ================= 切句 + 转写 =================
 class _Segmenter:
-    """按静音切句：说话中遇到 ≥0.5s 静音且已累计 ≥2.5s 就切一段；超过 ASR_CHUNK_SECONDS*2 强制切。"""
+    """Short low-latency slices; the configured maximum is never doubled."""
 
     def __init__(self, on_segment):
         import numpy as np
@@ -28,6 +28,9 @@ class _Segmenter:
         self.buf, self.n, self.silent = [], 0, 0
         self.t0 = 0.0
         self.noise = 0.004   # 自适应噪声底
+        mode = os.getenv("ECHO_CAPTION_MODE", "fast")
+        self.chunk_seconds = {"fast": min(2.4, config.ASR_CHUNK_SECONDS),
+                              "balanced": 3.6, "accurate": 6.0}.get(mode, 2.4)
 
     def feed(self, audio, t_now):
         np = self.np
@@ -42,15 +45,13 @@ class _Segmenter:
             if not self.buf and not loud:
                 continue
             if not self.buf:
-                self.t0 = t_now
+                self.t0 = max(0.0, t_now - (len(audio) - i) / SR)
             self.buf.append(frame)
             self.n += len(frame)
             self.silent = 0 if loud else self.silent + len(frame)
             dur = self.n / SR
-            if (self.silent >= 0.5 * SR and dur >= 2.5) or dur >= config.ASR_CHUNK_SECONDS * 2:
+            if (self.silent >= 0.3 * SR and dur >= 1.2) or dur >= self.chunk_seconds:
                 self.flush()
-            elif self.silent >= 1.0 * SR and dur < 2.5:     # 零碎噪声，丢掉
-                self.buf, self.n, self.silent = [], 0, 0
 
     def flush(self):
         if self.buf:
@@ -59,6 +60,13 @@ class _Segmenter:
 
 
 _HALLUCINATIONS = ("字幕", "订阅", "点赞", "谢谢观看", "请不吝", "Amara", "优优独播")
+
+
+def _is_hallucination(text):
+    # A lesson may legitimately discuss captions/subtitles. Match canned output,
+    # not every sentence containing the word “字幕”.
+    value = text.strip().strip("。！!，, ").lower()
+    return value in {h.lower() for h in _HALLUCINATIONS} or value.startswith(("字幕由", "字幕制作", "请不吝", "优优独播", "amara.org"))
 
 try:
     from opencc import OpenCC
@@ -88,7 +96,7 @@ class _WhisperWorker:
     def load(cls, on_status=None):
         with cls._model_lock:
             if cls._model is None:
-                from faster_whisper import WhisperModel
+                from echo.backend.fast_asr import RealtimeWhisperModel as WhisperModel
                 if on_status:
                     on_status("loading_asr")
                 kw = dict(device=config.WHISPER_DEVICE, compute_type=config.WHISPER_COMPUTE,
@@ -140,25 +148,50 @@ class _WhisperWorker:
                 audio, t = self.q.get(timeout=0.5)
             except queue.Empty:
                 continue
+            # Combine a short pending backlog in one decode instead of paying
+            # model setup overhead per slice. Never throw away lecture audio.
+            import numpy as np
+            while len(audio) / SR < 6 and not self.q.empty():
+                try:
+                    following, _ = self.q.get_nowait()
+                    audio = np.concatenate((audio, following))
+                except queue.Empty:
+                    break
             # 用时间轴上已识别出的知识点当热词，减少同音错字（如「备叶思」→「贝叶斯」）
             hot = []
             for c in self.engine.concepts()[-6:]:
                 hot += [c.topic] + c.concepts[:3]
             try:
-                segs, _ = model.transcribe(
-                    audio, language="zh", beam_size=1, vad_filter=True,
-                    condition_on_previous_text=False,
-                    hotwords=" ".join(dict.fromkeys(hot)) or None,
-                    initial_prompt="以下是普通话的课堂讲解，使用简体中文。" + self._prev[-60:])
-                text = _to_simplified("".join(s.text for s in segs).strip())
+                from echo.backend.fast_asr import realtime_decode
+                with realtime_decode(model, os.getenv("ECHO_CAPTION_MODE", "fast") == "fast"):
+                    text = self._decode(model, audio, t, hot)
             except Exception as e:
                 log.warning("ASR 失败: %s", e)
                 continue
-            if self._stop.is_set():      # 已下课/换课：正在转写的这段不再送进去
+            if self._stop.is_set():
                 break
-            if len(text) > 1 and not any(h in text for h in _HALLUCINATIONS):
+            if len(text) > 1 and not _is_hallucination(text):
                 self._prev = text
                 self.engine.add_transcript(text, t=t, session=self.session)
+
+    def _decode(self, model, audio, t, hot):
+        segs, _ = model.transcribe(
+            audio, language="zh", beam_size=1, best_of=1, temperature=0.0,
+            vad_filter=True, vad_parameters={"min_silence_duration_ms": 250},
+            without_timestamps=False, max_new_tokens=128,
+            condition_on_previous_text=False,
+            hotwords=" ".join(dict.fromkeys(hot)) or None,
+            initial_prompt="以下是普通话的课堂讲解，使用简体中文。课程主题：" + self.engine.title[:80] + "。" + self._prev[-60:])
+        parts = []
+        for segment in segs:
+            if self._stop.is_set():
+                break
+            parts.append(segment.text)
+            partial = _to_simplified("".join(parts).strip())
+            if len(partial) > 1 and not _is_hallucination(partial):
+                from echo.backend.engine import fmt_tc
+                self.engine._emit(self.session, "caption", fmt_tc(t), partial)
+        return _to_simplified("".join(parts).strip())
 
 
 def _resample(audio, sr):

@@ -2,7 +2,7 @@
 ; 先运行 build.bat 生成 dist\Echo\Echo.exe，再用本脚本编译。
 
 #define MyAppName "Echo"
-#define MyAppVersion "2.3.0"
+#define MyAppVersion "2.4.0"
 #define MyAppPublisher "Echo"
 #define MyAppExeName "Echo.exe"
 ; 产物名后缀。build_release.py --with-model 会传 /DMyAppSuffix=-with-model，
@@ -37,7 +37,9 @@ DisableDirPage=yes
 DisableReadyPage=yes
 DisableFinishedPage=no
 UninstallDisplayIcon={app}\{#MyAppExeName}
-CloseApplications=no
+CloseApplications=yes
+CloseApplicationsFilter=Echo.exe
+RestartApplications=no
 SetupLogging=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -47,6 +49,7 @@ PrivilegesRequired=lowest
 Name: "chinesesimp"; MessagesFile: "ChineseSimplified.isl"
 
 [Files]
+Source: "assets\setup-brand.bmp"; Flags: dontcopy
 ; 语音识别模型不再随包分发（483MB 的大头）—— 第一次开课时后台下载到 %APPDATA%\Echo\models
 #ifndef ECHO_PREVIEW
 Source: "..\dist\Echo\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion

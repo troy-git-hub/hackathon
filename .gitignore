@@ -52,3 +52,6 @@ mindmap.json
 /artifacts/
 /.build/
 /exports/
+/update-server/data/
+/updates/
+/logs/

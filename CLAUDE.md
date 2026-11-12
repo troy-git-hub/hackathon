@@ -58,7 +58,7 @@ python scripts/build_release.py --skip-iscc   # 只出 dist/Echo/，不编安装
 ## 测试
 
 ```
-python scripts/accept_check.py     # 全套离线验收；--with-web 追加真实HTML验收（共25项）
+python scripts/accept_check.py     # 全套离线验收；--with-web 追加真实HTML验收（共27项）
 ```
 
 自检脚本**必须**先把 `paths.config_dir` 指到临时目录。不隔离的话会往用户真实的

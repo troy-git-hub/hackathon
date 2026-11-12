@@ -25,6 +25,9 @@ ENV_PATH = paths.ensure_env()
 ENV_EXAMPLE = paths.example_env()
 
 COMBOS = [
+    ("ECHO_CAPTION_MODE", tr("字幕速度", "Caption latency"), ["fast", "balanced", "accurate"],
+     [tr("快速 · 约2.4秒切片", "Fast · ~2.4s slices"), tr("均衡 · 约3.6秒切片", "Balanced · ~3.6s slices"),
+      tr("准确优先 · 约6秒切片", "Accuracy · ~6s slices")]),
     ("ECHO_SOURCE", tr("音频来源", "Audio source"), ["system", "mic"],
      [tr("系统声音（网课/会议）", "System audio (courses / meetings)"), tr("麦克风", "Microphone")]),
     ("ECHO_WHISPER_MODEL", tr("语音识别模型", "Speech recognition model"), ["small", "medium"],
@@ -202,6 +205,17 @@ class SettingsDialog(QDialog):
             self.theme_combo.addItem(title, ident)
         self._select(self.theme_combo, THEME_MODE)
         form.addRow(tr("界面主题（重启生效）：", "Theme (restart required):"), self.theme_combo)
+        from echo.widgets.update_center import DEFAULT_URL
+        self.update_url = QLineEdit(QSettings("Echo", "Echo").value("update_url", DEFAULT_URL, type=str))
+        self.update_url.setPlaceholderText("https://updates.example.com")
+        form.addRow(tr("更新服务地址：", "Update service:"), self.update_url)
+        self.auto_update = QCheckBox(tr("闲置时每天自动检查更新", "Check daily when idle"))
+        self.auto_update.setChecked(QSettings("Echo", "Echo").value("auto_update_check", True, type=bool))
+        form.addRow("", self.auto_update)
+        from echo.version import VERSION
+        self.btn_updates = QPushButton(tr(f"更新中心 · 当前 {VERSION}", f"Update center · {VERSION}"))
+        self.btn_updates.clicked.connect(self._open_update_center)
+        form.addRow("", self.btn_updates)
 
         body.addLayout(form)
 
@@ -226,6 +240,9 @@ class SettingsDialog(QDialog):
         self.btn_export_help.setObjectName("Link")
         self.btn_export_help.clicked.connect(self._export_format_help)
         body.addWidget(self.btn_export_help)
+        self.btn_logs = QPushButton(tr("日志与诊断 · 查看 / 导出", "Diagnostics · view / export"))
+        self.btn_logs.clicked.connect(self._open_logs)
+        body.addWidget(self.btn_logs)
         self._refresh_storage()
 
         btns = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
@@ -264,6 +281,35 @@ class SettingsDialog(QDialog):
         dialogs.info(self, tr("学习档案已导出", "Learning profile exported"),
                      tr(f"已保存到：\n{filename}\n\n已导出 {len(data['selected_sections'])} 项个人数据，不含逐课明细。\n格式：echo.learning-profile / 2.0.0。",
                         f"Saved to:\n{filename}\n\n{len(data['selected_sections'])} personal categories. No per-lesson details.\nFormat: echo.learning-profile / 2.0.0."))
+
+    def _update_controller(self):
+        from echo.widgets.update_center import UpdateController
+        owner = self.parentWidget() or self
+        if not hasattr(owner, "_updates"):
+            owner._updates = UpdateController(owner)
+        return owner._updates
+
+    def _open_logs(self):
+        from echo.widgets.log_viewer import LogViewer
+        LogViewer(self).exec_()
+
+    def _save_update_settings(self):
+        from echo.backend.updater import validate_base_url
+        from echo.widgets.update_center import DEFAULT_URL
+        url = validate_base_url(self.update_url.text())
+        settings = QSettings("Echo", "Echo")
+        if (url != settings.value("update_url", DEFAULT_URL, type=str)
+                or self.auto_update.isChecked() != settings.value("auto_update_check", True, type=bool)):
+            self._update_controller().configure(url, self.auto_update.isChecked())
+
+    def _open_update_center(self):
+        try:
+            self._save_update_settings()
+        except ValueError as exc:
+            from echo.widgets import dialogs
+            dialogs.warn(self, "更新地址不可用", str(exc))
+            return
+        self._update_controller().show()
 
     def _export_format_help(self):
         from echo.widgets import dialogs
@@ -475,6 +521,12 @@ class SettingsDialog(QDialog):
         self._refresh_storage()
 
     def _save(self):
+        try:
+            self._save_update_settings()
+        except ValueError as exc:
+            from echo.widgets import dialogs
+            dialogs.warn(self, "更新地址不可用", str(exc))
+            return
         pid = self.prov.currentData()
         vid = self.vprov.currentData()
         updates = {k: cb.currentData() for k, cb in self.combos.items()}

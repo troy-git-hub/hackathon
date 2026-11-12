@@ -103,6 +103,7 @@ class EchoEngine:
                  use_llm: bool = True,
                  on_event: Callable = None):
         self.on_transcript = on_transcript or (lambda tc, text: None)
+        self.on_caption = lambda tc, text: None
         self.on_concept = on_concept or (lambda c: None)
         self.on_breakpoint = on_breakpoint or (lambda bp, cs: None)
         self.on_echo = on_echo or (lambda r: None)

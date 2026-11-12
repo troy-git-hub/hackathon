@@ -6,6 +6,7 @@ python-dotenv>=1.0
 numpy
 # 实时语音：系统音频 loopback + 本地 Whisper
 pyaudiowpatch>=0.2.12
-faster-whisper>=1.0
+faster-whisper>=1.0,<2
 opencc-python-reimplemented
 sounddevice>=0.4
+cryptography>=44,<47

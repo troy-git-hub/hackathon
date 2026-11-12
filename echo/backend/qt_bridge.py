@@ -25,6 +25,7 @@ log = logging.getLogger("echo.bridge")
 
 class EchoBridge(QObject):
     transcript = pyqtSignal(str, str)        # timecode, text
+    caption = pyqtSignal(str, str)           # early ASR output, not a second transcript
     concept = pyqtSignal(object)             # Concept
     breakpoint = pyqtSignal(object, object)  # BreakPoint, List[Concept]（含断点的时间轴片段）
     echo = pyqtSignal(object)                # EchoReport

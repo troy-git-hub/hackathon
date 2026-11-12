@@ -5,10 +5,6 @@ Echo - 后端配置
 import os
 import sys
 
-# 国内默认走 HF 镜像下载 Whisper 模型
-os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-# 禁用 xet 后端，避免 401 Unauthorized 下载失败
-os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
 try:
     from dotenv import load_dotenv
@@ -19,6 +15,12 @@ try:
     load_dotenv(paths.ensure_env())
 except ImportError:
     pass
+
+# Apply defaults after .env, before importing the Hub SDK.
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "30")
+os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "10")
 
 
 def _int(name, default):
@@ -84,7 +86,11 @@ def whisper_model_path() -> str:
     2. 随程序分发的 models/faster-whisper-small（exe 的 sys._MEIPASS 下）
     3. 都没有 → 返回 HF 模型名（"small"），faster-whisper 会自己去下载到缓存
     """
-    name = "faster-whisper-small"
+    if os.path.isdir(WHISPER_MODEL):
+        return os.path.abspath(WHISPER_MODEL)
+    if WHISPER_MODEL not in ("tiny", "base", "small", "medium", "large-v3"):
+        return WHISPER_MODEL
+    name = "faster-whisper-" + WHISPER_MODEL
     user_dir = os.path.join(user_models_dir(), name)
     if os.path.isfile(os.path.join(user_dir, "model.bin")):
         return user_dir
@@ -126,7 +132,7 @@ WHISPER_THREADS = max(1, _int("ECHO_WHISPER_THREADS", 4))
 os.environ["OMP_NUM_THREADS"] = str(WHISPER_THREADS)
 os.environ["MKL_NUM_THREADS"] = str(WHISPER_THREADS)
 os.environ["DNNL_NUM_THREADS"] = str(WHISPER_THREADS)
-ASR_CHUNK_SECONDS = float(os.getenv("ECHO_ASR_CHUNK", "6"))
+ASR_CHUNK_SECONDS = max(1.2, min(6.0, float(os.getenv("ECHO_ASR_CHUNK", "2.4"))))
 
 # ---------- 界面语言（决定 AI 用哪种语言回答） ----------
 # 后端不能 import echo.i18n —— 它依赖 QSettings，会把 PyQt5 拖进后端的导入链，

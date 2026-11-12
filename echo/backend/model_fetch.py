@@ -14,31 +14,47 @@ import logging
 import os
 import shutil
 import threading
+import json
 
 from echo.backend import config
 
 log = logging.getLogger("echo.model_fetch")
 
-HF_REPO = "Systran/faster-whisper-small"
+HF_REPO = "Systran/faster-whisper-" + config.WHISPER_MODEL
 FILES = ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt")
 # model.bin 483MB，其余三个共 2.7MB —— 用它的字节占比算总进度，误差不到 1%
-MODEL_BIN_BYTES = 483_546_902
+MODEL_BIN_BYTES = {"tiny": 75_000_000, "base": 145_000_000, "small": 483_546_902,
+                   "medium": 1_528_000_000, "large-v3": 3_100_000_000}.get(config.WHISPER_MODEL, 483_546_902)
 TOTAL_BYTES = MODEL_BIN_BYTES + 2_704_000
 
 _lock = threading.Lock()
 _thread = None          # 正在跑的下载线程（同一时刻最多一个）
 _done = False           # 本次会话里已经确认过「模型齐了」，别反复扫盘
-_progress = {"percent": -1, "done": 0, "total": TOTAL_BYTES}      # 最近一次的百分比和字节
+_progress = {"percent": -1, "done": 0, "total": TOTAL_BYTES, "error": "", "source": ""}
 
 
 def model_dir() -> str:
-    return os.path.join(config.user_models_dir(), "faster-whisper-small")
+    if os.path.isdir(config.WHISPER_MODEL):
+        return os.path.abspath(config.WHISPER_MODEL)
+    return os.path.join(config.user_models_dir(), "faster-whisper-" + config.WHISPER_MODEL)
+
+
+def _valid_file(file, name):
+    try:
+        if os.path.getsize(file) < (1024 * 1024 if name == 'model.bin' else 1):
+            return False
+        if name.endswith('.json'):
+            with open(file, encoding='utf-8') as stream:
+                return isinstance(json.load(stream), dict)
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 def is_ready() -> bool:
     """四个文件都在就算齐（只看存在性，不校验内容——坏文件会在加载时报错，走兜底）。"""
     d = model_dir()
-    return all(os.path.isfile(os.path.join(d, f)) for f in FILES)
+    return all(_valid_file(os.path.join(d, f), f) for f in FILES)
 
 
 def percent() -> int:
@@ -50,7 +66,8 @@ def progress() -> dict:
     """给界面用：percent / done / total（字节）。没在下时 percent 为 -1。"""
     return {"percent": _progress["percent"],
             "done": int(_progress.get("done") or 0),
-            "total": int(_progress.get("total") or TOTAL_BYTES)}
+            "total": int(_progress.get("total") or TOTAL_BYTES),
+            "error": _progress.get("error", ""), "source": _progress.get("source", "")}
 
 
 def running() -> bool:
@@ -118,7 +135,7 @@ def ensure(callback=None):
     """模型不齐就后台开始下载。callback(下载到的目录) 完成时回调（后台线程里调）。"""
     global _thread, _done
     with _lock:
-        if _done or is_ready():
+        if is_ready():
             _done = True
             if callback:
                 callback(model_dir())
@@ -128,6 +145,7 @@ def ensure(callback=None):
         _progress["percent"] = 0
         _progress["done"] = 0
         _progress["total"] = TOTAL_BYTES
+        _progress["error"] = ""
         _thread = threading.Thread(target=_run, args=(callback,), daemon=True,
                                    name="echo-model-download")
         _thread.start()
@@ -135,16 +153,42 @@ def ensure(callback=None):
 
 def _run(callback):
     global _done
-    from huggingface_hub import snapshot_download
     try:
-        # max_workers=1：串行下载让进度是线性的，看着不跳
-        path = snapshot_download(
-            repo_id=HF_REPO,
-            local_dir=model_dir(),
-            allow_patterns=list(FILES),
-            max_workers=1,
-            tqdm_class=_progress_tqdm(),
-        )
+        from echo.backend.diagnostics import setup, redact
+        setup()
+        os.environ.setdefault('HF_HUB_DOWNLOAD_TIMEOUT', '30')
+        os.environ.setdefault('HF_HUB_ETAG_TIMEOUT', '10')
+        from huggingface_hub import snapshot_download
+        common = dict(repo_id=HF_REPO, allow_patterns=list(FILES), max_workers=1, tqdm_class=_progress_tqdm())
+        log.info('Speech package requested: model=%s target=%s', config.WHISPER_MODEL, model_dir())
+        path = None
+        try:
+            cached = snapshot_download(local_files_only=True, **common)
+            _materialize(cached)
+            if is_ready():
+                path = cached
+                _progress['source'] = '本地缓存'
+        except Exception:
+            log.info('No complete local speech cache; checking download sources')
+        if path is None:
+            if config.WHISPER_MODEL not in ('tiny', 'base', 'small', 'medium', 'large-v3'):
+                raise RuntimeError('自定义语音模型目录不完整，请检查模型文件')
+            last = None
+            for endpoint in dict.fromkeys((os.getenv('HF_ENDPOINT', 'https://hf-mirror.com'), 'https://huggingface.co')):
+                _progress['source'] = endpoint
+                try:
+                    log.info('Speech download source: %s', endpoint)
+                    candidate = snapshot_download(local_dir=model_dir(), endpoint=endpoint, etag_timeout=10, **common)
+                    _materialize(candidate)
+                    if not is_ready():
+                        raise RuntimeError('下载返回后模型文件不完整')
+                    path = candidate
+                    break
+                except Exception as exc:
+                    last = exc
+                    log.warning('Speech source failed: %s', exc)
+            if path is None:
+                raise last or RuntimeError('没有可用的下载源')
         _materialize(path)
         if not is_ready():
             raise RuntimeError(f"下载完了但文件不在位：{path}")
@@ -157,8 +201,9 @@ def _run(callback):
     except Exception as e:
         _progress["percent"] = -1
         _progress["done"] = 0
-        # 不拦着上课：WhisperModel 还有「从 HF 缓存加载」的兜底；模型这边等下次开课再试
-        log.warning("Whisper 模型下载失败（开课时会再试）: %s", e)
+        from echo.backend.diagnostics import redact
+        _progress['error'] = redact(f'{type(e).__name__}: {e}')[:600]
+        log.exception("Whisper 模型下载失败: %s", e)
 
 
 def _materialize(src: str):
@@ -175,7 +220,7 @@ def _materialize(src: str):
     os.makedirs(dst, exist_ok=True)
     for f in FILES:
         s, d = os.path.join(src, f), os.path.join(dst, f)
-        if os.path.isfile(s) and not os.path.isfile(d):
+        if _valid_file(s, f) and not _valid_file(d, f) and os.path.abspath(s) != os.path.abspath(d):
             shutil.copy2(s, d)
 
 
@@ -186,7 +231,7 @@ def wait_ready(timeout: float = 1800) -> bool:
     白下一份，还跟这里的下载抢带宽。等它下完，从本地目录直接加载一次就好。
     超时返回 False，调用方自己决定要不要走兜底。
     """
-    if _done or is_ready():
+    if is_ready():
         return True
     t = _thread
     if t is None:

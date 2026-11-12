@@ -12,7 +12,7 @@ from echo.backend.mindmap import is_placeholder_topic
 
 FORMAT = "echo.learning-profile"
 SCHEMA_VERSION = "2.0.0"
-APP_VERSION = "2.3.0"
+from echo.version import VERSION as APP_VERSION
 SECTIONS = ("profile", "mastery", "difficulties", "reviews", "preferences")
 
 

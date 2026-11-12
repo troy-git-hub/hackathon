@@ -146,6 +146,7 @@ def run_child(theme, shots):
 
     class FakeBridge(QObject):
         transcript = pyqtSignal(str, str)
+        caption = pyqtSignal(str, str)
         concept = pyqtSignal(object)
         breakpoint = pyqtSignal(object, object)
         echo = pyqtSignal(object)

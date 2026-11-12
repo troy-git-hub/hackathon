@@ -12,6 +12,9 @@ if "--self-test" in sys.argv:
     from echo.release_check import run
     raise SystemExit(run(sys.argv[1:]))
 
+from echo.backend import diagnostics
+diagnostics.setup()
+
 # !!! 必须在 import PyQt5 之前预加载 Whisper 模型 !!!
 # PyQt5 与 ctranslate2 的 native 库加载顺序冲突：先 import PyQt5 再加载 WhisperModel 会访问违例
 # 必须在主线程、QApplication 创建之前、且未 import 任何 PyQt5 模块时加载
@@ -23,15 +26,17 @@ def _preload_whisper():
         os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
         from echo.backend import config
         from echo.backend.sources import _WhisperWorker
-        from faster_whisper import WhisperModel
+        from echo.backend.fast_asr import RealtimeWhisperModel as WhisperModel
         _WhisperWorker._model = WhisperModel(
             config.whisper_model_path(), device=config.WHISPER_DEVICE,
             compute_type=config.WHISPER_COMPUTE,
             cpu_threads=min(config.WHISPER_THREADS, os.cpu_count() or 1),
             local_files_only=True)
         print(f"[Echo] Whisper 预加载完成: {config.WHISPER_MODEL}")
+        __import__('logging').getLogger('echo.asr').info('ASR cache preloaded: %s', config.WHISPER_MODEL)
     except Exception as e:
         print(f"[Echo] Whisper 预加载失败（将在后台重试）: {e}")
+        __import__('logging').getLogger('echo.asr').warning('ASR preload unavailable; background retry: %s', e)
 
 # 在 import PyQt5 之前执行预加载
 _preload_whisper()
@@ -75,6 +80,11 @@ def main():
     win.move(screen.center().x() - win.width() // 2,
              screen.center().y() - win.height() // 2)
     win.show()
+    from echo.widgets.update_center import UpdateController
+    win._updates = UpdateController(win)
+    win._updates.available.connect(lambda version: win._toast(f"Echo {version} 可更新 · 在设置的更新中心查看"))
+    win._updates.start()
+    app.aboutToQuit.connect(win.echo.shutdown)
 
     # 语音识别模型不再随安装包分发。第一次启动问要不要下：前台看进度、后台下，
     # 或者先不下一。已经选过的下次直接按那个来，不再弹。不阻塞窗口。

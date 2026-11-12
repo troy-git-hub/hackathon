@@ -18,14 +18,17 @@ import os
 import sys
 import tempfile
 import time
+import json
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("ECHO_OFFLINE", "1")
 
+_TMP = tempfile.mkdtemp(prefix="echo-model-")
+from echo.backend import paths
+paths.config_dir = lambda: _TMP
 from echo.backend import config, model_fetch          # noqa: E402
 
 FAILED = []
-_TMP = tempfile.mkdtemp(prefix="echo-model-")
 config.user_models_dir = lambda: _TMP
 
 
@@ -41,10 +44,20 @@ def section(t):
 
 def make_files(size=1024):
     d = model_fetch.model_dir()
+    make_files_at(d, 'x', size)
+
+
+def make_files_at(d, prefix='y', size=1024):
     os.makedirs(d, exist_ok=True)
     for f in model_fetch.FILES:
         with open(os.path.join(d, f), "wb") as fh:
-            fh.write(b"x" * size)
+            if f.endswith('.json'):
+                fh.write(json.dumps({'fixture': prefix}).encode())
+            elif f == 'model.bin':
+                fh.write(prefix.encode()*16)
+                fh.truncate(1024*1024)
+            else:
+                fh.write(prefix.encode()*size)
 
 
 def wipe():
@@ -66,7 +79,9 @@ for f in model_fetch.FILES[:-1]:
     open(os.path.join(d, f), "wb").close()
 check("缺一个 -> 不就绪", not model_fetch.is_ready())
 open(os.path.join(d, model_fetch.FILES[-1]), "wb").close()
-check("四个都齐 -> 就绪", model_fetch.is_ready())
+check("四个空文件不能假装已下载", not model_fetch.is_ready())
+make_files()
+check("有效文件齐全 -> 就绪", model_fetch.is_ready())
 
 
 section("B. 没在下时 poll_progress 返回 -1")
@@ -103,7 +118,7 @@ try:
     d = model_fetch.model_dir()
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, "model.bin.incomplete"), "wb") as fh:
-        fh.write(b"x" * (model_fetch.TOTAL_BYTES // 4))     # 约 25%
+        fh.truncate(model_fetch.TOTAL_BYTES // 4)
     pct = model_fetch.poll_progress()
     check("下载中有百分比 (0~99)", 0 <= pct < 100, str(pct))
     check("约两成半的时候报 20%~26%", 20 <= pct <= 26, str(pct))
@@ -160,9 +175,7 @@ section("H. 下载落点不在目标目录时，自己拷过去")
 # 会把文件留在缓存目录、传进去的 local_dir 反而是空的。所以下完必须自己核一遍。
 wipe()
 elsewhere = tempfile.mkdtemp(prefix="echo-hf-land-")
-for f in model_fetch.FILES:
-    with open(os.path.join(elsewhere, f), "wb") as fh:
-        fh.write(b"y" * 16)
+make_files_at(elsewhere)
 check("拷之前目标目录是空的", not model_fetch.is_ready())
 model_fetch._materialize(elsewhere)
 check("拷完就绪", model_fetch.is_ready())

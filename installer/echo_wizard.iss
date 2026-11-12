@@ -1,9 +1,10 @@
-; Echo's own installation flow. Inno handles extraction, rollback and uninstall.
+; Original Echo artwork, with Inno providing safe extraction and uninstall.
 [Code]
 var
   EchoPage: TWizardPage;
   BrandPanel: TPanel;
-  StageTitle, StageHint, BrandStep: TNewStaticText;
+  BrandArt: TBitmapImage;
+  StageTitle, StageHint, BrandStep, Eyebrow: TNewStaticText;
   InstallPath: TNewEdit;
   DesktopChoice: TNewCheckBox;
 
@@ -40,72 +41,78 @@ procedure BrowseEchoFolder(Sender: TObject);
 var Folder: String;
 begin
   Folder := InstallPath.Text;
-  if BrowseForFolder('选择 Echo 的安装位置', Folder, False) then
+  if BrowseForFolder('选择 Echo 的学习角落', Folder, False) then
     InstallPath.Text := AddBackslash(Folder) + 'Echo';
 end;
 
 procedure InitializeWizard;
-var L: TNewStaticText; Browse: TNewButton;
+var Browse: TNewButton;
 begin
   WizardForm.Font.Name := 'Microsoft YaHei UI';
-  WizardForm.ClientWidth := ScaleX(800);
-  WizardForm.ClientHeight := ScaleY(500);
-  WizardForm.Color := $001E1D1B;
-  WizardForm.Caption := 'Echo · 安装';
+  WizardForm.ClientWidth := ScaleX(900);
+  WizardForm.ClientHeight := ScaleY(560);
+  WizardForm.Color := $00262421;
+  WizardForm.Caption := 'Echo · 为下一次听懂，准备好';
   WizardForm.MainPanel.Visible := False;
   WizardForm.WizardBitmapImage.Visible := False;
   WizardForm.WizardBitmapImage2.Visible := False;
   WizardForm.WizardSmallBitmapImage.Visible := False;
   WizardForm.Bevel.Visible := False;
   WizardForm.Bevel1.Visible := False;
-
   BrandPanel := TPanel.Create(WizardForm);
   BrandPanel.Parent := WizardForm;
-  BrandPanel.SetBounds(0, 0, ScaleX(218), ScaleY(500));
-  BrandPanel.Color := $00242622;
+  BrandPanel.SetBounds(0, 0, ScaleX(330), ScaleY(560));
+  BrandPanel.Color := $001B160B;
   BrandPanel.BevelOuter := bvNone;
-  L := EchoText(BrandPanel, 'Echo', 28, 36, 165, 52, 32, $00A7DAFF);
-  L.Font.Style := [fsBold];
-  EchoText(BrandPanel, '听懂这一课。', 30, 105, 158, 40, 15, $00F2F2F2);
-  EchoText(BrandPanel, '跟随知识点的板书'#13#10'讲得清楚的互动演示'#13#10'属于你的学习回响', 30, 176, 160, 110, 11, $00BBB5AD);
-  BrandStep := EchoText(BrandPanel, '01  准备你的学习空间', 30, 346, 166, 58, 11, $00A7DAFF);
-  EchoText(BrandPanel, 'WINDOWS 64-BIT'#13#10'VERSION {#MyAppVersion}', 30, 437, 164, 44, 8, $00928E88);
-
-  StageTitle := EchoText(WizardForm, '欢迎使用 Echo', 250, 32, 510, 40, 23, $00F2F2F2);
+  BrandArt := TBitmapImage.Create(WizardForm);
+  BrandArt.Parent := BrandPanel;
+  BrandArt.SetBounds(0, 0, ScaleX(330), ScaleY(560));
+  BrandArt.Stretch := True;
+  ExtractTemporaryFile('setup-brand.bmp');
+  Log('Echo art extracted');
+  BrandArt.Bitmap.LoadFromFile(ExpandConstant('{tmp}\setup-brand.bmp'));
+  Log('Echo art loaded');
+  BrandStep := EchoText(BrandPanel, '01  /  为新一课留个位置', 29, 491, 276, 25, 10, $00CEEDB7);
+  Eyebrow := EchoText(WizardForm, '01 / HELLO, ECHO.', 366, 30, 495, 24, 9, $00BDE0A9);
+  StageTitle := EchoText(WizardForm, '把 Echo 安顿好，'#13#10'就开始下一课。', 362, 65, 510, 85, 24, $00E9F3F4);
   StageTitle.Font.Style := [fsBold];
-  StageHint := EchoText(WizardForm, '安装好，然后安心听课。', 252, 78, 500, 36, 10, $00BBB5AD);
-  WizardForm.OuterNotebook.SetBounds(ScaleX(250), ScaleY(126), ScaleX(514), ScaleY(294));
-  WizardForm.InnerNotebook.SetBounds(0, 0, ScaleX(514), ScaleY(294));
-  WizardForm.BackButton.SetBounds(ScaleX(412), ScaleY(449), ScaleX(100), ScaleY(34));
-  WizardForm.NextButton.SetBounds(ScaleX(638), ScaleY(449), ScaleX(126), ScaleY(34));
-  WizardForm.CancelButton.SetBounds(ScaleX(526), ScaleY(449), ScaleX(100), ScaleY(34));
-
+  StageHint := EchoText(WizardForm, '你的思路，值得被接住。', 366, 151, 495, 30, 10, $00B4B9B2);
+  WizardForm.OuterNotebook.SetBounds(ScaleX(366), ScaleY(207), ScaleX(500), ScaleY(260));
+  WizardForm.InnerNotebook.SetBounds(0, 0, ScaleX(500), ScaleY(260));
+  WizardForm.BackButton.Visible := False;
+  WizardForm.NextButton.SetBounds(ScaleX(742), ScaleY(505), ScaleX(124), ScaleY(36));
+  WizardForm.CancelButton.SetBounds(ScaleX(628), ScaleY(505), ScaleX(100), ScaleY(36));
+  EchoText(WizardForm, 'ECHO {#MyAppVersion}  /  WINDOWS 64-BIT', 366, 518, 240, 20, 8, $00858D84);
   EchoPage := CreateCustomPage(wpWelcome, '准备安装', '');
-  EchoText(EchoPage.Surface, '安装位置', 0, 4, 480, 26, 11, $00F2F2F2);
+  Log('Echo custom page created');
+  EchoText(EchoPage.Surface, '让 Echo 住在这里', 0, 0, 480, 26, 12, $00E9F3F4);
   InstallPath := TNewEdit.Create(WizardForm);
   InstallPath.Parent := EchoPage.Surface;
-  InstallPath.SetBounds(0, ScaleY(36), ScaleX(410), ScaleY(30));
+  InstallPath.SetBounds(0, ScaleY(36), ScaleX(392), ScaleY(32));
   InstallPath.Text := WizardDirValue;
+  Log('Echo path assigned');
   Browse := TNewButton.Create(WizardForm);
   Browse.Parent := EchoPage.Surface;
-  Browse.SetBounds(ScaleX(420), ScaleY(36), ScaleX(90), ScaleY(30));
-  Browse.Caption := '更改位置';
+  Browse.SetBounds(ScaleX(404), ScaleY(36), ScaleX(94), ScaleY(32));
+  Browse.Caption := '换个位置';
   Browse.OnClick := @BrowseEchoFolder;
   DesktopChoice := TNewCheckBox.Create(WizardForm);
   DesktopChoice.Parent := EchoPage.Surface;
-  DesktopChoice.SetBounds(0, ScaleY(88), ScaleX(500), ScaleY(28));
-  DesktopChoice.Caption := '在桌面创建 Echo 快捷方式';
+  DesktopChoice.SetBounds(0, ScaleY(88), ScaleX(490), ScaleY(28));
+  DesktopChoice.Caption := '在桌面留一个 Echo 入口';
   DesktopChoice.Checked := True;
-  EchoText(EchoPage.Surface, '准备开始新的一课', 0, 150, 500, 28, 14, $00A7DAFF);
-  EchoText(EchoPage.Surface, '首次打开时设置你的模型服务。语音识别组件可在应用内按需下载。'#13#10#13#10'更新安装会保留已有的课程记录与个人设置。', 0, 190, 500, 96, 10, $00BBB5AD);
+  EchoText(EchoPage.Surface, '字幕跟上讲解，板书接住思路。', 0, 143, 490, 30, 12, $00CEEDB7);
+  EchoText(EchoPage.Surface, '语音识别组件可在应用内按需下载。'#13#10'已有的个人资料、课程记录和设置会保留。', 0, 185, 490, 60, 10, $00B4B9B2);
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
 #ifdef ECHO_PREVIEW
-  Result := False;
-  Exit;
+  if CurPageID = EchoPage.ID then begin
+    Result := False;
+    Exit;
+  end;
 #endif
   if CurPageID = EchoPage.ID then begin
     if (Length(Trim(InstallPath.Text)) < 3) or
@@ -121,25 +128,32 @@ begin
   WizardForm.MainPanel.Visible := False;
   WizardForm.BackButton.Visible := False;
   if CurPageID = EchoPage.ID then begin
-    StageTitle.Caption := '让学习，有迹可循。';
-    StageHint.Caption := '选择安装位置，即可开始。';
-    WizardForm.NextButton.Caption := '安装 Echo  →';
-    BrandStep.Caption := '01  准备你的学习空间';
+    WizardForm.NextButton.Caption := '安顿好 Echo  →';
   end else if CurPageID = wpInstalling then begin
-    StageTitle.Caption := '正在准备 Echo';
-    StageHint.Caption := '把工具安顿好，接下来专心听课。';
-    BrandStep.Caption := '02  正在安装';
-    WizardForm.StatusLabel.SetBounds(0, ScaleY(20), ScaleX(500), ScaleY(40));
-    WizardForm.ProgressGauge.SetBounds(0, ScaleY(88), ScaleX(510), ScaleY(12));
+    Eyebrow.Caption := '02 / MAKING ROOM.';
+    StageTitle.Caption := '正在为你，'#13#10'整理一个学习角落。';
+    StageHint.Caption := '稍等一下。下一节课，我们一起听。';
+    BrandStep.Caption := '02  /  把工具安顿好';
+    WizardForm.StatusLabel.SetBounds(0, ScaleY(24), ScaleX(496), ScaleY(40));
+    WizardForm.ProgressGauge.SetBounds(0, ScaleY(100), ScaleX(498), ScaleY(12));
     WizardForm.FilenameLabel.Visible := False;
   end else if CurPageID = wpFinished then begin
-    StageTitle.Caption := '你的学习空间，准备好了。';
-    StageHint.Caption := '欢迎开始下一节课。';
-    BrandStep.Caption := '03  安装完成';
+    Eyebrow.Caption := '03 / YOUR NEXT AHA.';
+    StageTitle.Caption := '准备好了。'#13#10'去听懂下一节课吧。';
+    StageHint.Caption := '每一次“原来如此”，都值得留下。';
+    BrandStep.Caption := '03  /  下一次听懂，见';
     WizardForm.FinishedHeadingLabel.Visible := False;
-    WizardForm.FinishedLabel.SetBounds(0, ScaleY(18), ScaleX(510), ScaleY(84));
-    WizardForm.FinishedLabel.Caption := 'Echo 已安装到你的电脑。'#13#10#13#10'播放网课，让板书、互动讲解和学习回响陪你一起理解。';
-    WizardForm.RunList.SetBounds(0, ScaleY(125), ScaleX(510), ScaleY(65));
-    WizardForm.NextButton.Caption := '完成  →';
+    WizardForm.FinishedLabel.SetBounds(0, ScaleY(18), ScaleX(496), ScaleY(84));
+    WizardForm.FinishedLabel.Caption := 'Echo 已准备就绪。'#13#10#13#10'播放网课，让字幕、板书和学习回响跟上你的思路。';
+    WizardForm.RunList.SetBounds(0, ScaleY(136), ScaleX(496), ScaleY(65));
+    WizardForm.NextButton.Caption := '开始下一课  →';
   end;
 end;
+
+#ifdef ECHO_PREVIEW
+procedure CancelButtonClick(CurPageID: Integer; var Cancel, Confirm: Boolean);
+begin
+  Cancel := True;
+  Confirm := False;
+end;
+#endif

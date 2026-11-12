@@ -59,6 +59,20 @@ def run(argv):
             report["checks"]["local_captions"] = captions.caption.text() == "字幕运行检查"
             captions.close()
             window.echo.engine.active = False
+            from echo.widgets.update_center import UpdateController, UpdateCenter
+            from cryptography.hazmat.primitives.serialization import load_pem_public_key
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+            key = load_pem_public_key(Path(paths.asset("assets", "update-public-key.pem")).read_bytes())
+            updates = UpdateController(window)
+            center = UpdateCenter(updates)
+            report["checks"]["signed_update_ui"] = isinstance(key, Ed25519PublicKey) and center.primary.isEnabled()
+            center.close()
+            from echo.backend.fast_asr import RealtimeWhisperModel
+            report["checks"]["fast_asr_runtime"] = hasattr(RealtimeWhisperModel, "encode")
+            from echo.widgets.log_viewer import LogViewer
+            logs = LogViewer()
+            report["checks"]["diagnostics_ui"] = bool(logs.content.toPlainText())
+            logs.close()
             from echo.widgets.web_lesson import HtmlLesson
             viewer = HtmlLesson()
             report["checks"]["webengine"] = viewer.view is not None

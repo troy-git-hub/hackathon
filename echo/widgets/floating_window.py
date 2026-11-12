@@ -281,6 +281,7 @@ class FloatingWindow(QWidget):
         # 后端：transcript → concept timeline → break point → 回响
         self.echo = EchoBridge(parent=self)
         self.echo.transcript.connect(self._on_transcript)
+        self.echo.caption.connect(self._on_caption)
         self.echo.concept.connect(self._on_concept)
         self.echo.breakpoint.connect(self._on_breakpoint)
         self.echo.echo.connect(self._on_echo)
@@ -1430,12 +1431,14 @@ class FloatingWindow(QWidget):
             QTimer.singleShot(0, self._ask_model_download)
 
     def _ask_model_download(self):
+        from echo.backend import model_fetch
+        size = model_fetch.fmt_bytes(model_fetch.TOTAL_BYTES)
         key = dialogs.choose(
             self,
             tr("下载语音识别模型", "Download the speech model"),
-            tr("听课转写需要一份语音模型，大约 484MB，只下一次，以后离线可用。\n"
+            tr(f"听课转写需要所选语音模型，大约 {size}，只下一次，以后离线可用。\n"
                "现在下，还是先放后台？",
-               "Transcribing a lesson needs a speech model, about 484 MB. "
+               f"Transcribing a lesson needs a speech model, about {size}. "
                "Downloaded once, then it works offline.\n"
                "Download it now, or in the background?"),
             [("bar", tr("现在下载，看进度", "Download now, show progress")),
@@ -1513,8 +1516,8 @@ class FloatingWindow(QWidget):
                 self._toast(tr("语音识别模型下好了，以后离线可用",
                                "Speech model is ready — offline from now on"))
             elif pct < 0:
-                self._toast(tr("语音模型没下完，主页上可以再试",
-                               "Speech model download didn't finish — you can retry from Home"))
+                detail = prog.get('error') or tr('连接中断', 'Connection interrupted')
+                self._toast(tr("语音包下载失败：", "Speech download failed: ") + detail[:150] + tr(" · 设置里可查看日志", " · See diagnostics in Settings"), 10000)
 
         showing = getattr(self, "_model_pct_shown", False)
         if 0 <= pct < 100 and not self._model_bar_on:
@@ -1594,8 +1597,8 @@ class FloatingWindow(QWidget):
         hv = QVBoxLayout(self.model_hint)
         hv.setContentsMargins(Spacing.MD, Spacing.SM, Spacing.MD, Spacing.SM)
         hv.setSpacing(6)
-        hv.addWidget(_label(tr("语音识别模型还没下载，大约 484MB，只下一次。",
-                               "The speech model isn't downloaded yet — about 484 MB, once."),
+        hv.addWidget(_label(tr("所选语音识别模型还没下载，只需下载一次。",
+                               "The selected speech model needs a one-time download."),
                             wrap=True))
         hrow = QHBoxLayout()
         hrow.addStretch()
@@ -3647,6 +3650,11 @@ class FloatingWindow(QWidget):
                                         "Listening — spotting knowledge points shortly…"))
         if self._page == LISTEN:   # 字幕行数会变，每句重新算高度
             self._fit()
+
+    def _on_caption(self, tc, text):
+        self._sync_subtitles(tc, text)
+        self.caption_lbl.setText(text[-120:])
+        self.caption_lbl.show()
 
     def _on_concept(self, c):
         cur = self.echo.engine.current_concept()
