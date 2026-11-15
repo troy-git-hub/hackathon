@@ -1,0 +1,20 @@
+'use strict';
+(()=>{
+const $=s=>document.querySelector(s),say=(s,t)=>{$(s).textContent=t;};
+const node=(tag,text)=>{const n=document.createElement(tag);n.textContent=text;return n;};
+async function api(path,body){const r=await fetch('/api/account/'+path,{method:body?'POST':'GET',credentials:'same-origin',headers:body?{'Content-Type':'application/json','X-Echo-CSRF':'1'}:{},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(45000)});let data;try{data=await r.json();}catch{throw Error('邮件服务暂时不可用。');}if(!r.ok){const e=Error(typeof data.detail==='string'?data.detail:'请求未完成。');e.status=r.status;if(r.status===401)gate(false);throw e;}return data;}
+function gate(ready){$('#mail-login').hidden=ready;$('#mail-workspace').hidden=!ready;$('#mail-logout').hidden=!ready;$('#mail-gate').hidden=true;}
+async function recipients(){const data=await api('admin/mail/recipients');$('#recipients-table').replaceChildren(...data.items.map(item=>{const row=document.createElement('tr');row.append(node('td',item.email),node('td',item.status==='verified'?'已开通':'待验证'),node('td',item.verified_at?new Date(item.verified_at).toLocaleString('zh-CN'):'—'));return row;}));}
+async function deliveries(){const data=await api('admin/mail/deliveries');$('#mail-deliveries').replaceChildren(...data.items.map(item=>{const row=node('div','');row.className='record';row.append(node('strong',item.recipient+' · '+({accepted:'收件服务器已接受',queued:'排队中',failed:'提交失败',unknown:'状态未知'}[item.status]||item.status)),node('p',item.category+' · '+new Date(item.created*1000).toLocaleString('zh-CN')),node('small',item.error||'回执：'+item.id));return row;}));if(!data.items.length)say('#mail-deliveries','暂无发信记录。');}
+async function enter(){const {user}=await api('me');if(user.role!=='admin')throw Error('邮件工作台仅供管理员使用。');gate(true);await Promise.allSettled([recipients().catch(e=>say('#recipient-result',e.message)),deliveries().catch(e=>say('#mail-deliveries',e.message)),api('public/config').then(d=>say('#mail-mode-note',d.mail_mode==='verified'?'免费模式：仅能向已开通的收件邮箱发信。请先发送验证邀请，由收件人点击链接后再发送验证码。':'发信服务已启用。')).catch(e=>say('#mail-mode-note',e.message))]);}
+function form(id,status,work){$(id).addEventListener('submit',async e=>{e.preventDefault();const buttons=[...e.target.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);say(status,'正在处理，请勿重复提交…');try{await work();}catch(error){say(status,error.message);}finally{buttons.forEach(b=>b.disabled=false);}});}
+form('#mail-login-form','#mail-login-status',async()=>{await api('auth/login',{email:$('#mail-login-email').value,password:$('#mail-login-password').value});$('#mail-login-password').value='';await enter();});
+form('#mail-form','#mail-result',async()=>{const data=await api('admin/mail/test',{to:$('#mail-to').value,subject:$('#mail-subject').value,text:$('#mail-text').value});say('#mail-result',data.status==='accepted'?'收件服务器已接受，请检查收件箱和垃圾邮件。':'已提交服务商队列，尚不能确认进入收件箱。');await deliveries();});
+async function verify(email,status){const data=await api('admin/mail/verify-recipient',{email});say(status,data.message);await recipients();}
+form('#recipient-onboard-form','#recipient-result',()=>verify($('#recipient-email').value,'#recipient-result'));
+for(const [id,work,status] of [['#refresh-recipients',recipients,'#recipient-result'],['#refresh-mail',deliveries,'#mail-deliveries'],['#verify-recipient',()=>$('#mail-to').reportValidity()?verify($('#mail-to').value,'#mail-result'):Promise.resolve(),'#mail-result']])$(id).addEventListener('click',async()=>{const b=$(id);b.disabled=true;try{await work();}catch(e){say(status,e.message);}finally{b.disabled=false;}});
+$('#mail-logout').addEventListener('click',async()=>{try{await api('auth/logout',{});gate(false);}catch(e){say('#mail-login-status',e.message);}});
+// Old admin hashes must never select or render an administration dashboard here.
+if(location.hash)history.replaceState(null,'',location.pathname+location.search);
+enter().catch(e=>{gate(false);if(e.status!==401)say('#mail-login-status',e.message);});
+})();

@@ -34,7 +34,8 @@ const server=http.createServer({maxHeaderSize:8192},async(req,res)=>{
     if(name==='/download')name='/download.html';
     if(name==='/updates')name='/updates.html';
     if(name==='/user')name='/user.html';
-    if(name==='/admin'||name==='/mail')name='/admin.html';
+    if(name==='/admin')name='/admin.html';
+    if(name==='/mail')name='/email.html';
     if(name.includes('\\')||name.includes('\0')||name.split('/').some(part=>part.startsWith('.')))return send(404,'Not found');
     const path=resolve(root,'.'+name);
     if(!path.startsWith(root+'/')&&!path.startsWith(root+'\\'))return send(404,'Not found');
