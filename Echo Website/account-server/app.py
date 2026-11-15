@@ -23,6 +23,7 @@ from fastapi import FastAPI, Request, HTTPException, Response
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from jsonschema import Draft202012Validator, FormatChecker
 import billing
+import study
 
 PROFILE_SCHEMA=json.loads(Path(__file__).with_name('learning-profile.schema.json').read_text(encoding='utf-8'))
 PROFILE_VALIDATOR=Draft202012Validator(PROFILE_SCHEMA,format_checker=FormatChecker())
@@ -101,6 +102,7 @@ def initialize():
                 if name not in existing:c.execute('ALTER TABLE '+table+' ADD COLUMN '+name+' '+definition)
         c.execute('CREATE UNIQUE INDEX IF NOT EXISTS ledger_reference ON ledger(reference) WHERE reference IS NOT NULL')
     with db(True) as c:billing.initialize(c)
+    with db() as c:study.initialize(c)
     # Never overwrite a persisted administrator's password during a restart.
     admin = os.environ.get('ECHO_ADMIN_EMAIL', '').strip().lower()
     encoded = os.environ.get('ECHO_ADMIN_PASSWORD_HASH', '')
@@ -154,16 +156,29 @@ async def protect(request, call_next):
         return Response('Origin not allowed', 403)
     if request.method not in ('GET', 'HEAD', 'OPTIONS') and request.headers.get('x-echo-csrf') != '1':
         return Response('Missing request header', 403)
-    max_size = 2*1024*1024 if request.url.path in ('/v1/echo/inference','/v1/me/profiles','/v1/me/sync') else 65536
+    max_size = 5*1024*1024 if request.url.path=='/v1/me/study/materials' else 512*1024 if request.url.path.startswith('/v1/me/study/') else 2*1024*1024 if request.url.path in ('/v1/echo/inference','/v1/me/profiles','/v1/me/sync') else 65536
     try:
         if int(request.headers.get('content-length', '0')) > max_size: return Response('Request too large', 413)
     except ValueError: return Response('Bad length', 400)
-    if request.method not in ('GET','HEAD','OPTIONS'):
-        body = await request.body()
-        if len(body)>max_size: return Response('Request too large',413)
-    response = await call_next(request)
-    response.headers.update({'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'",'Referrer-Policy':'no-referrer'})
-    return response
+    upload_slot=False
+    if request.url.path=='/v1/me/study/materials' and request.method=='POST':
+        try:session_user(request)
+        except HTTPException as exc:return Response(json.dumps({'detail':exc.detail}),exc.status_code,media_type='application/json')
+        if not study.UPLOAD_REQUEST_SLOTS.acquire(False):return Response(json.dumps({'detail':'资料上传繁忙，请稍后重试。'}),429,media_type='application/json',headers={'Retry-After':'5'})
+        upload_slot=True
+    try:
+        if request.method not in ('GET','HEAD','OPTIONS'):
+            chunks=[];size=0
+            async for chunk in request.stream():
+                size+=len(chunk)
+                if size>max_size:return Response('Request too large',413)
+                chunks.append(chunk)
+            request._body=b''.join(chunks)
+        response = await call_next(request)
+        response.headers.update({'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'",'Referrer-Policy':'no-referrer'})
+        return response
+    finally:
+        if upload_slot:study.UPLOAD_REQUEST_SLOTS.release()
 
 def ip(request):
     # Only Nginx/our reverse proxy can reach this container port.
@@ -804,6 +819,7 @@ def admin_requests(request:Request):
 
 from cloud import install as install_cloud
 install_cloud(app,globals())
+study.install(app,globals())
 from admin_release import install as install_admin_release
 install_admin_release(app,globals())
 from release_manager import install as install_release_manager

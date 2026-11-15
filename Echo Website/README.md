@@ -1,6 +1,6 @@
 # Echo Website
 
-自托管官网，Node.js 动态版本 API + 现有 Python 签名更新服务 + Docker Compose + 宿主机 Nginx HTTPS。无 npm 依赖、无登录/上传/数据库入口。网页内容来自项目 README 和真实界面。
+自托管官网，Node.js 动态版本 API + 现有 Python 签名更新服务 + Docker Compose + 宿主机 Nginx HTTPS。网页服务无 npm 依赖；账户服务提供登录、邀请码、加密学习数据、资料上传、每日练习和整卷考试。网页说明来自真实已实现功能。
 
 ## 本机预览
 
@@ -13,9 +13,9 @@
 | 官网 | https://echo.xhbtroy.cn | 127.0.0.1:8088 | 8080 |
 | 更新服务 | https://update.echo.xhbtroy.cn | 127.0.0.1:8787 | 8787 |
 | 版本 API | https://update.echo.xhbtroy.cn/v1/releases/stable/windows-x64 | 同上 | 同上 |
-| 安装包 | https://update.echo.xhbtroy.cn/artifacts/Echo-Setup-2.4.0.exe | 同上 | 同上 |
+| 安装包 | https://update.echo.xhbtroy.cn/artifacts/Echo-Setup-2.4.1.exe | 同上 | 同上 |
 
-只开放 80/443 给网站访客，SSH 22 建议限制为管理者地址。8088/8787 不应开放公网。此官网无需数据库；已有服务器的其他 API/数据库需要先检查再接入，不要改其端口或容器。
+只开放 80/443 给网站访客，SSH 22 建议限制为管理者地址。8088/8787 不应开放公网。账户服务使用受限持久化 SQLite，网页与账户 API 经同源 Nginx 路由。现有其他服务保持原端口和容器。
 
 ## 部署
 

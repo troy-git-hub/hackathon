@@ -51,7 +51,10 @@ def install(app,core):
             for review in snapshot.get('reviews',[]):
                 item=unpack_review(review);key=item['knowledge_id']
                 if key not in reviews or item['reviewed_at']>=reviews[key]['reviewed_at']:reviews[key]=item
+        if core.get('study_material_points'):
+            for point in core['study_material_points'](uid):points[point['id']]=point
         for row in overrides:
+            if row['knowledge_id'].startswith('material:') and row['knowledge_id'] not in points:continue
             item=json.loads(unseal(row['cipher'],'review:'+uid+':'+row['knowledge_id']))
             previous=reviews.get(row['knowledge_id'])
             if not previous or item['reviewed_at']>=previous['reviewed_at']:reviews[row['knowledge_id']]=item
@@ -66,6 +69,7 @@ def install(app,core):
         return {'points':items,'reviews':review_items,'lessons':[{k:v[k] for k in ('id','title','ended_at','duration_seconds','truncated','device_name')} for v in sorted(lessons.values(),key=lambda r:r['ended_at'],reverse=True)],'devices':[{k:r[k] for k in ('id','name','size','revision','updated')} for r in devices],
                 'preferences':pref,'stats':{'knowledge':len(items),'weakness':sum(p['state']=='weakness' for p in items),'strength':sum(p['state']=='strength' for p in items),'due':sum(r['due']<=now() for r in review_items),'saved_lessons':lesson_count,'last_sync':last_sync,'today_reviews':daily[-1]['reviews'],'practice_total':len(practice),'practice_answered':sum(p['answered'] is not None for p in practice),'practice_correct':sum(bool(p['correct']) for p in practice)},
                 'daily':daily,'history':[dict(r) for r in practice],'recent_reviews':[dict(r) for r in events[:30]],'note':'学习状态来自保存记录与复习表现，不等同考试成绩；课程数为设备记录最大值，不重复累加。'}
+    core['study_bundle']=bundle
     def point_for(uid,key):
         data=bundle(uid)
         point=next((p for p in data['points'] if p['id']==key),None)

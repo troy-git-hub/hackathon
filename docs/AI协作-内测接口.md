@@ -46,3 +46,12 @@
 - 保留 echo.exam/1 协议；新增 validate/checkpoint 内部函数，public_paper 不输出答案/解析。主观题 pending，score=null；本地 Beta 未接入整卷主观AI批改，网页不可据此宣称完整自动判卷。
 - 存档失败不提交内存结果；账户切换允许安全关闭；恢复读取最新数据并验证结构；失焦去重、exit 单独记录；过期恢复自动交卷。坏存档不覆写。
 - exam_check、assessment_check、workspace_revision_check 通过，无真实模型请求、无网页浏览器测试。发布会话负责把 exam_check 纳入 accept_check 并统一验证构建快照。
+
+## 网页学习空间前端冻结（2026-11-16）
+
+- 前端已完成user.html、console.js、新study.js/css；没有修改account-server。接口均按 /api/account/me/study 契约，整份preferences保存时保留原每周安排。
+- 手动付费与免费复用分开，资料题目核对confirm后入库，扫描PDF补文字/图片手动视觉解析，5题型作答与revision串行保存、冲突草稿恢复、服务端截止结算、手动主观AI批改均接好。
+- 独立模拟浏览器专项 scripts/web_study_check.cjs 已通过（3hash直达/登录hook/登出清缓存/无自动AI/409无付费回退/上传解析确认/5题型/保存失败重试/冲突恢复/交卷待批手动批改/移动布局）；无真实模型消费。
+- 前端源码就绪可制作部署快照；前端自检不代替后端API测试和生产验证。细节见 网页学习空间-体验与接口.md。部署仍由后端会话负责，不在本会话重复发布。
+
+补充：已接错题免费重做 POST /attempts/id/retry，在结果页/历史列表按wrong_count显示；服务端新快照继续隐藏答案。资料confirm后刷新现有loadWorkspace，连接知识点复习/单题练习。最后web_study_check再次通过，前端已冻结可部署。

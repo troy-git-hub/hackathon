@@ -4,6 +4,7 @@ from decimal import Decimal,InvalidOperation
 
 SCALE=1000
 PURPOSES={'assistant':'通用辅助','blackboard':'AI 黑板','quiz':'出题','grading':'答案批改','classroom':'听课知识分析','catchup':'补课讲解','qa':'课堂答疑','review':'复习','summary':'课堂总结','persona':'学习画像','booklet':'复习小册','problem_solving':'做题解析','vision':'截图识别','web_practice':'网页练习出题'}
+PURPOSES.update(material_parse='资料与试卷解析',daily_quiz='每日小题生成',exam_generate='整卷考试出题',exam_grading='整卷答案批改')
 def points(units):return int(units)/SCALE
 def units(value):
     try:

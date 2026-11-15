@@ -1,6 +1,9 @@
 *
 !app.py
 !cloud.py
+!study.py
+!study_models.py
+!material_parser.py
 !billing.py
 !admin_release.py
 !release_manager.py

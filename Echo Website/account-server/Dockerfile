@@ -4,6 +4,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 COPY cloud.py .
+COPY study.py study_models.py material_parser.py ./
 COPY billing.py .
 COPY admin_release.py .
 COPY release_manager.py .
