@@ -461,8 +461,24 @@ class AccountTests(unittest.TestCase):
         self.assertEqual(response.status_code,200,response.text)
         body['request_id']=uuid.uuid4().hex;body['purpose']='assistant'
         self.assertEqual(self.client.post('/v1/echo/inference',json=body).status_code,400)
+
         body['purpose']='quiz';body['context']['max_tokens']=10001
         self.assertEqual(self.client.post('/v1/echo/inference',json=body).status_code,400)
+
+    def test_admin_hourly_trends_use_real_completed_denominator(self):
+        self.admin()
+        initial=self.client.get('/v1/admin/workspace').json()['timeline']
+        self.assertEqual(len(initial),24)
+        self.assertTrue(all(p['success_rate'] is None for p in initial))
+        with app.db(True) as c:
+            uid=c.execute("SELECT id FROM users WHERE role='admin'").fetchone()[0]
+            for state in ('succeeded','failed','pending'):
+                c.execute('INSERT INTO inference_requests(user_id,request_id,request_hash,task,state,cost,created,input_tokens,output_tokens) VALUES(?,?,?,?,?,?,?,?,?)',(uid,uuid.uuid4().hex,'fixture','text',state,0,app.now(),100 if state=='succeeded' else None,50 if state=='succeeded' else None))
+        point=self.client.get('/v1/admin/workspace').json()['timeline'][-1]
+        self.assertEqual(point['requests'],3);self.assertEqual(point['success_rate'],50)
+        self.assertEqual(point['input_tokens'],100);self.assertEqual(point['output_tokens'],50)
+        self.client.post('/v1/auth/logout',json={})
+        self.assertEqual(self.client.get('/v1/admin/workspace').status_code,401)
 
     def test_milli_point_migration_runs_once_and_admin_model_keys_stay_private(self):
         self.admin()

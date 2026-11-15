@@ -292,4 +292,12 @@ def install(app,core):
             counts['active_users_7d']=c.execute('SELECT count(distinct user_id) FROM sessions WHERE created>=?',(now()-7*86400,)).fetchone()[0]
             counts['mail_failed_24h']=c.execute("SELECT count(*) FROM mail_deliveries WHERE status IN ('failed','unknown') AND created>=?",(now()-86400,)).fetchone()[0]
             usage=[dict(row) for row in c.execute('SELECT state,count(*) AS count FROM inference_requests WHERE created>=? GROUP BY state',(now()-86400,))]
-        return {'stats':counts,'usage_24h':usage,'limits':{'storage_bytes':64*1024*1024,'devices_per_user':5,'profile_bytes':1048576,'ai_concurrent':8},'server_time':now()}
+            hour=now()//3600*3600
+            hourly={row['hour']:dict(row) for row in c.execute("SELECT (created/3600)*3600 AS hour,count(*) AS requests,sum(state='succeeded') AS succeeded,sum(state='failed') AS failed,sum(state='pending') AS pending,coalesce(sum(input_tokens),0) AS input_tokens,coalesce(sum(output_tokens),0) AS output_tokens FROM inference_requests WHERE created>=? GROUP BY hour",(hour-23*3600,))}
+            timeline=[]
+            for stamp in range(hour-23*3600,hour+1,3600):
+                point={'hour':stamp,'requests':0,'succeeded':0,'failed':0,'pending':0,'input_tokens':0,'output_tokens':0,**hourly.get(stamp,{})}
+                finished=point['succeeded']+point['failed']
+                point['success_rate']=round(point['succeeded']/finished*100,1) if finished else None
+                timeline.append(point)
+        return {'stats':counts,'usage_24h':usage,'timeline':timeline,'limits':{'storage_bytes':64*1024*1024,'devices_per_user':5,'profile_bytes':1048576,'ai_concurrent':8},'server_time':now()}
