@@ -16,6 +16,8 @@ class Concept:
     prerequisites: List[str]
     summary: str
     status: str = "ok"     # ok / warn / lost / now
+    board_needed: bool = True
+    board_focus: str = ""
 
 
 @dataclass

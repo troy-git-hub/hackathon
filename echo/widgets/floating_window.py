@@ -63,7 +63,7 @@ LISTEN, MINI, BREAK, LESSON, ECHO, REVIEW, HOME, PRACTICE, DETAIL, MINDMAP, COUR
     PROFILE, ASK, LEARNED, WEEKLY = range(16)
 # 各页内容区宽度（不含阴影与内边距）
 PAGE_WIDTH = {LISTEN: 340, MINI: 300, BREAK: 380, LESSON: 400, ECHO: 380,
-              REVIEW: 380, HOME: 360, PRACTICE: 400, DETAIL: 380, MINDMAP: 480,
+              REVIEW: 380, HOME: 820, PRACTICE: 400, DETAIL: 380, MINDMAP: 480,
               COURSES: 420, RECALL: 400, PROFILE: 380, ASK: 400, LEARNED: 480,
               WEEKLY: 400}
 
@@ -593,14 +593,18 @@ class FloatingWindow(QWidget):
         main_row.setSpacing(Spacing.SM)
         self.btn_lost = _btn(tr("我掉队了", "I fell behind"), "Accent", self._on_lost,
                              tr("Echo 回看最近几分钟，找到你从哪一步开始没听懂", "Echo reviews the last few minutes to find where you lost track"))
-        self.btn_lost.setMinimumHeight(46)
+        self.btn_lost.setMinimumHeight(40)
         main_row.addWidget(self.btn_lost, 1)
         lay.addLayout(main_row)
 
         self.studio_btn = _btn(tr("▤  AI 黑板 · 梳理这段课", "AI board · explain this segment"), "Quiet", self._open_studio,
                                tr("结合老师讲解与圈选课件，把关键步骤讲清楚", "Combine the lesson with an annotated screenshot"))
         self.studio_btn.setMinimumHeight(38)
-        lay.addWidget(self.studio_btn)
+        studio_row = QHBoxLayout()
+        studio_row.addWidget(self.studio_btn,1)
+        self.booklet_btn = _btn(tr('我的小本','My notebook'),'Quiet',lambda:self._open_booklets(current=True))
+        studio_row.addWidget(self.booklet_btn)
+        lay.addLayout(studio_row)
 
         row = QHBoxLayout()
         row.setSpacing(Spacing.SM)
@@ -794,11 +798,11 @@ class FloatingWindow(QWidget):
         row = QHBoxLayout()
         row.setSpacing(Spacing.SM)
         self.btn_fill = _btn(tr("30 秒补上这一步", "Catch up in 30 seconds"), "Accent", self._go_lesson)
-        self.btn_fill.setMinimumHeight(44)
+        self.btn_fill.setMinimumHeight(40)
         row.addWidget(self.btn_fill, 3)
         self.btn_self = _btn(tr("我自己看看", "I'll figure it out"), "Quiet", self._on_self_look,
                              tr("不用 AI 讲，收起来回到课堂", "Skip the AI explanation and go back to class"))
-        self.btn_self.setMinimumHeight(44)
+        self.btn_self.setMinimumHeight(40)
         row.addWidget(self.btn_self, 2)
         lay.addLayout(row)
 
@@ -834,7 +838,7 @@ class FloatingWindow(QWidget):
 
         lay.addSpacing(Spacing.XS)
         self.btn_gotit = _btn(tr("✓  补上了，回到课堂", "✓  Got it, back to class"), "Solid", self._on_fixed)
-        self.btn_gotit.setMinimumHeight(42)
+        self.btn_gotit.setMinimumHeight(40)
         lay.addWidget(self.btn_gotit)
         return page
 
@@ -1587,6 +1591,25 @@ class FloatingWindow(QWidget):
         self.home_sub.setWordWrap(True)
         head.addWidget(self.home_sub)
         lay.addLayout(head)
+        hero = QHBoxLayout()
+        hero.setSpacing(Spacing.MD)
+        self.home_start_panel = QFrame()
+        self.home_start_panel.setObjectName('HomeStart')
+        self.home_start_panel.setStyleSheet(f'QFrame#HomeStart{{background:{Colors.SURFACE};border:1px solid {Colors.BORDER};border-radius:14px;}}')
+        start = QVBoxLayout(self.home_start_panel)
+        start.setContentsMargins(14,12,14,12)
+        start.setSpacing(8)
+        hero.addWidget(self.home_start_panel,3)
+        attention = QHBoxLayout()
+        attention.setSpacing(Spacing.MD)
+        self.home_tools_panel = QWidget()
+        self.home_features_grid = QGridLayout(self.home_tools_panel)
+        self.home_features_grid.setContentsMargins(0,0,0,0)
+        self.home_features_grid.setSpacing(8)
+        self.home_features_grid.setColumnStretch(0,1)
+        self.home_features_grid.setColumnStretch(1,1)
+        self.home_features_grid.setColumnStretch(2,1)
+        self.home_tools_panel.hide()
 
         # 选了「以后再说」才出现。进度条在顶上，这里只负责把下载入口留在主页。
         self.model_hint = QFrame()
@@ -1605,12 +1628,12 @@ class FloatingWindow(QWidget):
         hrow.addWidget(_btn(tr("下载", "Download"), "Quiet", self._ask_model_download))
         hv.addLayout(hrow)
         self.model_hint.setVisible(False)
-        lay.addWidget(self.model_hint)
+        start.addWidget(self.model_hint)
 
         # 「今天该回响」：进门第一眼就该看到的东西。没有到期的知识点时整张卡隐藏，
         # 别拿「今天没有待办」占着最显眼的位置。
         self.home_recall_card = self._recall_card()
-        lay.addWidget(self.home_recall_card)
+        attention.addWidget(self.home_recall_card,1)
 
         # 「你反复卡在 X」：跨课看出来的规律，不是今天的待办。放在「今天该回响」下面
         # —— 两者都在说「你该注意什么」，但这条是慢性的、根子上的问题。
@@ -1641,10 +1664,11 @@ class FloatingWindow(QWidget):
         grow.addWidget(self.gap_btn)
         gv.addLayout(grow)
         self.home_gap_card.setVisible(False)      # 有结论才亮出来
-        lay.addWidget(self.home_gap_card)
+        attention.addWidget(self.home_gap_card,1)
 
         # 开课前先给这节课起个名，下课后在历史里一眼能认出来
-        lay.addWidget(_label(tr("这节课叫什么？", "What's this lesson called?"), CAPTION))
+        start.addWidget(_label(tr("开始下一节课", "Your next lesson"), TITLE))
+        start.addWidget(_label(tr("这节课叫什么？", "What's this lesson called?"), CAPTION))
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText(
             tr("例如：初二数学 · 正比例函数（留空默认用开课时间命名）",
@@ -1655,38 +1679,84 @@ class FloatingWindow(QWidget):
             "font-size: 13px; }"
             f"QLineEdit:focus {{ border-color: {Colors.ACCENT}; }}")
         self.title_edit.returnPressed.connect(self._start_today)
-        lay.addWidget(self.title_edit)
+        start.addWidget(self.title_edit)
 
         self.btn_today = _btn(tr("开始今天的学习", "Start today's learning"), "Accent", self._start_today,
                               tr("开一节新课，Echo 开始听你的网课", "Start a new lesson and Echo will begin listening"))
-        self.btn_today.setMinimumHeight(46)
-        lay.addWidget(self.btn_today)
-        lay.addWidget(_btn(tr("课前资料库 · 准备教材与笔记", "Course library · prepare your notes"),
-                           "Quiet", self._open_library))
+        self.btn_today.setMinimumHeight(40)
+        start.addWidget(self.btn_today)
+        self.home_booklet_card = QFrame()
+        self.home_booklet_card.setObjectName('BookletHero')
+        self.home_booklet_card.setStyleSheet('QFrame#BookletHero{background:transparent;border:0;}')
+        booklet = QVBoxLayout(self.home_booklet_card)
+        booklet.setContentsMargins(0,0,0,0)
+        booklet.setSpacing(8)
+        self.home_notebook_entry = self._home_card(tr('我的小本','My notebook'),
+            tr('收集相关知识，按大类和章节复习','Review related topics by chapter'),tr('打开','Open'),self._open_booklets)
+        booklet.addWidget(self.home_notebook_entry)
+        self.home_exam_entry = self._home_card(tr('考试机 · Beta','Exam machine · Beta'),
+            tr('选择几章知识，合并组卷并独立作答','Combine selected chapters into a complete exam'),tr('进入','Enter'),self._open_exam)
+        booklet.addWidget(self.home_exam_entry)
+        hero.addWidget(self.home_booklet_card,2)
 
         self.home_review_card = self._home_card(
             tr("错题复习", "Review mistakes"), tr("把掉队过的知识点再过一遍", "Go over the points you missed"),
             tr("去复习", "Review"), self._show_review)
-        lay.addWidget(self.home_review_card)
+        self.home_features_grid.addWidget(self.home_review_card,0,0)
         self.home_practice_card = self._home_card(
             tr("错题练习", "Mistake practice"), tr("照着错题出题，离线也能练", "Practise your mistakes, even offline"),
             tr("开始练", "Practice"), self._start_practice)
-        lay.addWidget(self.home_practice_card)
+        self.home_features_grid.addWidget(self.home_practice_card,0,1)
         self.home_courses_card = self._home_card(
             tr("课程管理", "Course manager"), tr("回看、搜索、重命名、批量管理历史课程", "Review, search, rename, and manage past lessons"),
             tr("管理", "Manage"), self._show_courses)
-        lay.addWidget(self.home_courses_card)
+        self.home_features_grid.addWidget(self.home_courses_card,0,2)
         self.home_learned_card = self._home_card(
             tr("已学内容", "Learned so far"),
             tr("所有历史学过的知识点，一张按学科分区的大思维导图", "Every topic you've learned, in one subject-grouped mind map"),
             tr("查看", "View"), self._show_learned)
-        lay.addWidget(self.home_learned_card)
+        self.home_features_grid.addWidget(self.home_learned_card,1,0)
         self.home_weekly_card = self._home_card(
             tr("一周学习回响", "Weekly review"),
             tr("最近 7 天学过的知识点，一页看全", "What you learned in the last 7 days, at a glance"),
             tr("查看", "View"), self._show_weekly)
-        lay.addWidget(self.home_weekly_card)
+        self.home_features_grid.addWidget(self.home_weekly_card,1,1)
+        self.home_account_card = self._home_card(
+            tr("用户中心", "Account center"), tr("自动同步、网页复习与学习点余额", "Cloud sync, web review and learning credits"),
+            tr("打开", "Open"), self._show_account_center)
+        booklet.addWidget(self.home_account_card)
+        self.home_tools_toggle = _btn(tr('更多工具 ▾','More tools ▾'),'Link',self._toggle_home_tools)
+        self.home_tools_toggle.setCheckable(True)
+        lay.addLayout(hero)
+        lay.addLayout(attention)
+        lay.addWidget(self.home_tools_toggle,0,Qt.AlignLeft)
+        lay.addWidget(self.home_tools_panel)
         return page
+
+    def _toggle_home_tools(self):
+        expanded = self.home_tools_toggle.isChecked()
+        self.home_tools_panel.setVisible(expanded)
+        self.home_tools_toggle.setText(tr('收起工具 ▴','Hide tools ▴') if expanded else tr('更多工具 ▾','More tools ▾'))
+        self._fit()
+
+    def _open_exam(self):
+        from echo.widgets.exam_window import open_exam_window
+        self._exam_window = open_exam_window(engine=getattr(getattr(self,'echo',None),'engine',None),parent=self)
+
+    def _open_booklets(self, current=False):
+        from echo.widgets.booklet_window import BookletWindow
+        if not getattr(self,'_booklets',None):
+            self._booklets = BookletWindow(getattr(getattr(self,'echo',None),'engine',None),self)
+        self._booklets.engine = getattr(getattr(self,'echo',None),'engine',None)
+        self._booklets.refresh()
+        self._booklets.show()
+        self._booklets.raise_()
+        if current:
+            QTimer.singleShot(0,lambda:self._booklets.create(current=True))
+
+    def _show_account_center(self):
+        from echo.widgets.account_login import show_account_center
+        show_account_center(self)
 
     def _recall_card(self):
         """主页顶部的「今天该回响」卡：几个知识点要确认 + 当时在哪掉的队 + 预计几分钟。
@@ -1729,14 +1799,16 @@ class FloatingWindow(QWidget):
         card.setStyleSheet(f"QFrame#HomeCard {{ background: {Colors.SURFACE};"
                            f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.MD}px; }}")
         h = QHBoxLayout(card)
-        h.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.MD, Spacing.MD)
+        h.setContentsMargins(10,5,8,5)
         h.setSpacing(Spacing.SM)
         col = QVBoxLayout()
         col.setSpacing(2)
-        t = _label(title, f"color: {Colors.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;")
+        t = _label(title, f"color: {Colors.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;")
         col.addWidget(t)
         d = _label(desc, f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;", wrap=True)
         col.addWidget(d)
+        d.hide()
+        card.setToolTip(desc)
         h.addLayout(col, 1)
         b = _btn(action, "Quiet", slot)
         h.addWidget(b, 0, Qt.AlignVCenter)
@@ -1984,7 +2056,7 @@ class FloatingWindow(QWidget):
         self.home_sub.setText(" · ".join(bits))
         self._sync_model_hint()
         for card in (self.home_courses_card, self.home_learned_card, self.home_weekly_card):
-            card.setVisible(bool(n_lesson))
+            card.setVisible(True)
         self._render_recall_card()
         self._render_gap_card()
 
@@ -2832,7 +2904,12 @@ class FloatingWindow(QWidget):
         self.profile_page = ProfilePage()
         self.profile_page.back_requested.connect(self._leave_profile)
         self.profile_page.avatar_changed.connect(self._on_avatar_changed)
+        self.profile_page.settings_requested.connect(self._open_settings)
         return self.profile_page
+
+    def _open_settings(self):
+        from echo.widgets.settings import open_settings_dialog
+        open_settings_dialog(self)
 
     def _show_profile(self):
         # 切进来要 refresh：统计和头像都可能变了，不刷新显示的是上次的
@@ -3282,6 +3359,9 @@ class FloatingWindow(QWidget):
             self.stack.setMaximumHeight(16777215)
             pl.activate()
             w = PAGE_WIDTH[idx]
+            if idx == HOME:
+                screen_area = (self.screen() or QApplication.primaryScreen()).availableGeometry()
+                w = min(w,max(520,screen_area.width()-100))
             # A long choice must wrap within the viewport, never enlarge the
             # whole stacked page behind a hidden horizontal scrollbar.
             self.stack.setFixedWidth(w)

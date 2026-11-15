@@ -1,5 +1,11 @@
 # Echo — 网课里的 AI 学习副驾驶
 
+[官网](https://echo.xhbtroy.cn/) · [正式版下载](https://echo.xhbtroy.cn/download) · [邀请码内测](https://echo.xhbtroy.cn/beta)
+
+新增版本管理位于官网 `/admin#releases`。正式版 2.4.1 修正公网更新默认地址；内测 2.5.1 为独立安装包，包含紧凑主页、我的小本和考试机 Beta，主观题暂待批改。源码运行不会下载或安装更新。
+
+开发与交接详见 [开发记录](开发记录.md)、[考试机契约](docs/考试机-Beta.md)。
+
 ## Windows 2.4.0 发布版
 
 安装包使用 Echo 定制的深色安装界面，可选择路径与桌面快捷方式，默认安装到当前用户目录。

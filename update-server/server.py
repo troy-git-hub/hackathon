@@ -20,16 +20,28 @@ def create_server(data, host="0.0.0.0", port=8787):
 
         def do_GET(self, head=False):
             path = unquote(urlsplit(self.path).path)
+            if path in ('/v1/releases/stable/windows-x64','/v2/releases/stable/windows-x64'):
+                try:paused=json.loads((root/'control.json').read_text()).get('paused') is True
+                except (OSError,ValueError):paused=False
+                if paused:
+                    self.send_response(503)
+                    self.send_header('Retry-After','3600')
+                    self.send_header('Content-Length','0')
+                    self.end_headers()
+                    return
             if path == "/healthz":
                 self.send_response(200)
                 self.send_header("Content-Length", "2")
                 self.end_headers()
                 if not head: self.wfile.write(b"ok")
                 return
-            if path == "/v1/releases/stable/windows-x64":
+            if path in ("/v1/releases/stable/windows-x64", "/v1/catalog/stable/windows-x64"):
                 file = root / "stable.json"
                 content_type = "application/json; charset=utf-8"
-            elif re.fullmatch(r"/artifacts/Echo-Setup-\d+\.\d+\.\d+\.exe", path):
+            elif path == "/v2/releases/stable/windows-x64":
+                file = root / "stable-v2.json"
+                content_type = "application/json; charset=utf-8"
+            elif re.fullmatch(r"/artifacts/(?:Echo-Setup-\d+\.\d+\.\d+\.exe|Echo-Update-\d+\.\d+\.\d+\.zip)", path):
                 file = root / "artifacts" / path.rsplit("/", 1)[-1]
                 content_type = "application/octet-stream"
             else:
@@ -51,7 +63,7 @@ def create_server(data, host="0.0.0.0", port=8787):
                     if not head:
                         while chunk := stream.read(128 * 1024):
                             self.wfile.write(chunk)
-            except (BrokenPipeError, ConnectionResetError):
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 pass
 
         def log_message(self, format, *args):

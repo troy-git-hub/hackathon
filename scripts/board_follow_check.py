@@ -75,7 +75,7 @@ with patch.object(blackboard, "generate_board", side_effect=generate):
     assert len(calls) == 1  # same knowledge point is not billed repeatedly
     board.focus.setText("用HTML解释为什么是180度")
     board.generate()
-    wait(app, lambda: len(board._boards) == 2)
+    wait(app, lambda: board._boards[0].get('revision') == 1)
     assert board._board["trigger"] == "manual" and board._board["inline_visual"]["html"]
     assert "用HTML" in calls[-1][1]
     assert not board.focus.text()
@@ -89,20 +89,20 @@ with patch.object(blackboard, "generate_board", side_effect=generate):
     board.follow_current()
     board._topic_gate.since -= 3
     board.follow_current()
-    wait(app, lambda: len(board._boards) == 3)
+    wait(app, lambda: len(board._boards) == 2)
     assert board._board["current_topic"] == "外角和"
-    assert len(w.echo.engine.blackboards) == 3
+    assert len(w.echo.engine.blackboards) == 2
 
 # All boards, not just the selected one, survive storage and export.
 ts = store.save_lesson("几何课", [], [], summary="几何课总结", blackboards=board._boards)
 saved = store.get_lesson(ts)
-assert len(saved["blackboards"]) == 3 and saved["blackboards"][0]["inline_visual"]
+assert len(saved["blackboards"]) == 2 and saved["blackboards"][0]["inline_visual"]
 notes = blackboard.lesson_markdown("几何课", "本节总结", ["内角和"], saved["blackboards"])
-assert "本节总结" in notes and "板书 3" in notes and "onclick" in notes
+assert "本节总结" in notes and "板书 2" in notes and "onclick" in notes
 destination = Path(folder) / "lesson.md"
 with patch("echo.widgets.floating_window.QFileDialog.getSaveFileName", return_value=(str(destination), "Markdown (*.md)")):
     w._export_lesson_notes(saved)
-assert "板书 3" in destination.read_text(encoding="utf-8")
+assert "板书 2" in destination.read_text(encoding="utf-8")
 destination = Path(folder) / "lesson.html"
 with patch("echo.widgets.floating_window.QFileDialog.getSaveFileName", return_value=(str(destination), "HTML (*.html)")):
     w._export_lesson_notes(saved)

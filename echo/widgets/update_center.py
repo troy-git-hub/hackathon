@@ -13,7 +13,7 @@ from echo.theme import Colors, dialog_qss, font
 from echo.version import VERSION
 from echo.i18n import tr
 
-DEFAULT_URL = "http://127.0.0.1:8787"
+DEFAULT_URL = "https://update.echo.xhbtroy.cn"
 
 
 class UpdateController(QObject):
@@ -40,6 +40,8 @@ class UpdateController(QObject):
             owner.echo.status.connect(lambda _: self.changed.emit())
 
     def start(self):
+        if not paths.is_frozen():
+            return
         self.poll.start()
         QTimer.singleShot(15000, self.auto_check)
 
@@ -47,9 +49,15 @@ class UpdateController(QObject):
         return bool(getattr(getattr(getattr(self.owner, "echo", None), "engine", None), "active", False))
 
     def url(self):
-        return QSettings("Echo", "Echo").value("update_url", DEFAULT_URL, type=str)
+        settings=QSettings("Echo", "Echo")
+        configured=settings.value("update_url", DEFAULT_URL, type=str)
+        if configured in ("http://127.0.0.1:8787", "http://localhost:8787") and not settings.value('advanced_update_override',False,type=bool):
+            return DEFAULT_URL
+        return configured
 
     def auto_check(self):
+        if not paths.is_frozen():
+            return
         settings = QSettings("Echo", "Echo")
         if self.in_class() or self.state in ("checking", "downloading", "ready", "available"):
             self.changed.emit()
@@ -68,6 +76,7 @@ class UpdateController(QObject):
         self.cancel()
         settings = QSettings("Echo", "Echo")
         settings.setValue("update_url", url)
+        settings.setValue("advanced_update_override", True)
         settings.setValue("auto_update_check", bool(automatic))
         settings.setValue("last_update_check", 0)
         self.info, self.package = None, None
@@ -83,6 +92,10 @@ class UpdateController(QObject):
         self.dialog.activateWindow()
 
     def check(self):
+        if not paths.is_frozen():
+            self.state, self.message = 'disabled', '当前为源码开发版，不检查、下载或安装更新。请通过源码仓库更新。'
+            self.changed.emit()
+            return
         if self.state in ("checking", "downloading"):
             return
         self.generation += 1
@@ -98,6 +111,10 @@ class UpdateController(QObject):
         threading.Thread(target=run, daemon=True, name="echo-update-check").start()
 
     def download(self):
+        if not paths.is_frozen():
+            self.state, self.message = 'disabled', '源码开发版不下载更新。'
+            self.changed.emit()
+            return
         if not self.info or not self.info["available"] or self.state == "downloading":
             return
         self.generation += 1
@@ -162,11 +179,16 @@ class UpdateController(QObject):
             self.changed.emit()
             return
         try:
-            release = updater.verify_manifest(self.info["envelope"])
+            release = updater.verify_for_client(self.info["envelope"])
             if updater.version_tuple(release["version"]) <= updater.version_tuple(VERSION):
                 raise updater.UpdateError("不安装相同或更旧的版本")
             package = updater.verify_package(self.package, release)
-            subprocess.Popen([str(package), "/SP-", "/UPDATE=1", f"/DIR={paths.app_dir()}"], close_fds=True)
+            if release['format']=='echo.update/2':
+                from echo.backend import fast_update
+                staged=fast_update.stage(package,paths.app_dir())
+                fast_update.launch(staged,paths.app_dir(),package.parent)
+            else:
+                subprocess.Popen([str(package), "/SP-", "/UPDATE=1", f"/DIR={paths.app_dir()}"], close_fds=True)
         except Exception as exc:
             self.state, self.message = "error", str(exc)
             self.changed.emit()
@@ -246,8 +268,8 @@ class UpdateCenter(QDialog):
     def render(self):
         c = self.controller
         names = {"idle": "每一次更新，都更靠近听懂", "checking": "正在检查更新", "current": "已是最新版本",
-                 "available": "发现新版本", "downloading": "正在下载", "ready": "更新准备好了", "error": "暂时未能完成", "cancelled": "已暂停"}
-        self.badge.setText(names[c.state])
+                 "available": "发现新版本", "downloading": "正在下载", "ready": "更新准备好了", "error": "暂时未能完成", "cancelled": "已暂停", "disabled":"源码开发版 · 更新已禁用"}
+        self.badge.setText(names.get(c.state,'更新中心'))
         self.description.setText(c.message or "检查更顺畅的字幕、板书与学习体验。")
         release = c.info["release"] if c.info else None
         self.notes.setText((f"Echo {release['version']}\n\n" + "\n".join("• " + n for n in release["notes"])) if release else "更新后保留你的资料、模型设置和学习记录。\n\n可以继续使用当前版本，等方便时再更新。")
@@ -261,7 +283,7 @@ class UpdateCenter(QDialog):
         if c.state in ("error", "cancelled") and c.info and c.info["available"]:
             text = "重试下载"
         self.primary.setText(text)
-        self.primary.setEnabled(c.state not in ("checking", "downloading") and not (c.state == "ready" and (c.in_class() or not paths.is_frozen())))
+        self.primary.setEnabled(paths.is_frozen() and c.state not in ("checking", "downloading", "disabled") and not (c.state == "ready" and c.in_class()))
         if c.state == "ready" and c.in_class():
             self.notice.setText("正在上课，更新已经保留。下课后再安装。")
         elif c.state == "ready" and not paths.is_frozen():

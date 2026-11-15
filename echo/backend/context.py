@@ -35,7 +35,7 @@ def recent_turns(history, max_chars=6000, max_pairs=4):
 class AutomaticBudget:
     """Fair shared spacing for automatic model requests in one lesson."""
     def __init__(self, interval=50):
-        self.interval = max(50, interval)
+        self.interval = max(15, interval)
         self.last = float("-inf")
         self.waiting = []
         self.seen = {}

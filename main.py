@@ -70,6 +70,10 @@ def main():
     from echo.backend import config as backend_config
     backend_config.set_ui_lang(i18n.lang())
 
+    from echo.widgets.account_login import ensure_account
+    if not ensure_account(allow_skip=True):
+        sys.exit(0)
+
     # 第一次打开先填资料（存成 profile.json，以后启动直接读）；关掉不填就不启动
     if not ensure_profile():
         sys.exit(0)
@@ -80,9 +84,21 @@ def main():
     win.move(screen.center().x() - win.width() // 2,
              screen.center().y() - win.height() // 2)
     win.show()
+    from echo.widgets.cloud_sync import CloudSyncController
+    win._cloud=CloudSyncController(win)
+    win._cloud.start()
+    app.aboutToQuit.connect(win._cloud.stop)
     from echo.widgets.update_center import UpdateController
     win._updates = UpdateController(win)
-    win._updates.available.connect(lambda version: win._toast(f"Echo {version} 可更新 · 在设置的更新中心查看"))
+    def offer_update(version):
+        from PyQt5.QtCore import QSettings
+        from echo.widgets import dialogs
+        settings=QSettings('Echo','Echo')
+        if settings.value('update_notice_version','')==version or win._updates.in_class():return
+        settings.setValue('update_notice_version',version)
+        if dialogs.confirm(win,'Echo 有新版本',f'Echo {version} 已可更新。现在查看更新说明并选择下载吗？\n课堂期间不会自动安装。',ok_text='查看更新'):
+            win._updates.show()
+    win._updates.available.connect(offer_update)
     win._updates.start()
     app.aboutToQuit.connect(win.echo.shutdown)
 

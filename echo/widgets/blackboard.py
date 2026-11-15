@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (QApplication, QDialog, QFrame, QHBoxLayout, QLabel,
 from echo.backend import blackboard, awareness, providers, config
 from echo.theme import Colors, apply_native_titlebar
 from echo.widgets.web_lesson import HtmlLesson, step_visual
+from echo.widgets.echo_combo import EchoCombo
 
 
 class DragHeader(QWidget):
@@ -94,6 +95,7 @@ class BlackboardWindow(QDialog):
         self._request = 0
         self._busy = False
         self._capture = None
+        self._pending_image = None
         self._board = None
         self._moment = None
         self._boards = copy.deepcopy(archived if self.archived else getattr(engine, "blackboards", []))
@@ -179,13 +181,13 @@ class BlackboardWindow(QDialog):
         nav.setContentsMargins(0, 0, 0, 0)
         nav.setSpacing(4)
         self.tabs = []
-        for index, title in enumerate(("板书", "演示", "来源")):
+        for index, title in enumerate(("板书", "演示", "来源", "聊天")):
             tab = button(title, lambda i=index: self.show_tab(i), "Chip")
             tab.setCheckable(True)
             nav.addWidget(tab)
             self.tabs.append(tab)
         nav.addStretch()
-        self.history = QComboBox()
+        self.history = EchoCombo()
         self.history.setMinimumContentsLength(4)
         self.history.setMaximumWidth(150)
         self.history.currentIndexChanged.connect(self.select_board)
@@ -294,6 +296,11 @@ class BlackboardWindow(QDialog):
         visual_layout.addLayout(self.visual_host, 1)
         self.splitter.addWidget(self.visual_page)
         self.visual_page.hide()
+        from echo.widgets.board_chat import BoardChat
+        self.chat_page = BoardChat(self.jump_changed_section,self)
+        self.splitter.addWidget(self.chat_page)
+        self.chat_page.hide()
+        self._chat_question = ''
 
         self.composer = QFrame()
         self.composer.setObjectName("Composer")
@@ -380,6 +387,7 @@ class BlackboardWindow(QDialog):
         self.paper.setVisible(index == 0)
         self.visual_page.setVisible(index == 1)
         self.sources_scroll.setVisible(index == 2)
+        self.chat_page.setVisible(index == 3)
         for i, tab in enumerate(self.tabs):
             tab.setChecked(i == index)
         if index == 1:
@@ -395,6 +403,7 @@ class BlackboardWindow(QDialog):
             self.visual_btn.setEnabled(False)
             return
         self.visual_btn.setEnabled(self.active())
+
         if self._visual_view is None:
             self._visual_view = HtmlLesson(self)
             self._visual_view.failed.connect(self.status.setText)
@@ -403,6 +412,12 @@ class BlackboardWindow(QDialog):
         self.visual_label.setText("多角度理解 · 对照依据 · 检查理解" if visual.get("layout") == "guided"
                                   else "探索变化，理解关系" if visual.get("mode") == "ai" else "先梳理脉络，再展开理解")
         self._visual_view.display(visual)
+
+    def jump_changed_section(self,index=None):
+        self.show_tab(0)
+        cards = self.paper.findChildren(QFrame,'StepCard')
+        if index is not None and 0<=index<len(cards):
+            self.scroll.ensureWidgetVisible(cards[index])
 
     def maybe_generate_visual(self):
         board = self._board or {}
@@ -870,6 +885,22 @@ class BlackboardWindow(QDialog):
             self.status.setText("还没听到讲解。可以先圈选课件，或等老师讲几句再整理。")
             return
         self._follow_hold_until = time.monotonic() + 45
+        question = self.focus.text().strip()
+        if question:
+            moment = copy.deepcopy(moment)
+            if self._board:
+                moment['board_context'] = {'title':self._board.get('title',''),'gist':self._board.get('gist',''),
+                    'steps':[{'section':i+1,'heading':step.get('heading',''),'body':step.get('body','')[:450]}
+                             for i,step in enumerate(self._board.get('steps',[])[:5])]}
+                seen = {source.get('text') for source in moment['sources']}
+                for i,source in enumerate(self._board.get('sources',[])[:8]):
+                    if source.get('kind')!='image' and source.get('text') not in seen:
+                        historic = dict(source,id=f'P{i+1}',text=source.get('text','')[:450])
+                        moment['sources'].append(historic)
+            moment['dialogue'] = [{'role':item['role'],'text':item['text'][:600]} for item in self.chat_page.history[-6:]]
+            self._chat_question = question
+            self.chat_page.add('user',question)
+            self.show_tab(3)
         self._start_generation(moment, self.focus.text().strip(), image)
 
     def _start_generation(self, moment, focus, image=None, automatic=False, topic_follow=False):
@@ -905,6 +936,9 @@ class BlackboardWindow(QDialog):
         threading.Thread(target=run, daemon=True, name="echo-lesson-board").start()
 
     def cancel(self):
+        if self._chat_question:
+            self.chat_page.add('assistant','已停止本次回答。问题保留在输入框，可以稍后重试。')
+            self._chat_question = ''
         self._request += 1
         self._busy = False
         self._topic_pending = ""
@@ -928,8 +962,46 @@ class BlackboardWindow(QDialog):
         if not self.active():
             return
         if error:
+            if self._chat_question:
+                self.chat_page.add('assistant','这次还没完成回答：'+error+'。可以保留问题后重试。')
+                self._chat_question = ''
             self._topic_pending = ""
             self.status.setText("这次未能整理：" + error)
+            return
+        editing = bool(self._chat_question and self._board and not result.get('chat_only'))
+        if editing:
+            result['created'] = self._board['created']
+            result['revision'] = self._board.get('revision',0)+1
+            result['revised_at'] = time.time()
+        if self._chat_question:
+            changes = []
+            if not result.get('chat_only'):
+                previous = self._board or {}
+                if previous.get('gist')!=result.get('gist'):
+                    changes.append({'label':'已更新：知识点概览','index':None})
+                before = previous.get('steps',[])
+                for i,step in enumerate(result.get('steps',[])):
+                    if i>=len(before) or any(before[i].get(key)!=step.get(key) for key in ('heading','body')):
+                        changes.append({'label':f"已更新：第{i+1}节 · {step['heading']}",'index':i})
+                if len(before)>len(result.get('steps',[])):
+                    changes.append({'label':'已精简：合并或移除多余步骤','index':None})
+                if previous.get('pitfall')!=result.get('pitfall'):
+                    changes.append({'label':'已更新：容易混淆的地方','index':None})
+                if previous.get('inline_visual')!=result.get('inline_visual') and result.get('inline_visual'):
+                    changes.append({'label':'已更新：板书图解','index':None})
+            reply = result.get('reply') or result.get('gist') or '已根据当前课堂来源整理。'
+            fragment = result.get('reply_html') or (result.get('inline_visual') or {}).get('html')
+            visual = {'title':'看图理解','html':fragment,'mode':'ai'} if fragment else None
+            self.chat_page.add('assistant',reply,changes,visual)
+            awareness.note('qa',self._chat_question,reply)
+            self._chat_question = ''
+            self.show_tab(3)
+        if result.get('chat_only'):
+            self.focus.clear()
+            self._pending_image = None
+            self.remove_capture()
+            self._topic_pending = ''
+            self.status.setText('已在聊天中回复；当前问题不需要新增板书。')
             return
         self._topic_gate.completed(result.get("topic_key"))
         self._topic_pending = ""
@@ -938,11 +1010,19 @@ class BlackboardWindow(QDialog):
                 return
             if not hasattr(self.engine, "blackboards"):
                 self.engine.blackboards = []
-            self.engine.blackboards.append(copy.deepcopy(result))
+            position = next((i for i,b in enumerate(self.engine.blackboards) if editing and b.get('created')==result['created']),None)
+            if position is None:
+                self.engine.blackboards.append(copy.deepcopy(result))
+            else:
+                self.engine.blackboards[position] = copy.deepcopy(result)
             self.engine.blackboards[:] = self.engine.blackboards[-80:]
         awareness.note("board", result.get("focus") or result["title"],
                        result.get("gist", "") + " → ".join(step["heading"] for step in result["steps"]))
-        self._boards.append(result)
+        position = next((i for i,b in enumerate(self._boards) if editing and b.get('created')==result['created']),None)
+        if position is None:
+            self._boards.append(result)
+        else:
+            self._boards[position] = result
         self._boards = self._boards[-80:]
         if self._pending_image:
             self._images[result["created"]] = self._pending_image
@@ -954,7 +1034,7 @@ class BlackboardWindow(QDialog):
         self.remove_btn.hide()
         self.refresh_history()
         self.history.blockSignals(True)
-        self.history.setCurrentIndex(len(self._boards) - 1)
+        self.history.setCurrentIndex(position if position is not None else len(self._boards)-1)
         self.history.blockSignals(False)
         current_key = blackboard.TopicBoardGate.key(blackboard.snapshot(self.engine, seconds=120))
         if result.get("trigger") != "topic" or result.get("topic_key") == current_key:
@@ -983,12 +1063,14 @@ class BlackboardWindow(QDialog):
                 self.status.setText("导出失败：" + str(exc))
 
     def closeEvent(self, event):
+        self.chat_page.stop()
         self.auto_toggle.setChecked(False)
         if self._busy:
             self.cancel()
         super().closeEvent(event)
 
     def reject(self):
+        self.chat_page.stop()
         if self._busy:
             self.cancel()
         super().reject()

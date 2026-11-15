@@ -118,6 +118,7 @@ class EchoEngine:
         # 可选：统一事件出口 on_event(session, name, *args)，给 Qt 桥接在主线程再核对一次 session
         self.on_event = on_event
         self.concept_interval = concept_interval or config.CONCEPT_INTERVAL
+        self._custom_concept_interval = concept_interval
 
         self.llm: Optional[LLM] = None
         self._online_llm: Optional[LLM] = None   # 切离线时先存着，恢复在线再放回来
@@ -143,7 +144,8 @@ class EchoEngine:
         with self._lock:
             self.session += 1
             self.active = False            # 尚未开始上课（拍题/反馈这时不记入课程）
-            self.automatic_budget = AutomaticBudget()
+            self.automatic_budget = AutomaticBudget(config.activity_intervals()[0])
+            self.concept_interval = self._custom_concept_interval or config.activity_intervals()[1]
             self._concept_lock = threading.Lock()   # 每节课一把，旧任务卡住也不会挡新课
             self.start_ts = time.time()
             self.lines: List[Line] = []
@@ -320,7 +322,7 @@ class EchoEngine:
                 data = self.llm.json(prompts.system("CONCEPT_SYSTEM"),
                                      prompts.CONCEPT_USER.format(timeline=timeline or "（暂无）",
                                                                  chunk=chunk),
-                                     max_tokens=700, attempts=1)
+                                     max_tokens=700, attempts=1,purpose='classroom')
             else:
                 data = self._mock_concept(chunk)
             segs = data.get("segments") if isinstance(data.get("segments"), list) else [data]
@@ -347,6 +349,9 @@ class EchoEngine:
                         c.concepts = _merge(c.concepts, seg.get("concepts"))[:6]
                         c.prerequisites = _merge(c.prerequisites, seg.get("prerequisites"))[:4]
                         c.summary = seg.get("summary") or c.summary
+                        if seg.get('board_needed') is True:
+                            c.board_needed = True
+                            c.board_focus = str(seg.get('board_focus') or c.board_focus or topic).strip()[:80]
                     else:
                         # 片段起点：取 LLM 给的时间码，吸附到本段真实句子上，且保持单调递增
                         t = parse_tc(seg.get("start"))
@@ -357,7 +362,9 @@ class EchoEngine:
                         c = Concept(timecode=fmt_tc(t), topic=topic,
                                     concepts=_as_list(seg.get("concepts")),
                                     prerequisites=_as_list(seg.get("prerequisites")),
-                                    summary=str(seg.get("summary") or ""), status="now")
+                                    summary=str(seg.get("summary") or ""), status="now",
+                                    board_needed=seg.get('board_needed', True) is True,
+                                    board_focus=str(seg.get('board_focus') or topic).strip()[:80])
                         self.entries.append(_ConceptEntry(t, c))
                         if prev and prev.concept.status == "now":
                             # 新 concept 入列后，上一个的时间区间才闭合，此时再按反馈定状态

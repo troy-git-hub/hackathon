@@ -44,7 +44,13 @@ VISION_MODEL = os.getenv("ECHO_VISION_MODEL", "deepseek-flash")
 
 # ---------- 课堂引擎 ----------
 # 每隔多少秒把新 transcript 交给 LLM 抽一次 concept
-CONCEPT_INTERVAL = max(50, _int("ECHO_CONCEPT_INTERVAL", 50))
+def activity_intervals():
+    """Shared spacing / concept extraction / automatic board refresh."""
+    return {"active": (20, 25, 30), "balanced": (35, 40, 45), "economy": (50, 60, 70)}.get(
+        os.getenv("ECHO_AI_ACTIVITY", "active"), (20, 25, 30))
+
+
+CONCEPT_INTERVAL = activity_intervals()[1]
 # 新 transcript 至少多少字才值得抽 concept
 CONCEPT_MIN_CHARS = _int("ECHO_CONCEPT_MIN_CHARS", 40)
 # 点「我掉队了」时回看多少秒 transcript

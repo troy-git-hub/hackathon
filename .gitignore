@@ -55,3 +55,7 @@ mindmap.json
 /update-server/data/
 /updates/
 /logs/
+/booklets.json
+/cloud-sync.json
+/exams/
+/.cloud-sync-*.tmp

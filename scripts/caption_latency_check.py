@@ -19,6 +19,9 @@ def main():
         from echo.backend import paths
         paths.config_dir = lambda: folder
         from echo.backend.sources import _Segmenter, _WhisperWorker, SR
+        # Application startup preloads this runtime before classroom decoding.
+        # Exclude a cold native-library import from the partial-caption deadline.
+        from echo.backend.fast_asr import RealtimeWhisperModel, WhisperModel, realtime_decode
         from echo.backend.engine import EchoEngine
         chunks = []
         with patch.dict(os.environ, ECHO_CAPTION_MODE='fast'):

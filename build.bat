@@ -49,6 +49,7 @@ python scripts\freeze_app.py --noconfirm --clean --windowed --name Echo --icon a
   --add-data "assets;assets" ^
   --add-data ".env.example;." ^
   --hidden-import openai ^
+  --hidden-import keyring.backends.Windows ^
   --hidden-import onnxruntime ^
   --hidden-import ctranslate2 ^
   --hidden-import echo.widgets.desk_pet ^

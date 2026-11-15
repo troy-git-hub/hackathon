@@ -8,6 +8,7 @@ import shutil
 import tempfile
 import urllib.parse
 import urllib.request
+import zipfile
 from pathlib import Path
 
 from echo.backend import paths
@@ -51,9 +52,30 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         raise UpdateError("更新服务发生跳转，请检查已配置的服务地址")
 
 
-def _open(url, timeout=15):
+def _open(url, timeout=15, auth_token=None):
+    headers={"User-Agent": "Echo-Updater/1", "Accept-Encoding": "identity"}
+    if auth_token:headers['Authorization']='Bearer '+auth_token
     return urllib.request.build_opener(_NoRedirect()).open(
-        urllib.request.Request(url, headers={"User-Agent": "Echo-Updater/1", "Accept-Encoding": "identity"}), timeout=timeout)
+        urllib.request.Request(url, headers=headers), timeout=timeout)
+
+
+def verify_for_client(envelope, public_key=None):
+    from echo import version
+    if getattr(version,'CHANNEL','stable')!='beta':return verify_manifest(envelope,public_key)
+    from cryptography.hazmat.primitives.serialization import load_pem_public_key
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    try:
+        item=dict(envelope);signature=item.pop('signature')
+        key=load_pem_public_key(public_key or Path(paths.asset('assets','update-public-key.pem')).read_bytes())
+        if not isinstance(key,Ed25519PublicKey):raise ValueError()
+        key.verify(base64.b64decode(signature,validate=True),canonical(item))
+        version_tuple(item['version'])
+        if (item['filename']!='Echo-Beta-Setup-'+item['version']+'.exe' or type(item['size'])!=int
+            or not 1<=item['size']<=MAX_PACKAGE or not re.fullmatch('[a-f0-9]{64}',item['sha256'])
+            or not isinstance(item['notes'],list) or len(item['notes'])>12
+            or any(not isinstance(n,str) or len(n)>400 for n in item['notes'])):raise ValueError()
+        return {**item,'format':'echo.update/1','channel':'beta','platform':'windows-x64'}
+    except Exception as exc:raise UpdateError('内测更新签名或安装包信息无效。') from exc
 
 
 def verify_manifest(envelope, public_key=None):
@@ -74,8 +96,9 @@ def verify_manifest(envelope, public_key=None):
     except Exception as exc:
         raise UpdateError("更新签名校验失败，请勿安装该文件") from exc
     version_tuple(release["version"])
-    if (release["format"] != "echo.update/1" or release["platform"] != "windows-x64" or release["channel"] != "stable"
-            or release["filename"] != f"Echo-Setup-{release['version']}.exe"
+    expected_filename = f"Echo-Update-{release['version']}.zip" if release["format"] == "echo.update/2" else f"Echo-Setup-{release['version']}.exe"
+    if (release["format"] not in ("echo.update/1", "echo.update/2") or release["platform"] != "windows-x64" or release["channel"] != "stable"
+            or release["filename"] != expected_filename
             or type(release["size"]) is not int or not 1 <= release["size"] <= MAX_PACKAGE
             or not isinstance(release["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", release["sha256"])
             or not isinstance(release["notes"], list) or len(release["notes"]) > 12
@@ -86,8 +109,20 @@ def verify_manifest(envelope, public_key=None):
 
 
 def check_update(base, current=VERSION, public_key=None):
+    from echo import version
+    if getattr(version,'CHANNEL','stable')=='beta':
+        from echo.backend import account
+        envelope=account.request('/v1/beta/update')
+        release=verify_for_client(envelope,public_key)
+        return {'available':version_tuple(release['version'])>version_tuple(current),'release':release,'envelope':envelope}
     base = validate_base_url(base)
-    with _open(base + MANIFEST_PATH) as response:
+    import urllib.error
+    try:
+        response = _open(base + '/v2/releases/stable/windows-x64')
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404: raise
+        response = _open(base + MANIFEST_PATH)
+    with response:
         raw = response.read(65537)
     if len(raw) > 65536:
         raise UpdateError("更新信息过大")
@@ -95,7 +130,7 @@ def check_update(base, current=VERSION, public_key=None):
         envelope = json.loads(raw)
     except (ValueError, UnicodeError) as exc:
         raise UpdateError("更新服务返回了无法读取的信息") from exc
-    release = verify_manifest(envelope, public_key)
+    release = verify_for_client(envelope, public_key)
     return {"available": version_tuple(release["version"]) > version_tuple(current), "release": release, "envelope": envelope}
 
 
@@ -107,15 +142,24 @@ def verify_package(path, release):
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     if digest != release["sha256"]:
         raise UpdateError("安装包校验失败，请重新下载")
-    with path.open("rb") as stream:
-        if stream.read(2) != b"MZ":
-            raise UpdateError("下载的文件不是 Windows 安装程序")
+    _verify_header(path, release)
     return path
+
+
+def _verify_header(path, release):
+    if release['format']=='echo.update/2':
+        from echo.backend.fast_update import inspect_archive
+        try: inspect_archive(path)
+        except (ValueError, OSError, zipfile.BadZipFile, RuntimeError) as exc:
+            raise UpdateError('快速更新包校验失败：'+str(exc)) from exc
+    else:
+        with Path(path).open('rb') as stream:
+            if stream.read(2)!=b'MZ':raise UpdateError('下载的文件不是 Windows 安装程序')
 
 
 def download_update(base, envelope, destination, progress=lambda done, total: None, cancelled=lambda: False, public_key=None):
     base = validate_base_url(base)
-    release = verify_manifest(envelope, public_key)
+    release = verify_for_client(envelope, public_key)
     folder = Path(destination).resolve()
     folder.mkdir(parents=True, exist_ok=True)
     target = folder / release["filename"]
@@ -133,7 +177,12 @@ def download_update(base, envelope, destination, progress=lambda done, total: No
     try:
         with tempfile.NamedTemporaryFile(dir=folder, prefix=".echo-update-", suffix=".part", delete=False) as output:
             temporary = Path(output.name)
-            with _open(base + "/artifacts/" + release["filename"], timeout=20) as response:
+            if release['channel']=='beta':
+                from echo.backend import account
+                if not account.token():raise UpdateError('请先登录内测账户再下载更新。')
+                response=_open(account.API_ORIGIN+'/v1/beta/download',timeout=20,auth_token=account.token())
+            else:response=_open(base + '/artifacts/' + release['filename'],timeout=20)
+            with response:
                 received = 0
                 while True:
                     if cancelled():
@@ -152,9 +201,7 @@ def download_update(base, envelope, destination, progress=lambda done, total: No
         with temporary.open("rb") as stream:
             if hashlib.file_digest(stream, "sha256").hexdigest() != release["sha256"]:
                 raise UpdateError("下载校验失败，文件未保存为安装包")
-        with temporary.open("rb") as stream:
-            if stream.read(2) != b"MZ":
-                raise UpdateError("下载的文件不是 Windows 安装程序")
+        _verify_header(temporary, release)
         os.replace(temporary, target)
         verify_package(target, release)
         return target

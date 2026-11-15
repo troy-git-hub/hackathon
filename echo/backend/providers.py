@@ -49,6 +49,7 @@ def preset(pid: str):
 
 
 def label(pid: str, en: bool = False) -> str:
+    if pid == 'echo':return 'Echo account' if en else 'Echo 账户服务'
     p = preset(pid)
     return p[2] if en else p[1]
 
@@ -75,6 +76,9 @@ def _current(spec):
 
 def text() -> dict:
     """当前文本模型。返回 id / api_key / base_url / model。"""
+    from echo.backend import account
+    if account.managed_models():
+        return {'id':'echo','api_key':account.token(),'base_url':account.API_ORIGIN+'/v1','model':'echo-text'}
     explicit = _env("ECHO_LLM_PROVIDER")
     if explicit:
         p = preset(explicit)
@@ -101,6 +105,9 @@ def text() -> dict:
 
 def vision() -> dict:
     """统一视觉设置；仅在未使用新提供商设置时兼容旧百炼配置。"""
+    from echo.backend import account
+    if account.managed_models():
+        return {'id':'echo','api_key':account.token(),'base_url':account.API_ORIGIN+'/v1','model':'echo-vision'}
     explicit = _env("ECHO_VISION_PROVIDER")
     if explicit and explicit != "same":
         p = preset(explicit)
@@ -169,6 +176,10 @@ def configured(spec: dict = None) -> bool:
 
 
 def client(spec: dict, retries: int = 0):
+    if spec['id']=='echo':
+        if not spec['api_key']:return None
+        from echo.backend.account_models import EchoModelClient
+        return EchoModelClient()
     from openai import OpenAI
 
     from echo.backend import config
@@ -177,4 +188,5 @@ def client(spec: dict, retries: int = 0):
     if not key:
         return None
     return OpenAI(api_key=key, base_url=spec["base_url"] or None,
-                  timeout=config.LLM_TIMEOUT, max_retries=retries)
+                  timeout=config.LLM_TIMEOUT, max_retries=retries,
+                  default_headers={'X-Echo-CSRF':'1'} if spec['id']=='echo' else None)

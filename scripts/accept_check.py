@@ -22,10 +22,16 @@ SCRIPTS = ROOT / "scripts"
 
 def suite(with_tray, with_ai, with_web=False):
     steps = [
+        ("考试机 Beta（整卷 / 事务存档 / 退出恢复 / 账户隔离）", ["exam_check.py"], "隔离数据，不调用真实模型"),
+        ("内测更新渠道（认证 / 签名 / 正式隔离）", ["beta_update_check.py"], "测试密钥与模拟网络"),
+        ("主页与复习小册（双列 / 设置 / 聊天 / 主AI板书决策）", ["workspace_revision_check.py"], "隔离数据，不调用真实模型"),
         ("低延迟字幕（短切片 / 首段即显 / 不重复入库）", ["caption_latency_check.py"], "合成音频，不采集麦克风"),
         ("更新服务与界面（验签 / 下载 / 取消 / 上课保护）", ["update_check.py"], "临时HTTP服务与测试密钥"),
         ("字幕与调用节流（本地转写 / 50秒 / 上下文 / 截图排除）", ["lesson_features_check.py"], "不调用真实模型"),
         ("学习档案导出（JSON / 隐私 / 数据关联 / 设置按钮）", ["learning_export_check.py"], "隔离数据，不调用模型"),
+        ("账户模式（凭据库 / 登录 / 跳过 / 高级设置）", ["account_client_check.py"], "隔离凭据库，不调用网络"),
+        ("账户登录框（6 主题 / 滚动背景 / 短屏注册）", ["account_visual_check.py"], "隔离数据与渲染"),
+        ("云端同步（账户隔离 / 合并 / 暂停 / 重试）", ["cloud_sync_check.py"], "隔离数据与模拟网络"),
         ("演示教学设计（阅读角度 / 对照 / 统一风格）", ["lesson_design_check.py"], "不调用真实模型"),
         ("课堂多题型（轮换 / AI 批改 / 长文本换行）", ["checkin_types_check.py"], "不调用真实模型"),
         ("已学内容（课程分支 / 依赖分层 / 聚焦）", ["learned_map_check.py"], "不调用真实模型"),

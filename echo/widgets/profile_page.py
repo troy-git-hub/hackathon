@@ -59,6 +59,7 @@ class ProfilePage(QWidget):
 
     back_requested = pyqtSignal()
     avatar_changed = pyqtSignal(str)          # 换过头像（参数是新路径，空=默认喵喵）
+    settings_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -114,6 +115,8 @@ class ProfilePage(QWidget):
         self.btn_rename = _btn(tr("改称呼", "Rename"), "Quiet", self._rename,
                                tr("开机问候和这一页用的名字", "The name Echo greets you with"))
         row.addWidget(self.btn_rename)
+        self.btn_settings = _btn(tr("设置", "Settings"), "Quiet", self.settings_requested.emit)
+        row.addWidget(self.btn_settings)
         # 没设过自定义头像时，这个按钮没意义，自己藏起来
         self.btn_default = _btn(tr("用默认喵喵", "Use the default cat"), "Quiet",
                                 self._use_default)

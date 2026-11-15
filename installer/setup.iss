@@ -1,8 +1,12 @@
 ; Echo 安装包脚本（Inno Setup 6）
 ; 先运行 build.bat 生成 dist\Echo\Echo.exe，再用本脚本编译。
 
-#define MyAppName "Echo"
-#define MyAppVersion "2.4.0"
+#ifndef MyAppName
+  #define MyAppName "Echo"
+#endif
+#ifndef MyAppVersion
+  #define MyAppVersion "2.4.0"
+#endif
 #define MyAppPublisher "Echo"
 #define MyAppExeName "Echo.exe"
 ; 产物名后缀。build_release.py --with-model 会传 /DMyAppSuffix=-with-model，
@@ -24,7 +28,11 @@ OutputDir=..\dist
 #ifdef ECHO_PREVIEW
 OutputBaseFilename=Echo-Installer-Preview
 #else
+#ifdef ECHO_BETA
+OutputBaseFilename=Echo-Beta-Setup-{#MyAppVersion}
+#else
 OutputBaseFilename=Echo-Setup-{#MyAppVersion}{#MyAppSuffix}
+#endif
 #endif
 SetupIconFile=..\assets\echo.ico
 Compression=lzma2/normal

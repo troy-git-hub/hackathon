@@ -16,7 +16,11 @@ end;
 function EchoAppId(Param: String): String;
 begin
   if IsQAInstall then Result := 'Echo.ReleaseVerification.2.2'
+#ifdef ECHO_BETA
+  else Result := '{F75837B7-7CF6-4738-9B7F-DC8621829B1C}';
+#else
   else Result := '{7C1F9A3E-0E4B-4A5C-9E2D-1B3A5F6C8D9E}';
+#endif
 end;
 
 function WantDesktopIcon: Boolean;

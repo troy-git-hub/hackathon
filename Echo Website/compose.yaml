@@ -1,0 +1,48 @@
+name: echo-web
+services:
+  website:
+    build: .
+    environment:
+      UPDATE_ORIGIN: http://updates:8787
+    ports: ["127.0.0.1:8088:8080"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    mem_limit: 96m
+    cpus: 0.5
+    pids_limit: 80
+    networks: [echo]
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+  updates:
+    build: ../update-server
+    ports: ["127.0.0.1:8787:8787"]
+    volumes: ["../update-server/data:/data:ro"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    mem_limit: 64m
+    cpus: 0.5
+    pids_limit: 80
+    networks: [echo]
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+  accounts:
+    build: ./account-server
+    env_file:
+      - path: ../secrets/account.env
+        format: raw
+    ports: ["127.0.0.1:9090:9090"]
+    volumes: ["../account-data:/data", "../private-releases:/releases", "../update-server/data:/update-data", "../update-server/data/artifacts:/update-data/artifacts:ro"]
+    read_only: true
+    tmpfs: ["/tmp:size=8m,noexec,nosuid"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    mem_limit: 192m
+    cpus: 0.5
+    pids_limit: 80
+    networks: [echo]
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+networks:
+  echo:

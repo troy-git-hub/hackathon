@@ -57,7 +57,10 @@ document.querySelector('#prev').onclick=()=>show(Math.max(0,index-1));document.q
 def sandbox_document(fragment):
     palette = {"bg": Colors.WINDOW_BG, "surface": Colors.SURFACE, "text": Colors.TEXT_PRIMARY,
                "muted": Colors.TEXT_SECONDARY, "accent": Colors.ACCENT, "border": Colors.BORDER_STRONG,
-               "accent-soft": Colors.ACCENT_SOFT, "on-accent": Colors.ON_ACCENT}
+               "accent-soft": Colors.ACCENT_SOFT, "on-accent": Colors.ON_ACCENT,
+               "series-blue":"#63a9e8", "series-orange":"#d99442", "series-green":"#4fa985",
+               "series-blue-soft":"rgba(75,140,210,.16)", "series-orange-soft":"rgba(220,155,70,.16)",
+               "series-green-soft":"rgba(70,170,125,.16)"}
     variables = ";".join(f"--{key}:{value}" for key, value in palette.items())
     policy = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
               "img-src data:; connect-src 'none'; font-src 'none'; frame-src 'none'; "

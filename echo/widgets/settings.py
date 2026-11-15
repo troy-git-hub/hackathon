@@ -25,6 +25,9 @@ ENV_PATH = paths.ensure_env()
 ENV_EXAMPLE = paths.example_env()
 
 COMBOS = [
+    ("ECHO_AI_ACTIVITY", tr("课堂 AI 频率", "Lesson AI frequency"), ["active", "balanced", "economy"],
+     [tr("积极 · 20秒起，更多调用", "Active · from 20s, more calls"),
+      tr("均衡 · 35秒起", "Balanced · from 35s"), tr("节省 · 50秒起", "Economy · from 50s")]),
     ("ECHO_CAPTION_MODE", tr("字幕速度", "Caption latency"), ["fast", "balanced", "accurate"],
      [tr("快速 · 约2.4秒切片", "Fast · ~2.4s slices"), tr("均衡 · 约3.6秒切片", "Balanced · ~3.6s slices"),
       tr("准确优先 · 约6秒切片", "Accuracy · ~6s slices")]),
@@ -152,9 +155,8 @@ class SettingsDialog(QDialog):
         title = QLabel(tr("Echo 设置", "Echo Settings"))
         title.setFont(font(16, 600))
         body.addWidget(title)
-        sub = QLabel(tr("选一家，贴上 Key 就能用。模型名不用改，除非你想换。Key 只存在本机。",
-                        "Pick a provider and paste the key. Leave the model name unless you "
-                        "want a different one. The key stays on this computer."))
+        sub = QLabel(tr("默认使用 Echo 账户服务。自己的模型 API 与更新地址可在高级设置中调整。",
+                        "Echo account services are the default. Custom model APIs and the update URL are in Advanced settings."))
         sub.setStyleSheet(f"color:{Colors.TEXT_SECONDARY}; font-size:12px;")
         sub.setWordWrap(True)
         body.addWidget(sub)
@@ -170,7 +172,12 @@ class SettingsDialog(QDialog):
         self.user_edit.setFont(font(12))
         form.addRow(tr("用户：", "User:"), self.user_edit)
 
-        self._build_providers(form)
+        self.advanced_widget = QWidget()
+        advanced_form = QFormLayout(self.advanced_widget)
+        self.custom_api = QCheckBox(tr("使用自己的模型 API（高级）", "Use my own model API (advanced)"))
+        self.custom_api.setChecked(os.getenv('ECHO_ACCOUNT_GUEST')=='1' or self._kv.get('ECHO_ACCOUNT_CUSTOM_API','0') == '1')
+        advanced_form.addRow('', self.custom_api)
+        self._build_providers(advanced_form)
 
         self.combos = {}
         for key, label, values, labels in COMBOS:
@@ -206,9 +213,13 @@ class SettingsDialog(QDialog):
         self._select(self.theme_combo, THEME_MODE)
         form.addRow(tr("界面主题（重启生效）：", "Theme (restart required):"), self.theme_combo)
         from echo.widgets.update_center import DEFAULT_URL
-        self.update_url = QLineEdit(QSettings("Echo", "Echo").value("update_url", DEFAULT_URL, type=str))
-        self.update_url.setPlaceholderText("https://updates.example.com")
-        form.addRow(tr("更新服务地址：", "Update service:"), self.update_url)
+        update_settings = QSettings("Echo", "Echo")
+        configured_url = update_settings.value("update_url", DEFAULT_URL, type=str)
+        if configured_url in ('http://127.0.0.1:8787','http://localhost:8787') and not update_settings.value('advanced_update_override',False,type=bool):
+            configured_url=DEFAULT_URL
+        self.update_url = QLineEdit(configured_url)
+        self.update_url.setPlaceholderText("https://update.echo.xhbtroy.cn")
+        advanced_form.addRow(tr("更新服务地址：", "Update service:"), self.update_url)
         self.auto_update = QCheckBox(tr("闲置时每天自动检查更新", "Check daily when idle"))
         self.auto_update.setChecked(QSettings("Echo", "Echo").value("auto_update_check", True, type=bool))
         form.addRow("", self.auto_update)
@@ -216,8 +227,29 @@ class SettingsDialog(QDialog):
         self.btn_updates = QPushButton(tr(f"更新中心 · 当前 {VERSION}", f"Update center · {VERSION}"))
         self.btn_updates.clicked.connect(self._open_update_center)
         form.addRow("", self.btn_updates)
+        self.btn_library = QPushButton(tr("知识库 · 教材、讲义与笔记", "Knowledge library · course references"))
+        self.btn_library.clicked.connect(self._open_library)
+        form.addRow("", self.btn_library)
 
         body.addLayout(form)
+        self.account_button = QPushButton(tr("用户中心 · 账户与学习点", "Account center · learning credits"))
+        self.account_button.clicked.connect(self._open_account_center)
+        body.addWidget(self.account_button)
+        from echo.backend import cloud_sync
+        self.cloud_auto=QCheckBox(tr('这台设备自动同步学习档案（登录后生效）','Automatically sync learning data when signed in'))
+        self.cloud_auto.setChecked(cloud_sync.status()['enabled'])
+        body.addWidget(self.cloud_auto)
+        self.cloud_sync_now=QPushButton(tr('立即同步到云端','Sync to cloud now'))
+        self.cloud_sync_now.clicked.connect(self._sync_cloud_now);body.addWidget(self.cloud_sync_now)
+        self.cloud_sync_status=QLabel('');self.cloud_sync_status.setWordWrap(True);body.addWidget(self.cloud_sync_status)
+        cloud_note=QLabel(tr('知识掌握与复习进度会同步到网页；不上传密钥、录音、截图和原始课件。','Syncs learning indicators and review progress, excluding keys, recordings, screenshots and source materials.'))
+        cloud_note.setWordWrap(True);cloud_note.setStyleSheet(f'color:{Colors.TEXT_SECONDARY};font-size:11px;');body.addWidget(cloud_note)
+        self.advanced_toggle = QPushButton(tr("高级设置 · 模型 API 与更新地址", "Advanced · model APIs and update URL"))
+        self.advanced_toggle.setCheckable(True)
+        self.advanced_toggle.toggled.connect(self.advanced_widget.setVisible)
+        body.addWidget(self.advanced_toggle)
+        body.addWidget(self.advanced_widget)
+        self.advanced_widget.hide()
 
         # 存储：攒了多少东西 + 一键清空
         body.addSpacing(4)
@@ -292,6 +324,32 @@ class SettingsDialog(QDialog):
     def _open_logs(self):
         from echo.widgets.log_viewer import LogViewer
         LogViewer(self).exec_()
+
+    def _open_library(self):
+        from echo.widgets.learning_studio import KnowledgeLibrary
+        KnowledgeLibrary(self).exec_()
+
+    def _open_account_center(self):
+        from echo.widgets.account_login import show_account_center
+        show_account_center(self)
+
+    def _sync_cloud_now(self):
+        import threading
+        from echo.backend import cloud_sync
+        from echo.widgets.account_login import _Result
+        try:cloud_sync.configure(enabled=self.cloud_auto.isChecked())
+        except Exception as exc:self.cloud_sync_status.setText(str(exc));return
+        self.cloud_sync_now.setEnabled(False);self.cloud_sync_status.setText(tr('正在同步…','Syncing…'))
+        self._cloud_bus=_Result(self)
+        def finished(kind,value,error):
+            self.cloud_sync_now.setEnabled(True);self.cloud_sync_status.setText(error or value.get('message',''))
+        self._cloud_bus.done.connect(finished);bus=self._cloud_bus
+        def run():
+            try:value=cloud_sync.sync_once();error=''
+            except Exception as exc:value={};error=str(exc)
+            try:bus.done.emit('sync',value,error)
+            except RuntimeError:pass
+        threading.Thread(target=run,daemon=True,name='echo-settings-sync').start()
 
     def _save_update_settings(self):
         from echo.backend.updater import validate_base_url
@@ -531,6 +589,7 @@ class SettingsDialog(QDialog):
         vid = self.vprov.currentData()
         updates = {k: cb.currentData() for k, cb in self.combos.items()}
         updates.update({
+            "ECHO_ACCOUNT_CUSTOM_API": "1" if self.custom_api.isChecked() else "0",
             "ECHO_LLM_PROVIDER": pid,
             "ECHO_LLM_API_KEY": self.key_edit.text().strip(),
             "ECHO_LLM_MODEL": self.model_edit.text().strip(),
@@ -578,6 +637,11 @@ class SettingsDialog(QDialog):
         for widget in QApplication.topLevelWidgets():
             if isinstance(widget, DeskPet):
                 widget.set_skin(skin)
+        from echo.backend import cloud_sync
+        try:cloud_sync.configure(enabled=self.cloud_auto.isChecked())
+        except (OSError,ValueError,RuntimeError) as exc:
+            from echo.widgets import dialogs
+            dialogs.warn(self,tr('同步设置未保存','Sync settings not saved'),str(exc));return
         self.accept()
 
 

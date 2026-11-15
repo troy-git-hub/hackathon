@@ -102,18 +102,18 @@ def main():
             with patch.object(updater, 'check_update', side_effect=lambda address: original_check(address, public_key=pub)), \
                  patch.object(updater, 'download_update', side_effect=lambda *a,**k: original_download(*a, **k, public_key=pub)):
                 controller.show()
-                controller.check()
+                with patch.object(paths,'is_frozen',return_value=True):controller.check()
                 wait(app, lambda: controller.state == 'available')
                 assert controller.dialog.primary.text() == '下载更新'
                 if '--shots' in sys.argv:
                     (ROOT/'artifacts').mkdir(exist_ok=True)
                     controller.dialog.grab().save(str(ROOT/'artifacts/echo-update-available.png'))
-                controller.download()
+                with patch.object(paths,'is_frozen',return_value=True):controller.download()
                 wait(app, lambda: controller.state == 'ready')
                 assert not controller.dialog.primary.isEnabled()  # source mode cannot replace itself
                 original_verify = updater.verify_manifest
                 with patch.object(paths, 'is_frozen', return_value=True), \
-                     patch.object(updater, 'verify_manifest', side_effect=lambda value: original_verify(value, pub)), \
+                     patch.object(updater, 'verify_for_client', side_effect=lambda value: original_verify(value, pub)), \
                      patch('subprocess.Popen') as launch, patch.object(app, 'quit') as quit_app:
                     controller.package.write_bytes(b'corrupted after download')
                     controller.install()
@@ -135,6 +135,10 @@ def main():
                 assert controller.state == 'cancelled'  # stale result cannot revive cancelled work
                 controller.dialog.close()
             controller.state = 'idle'
+            with patch.object(updater,'check_update') as network:
+                controller.start();controller.auto_check();controller.check();controller.download()
+                network.assert_not_called()
+                assert controller.state=='disabled' and not controller.poll.isActive()
             with patch.object(controller, 'in_class', return_value=True), patch.object(controller, 'check') as check:
                 controller.auto_check()
                 check.assert_not_called()

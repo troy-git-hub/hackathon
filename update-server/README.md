@@ -1,5 +1,7 @@
 # Echo 本地更新服务
 
+正式服务已部署到 `https://update.echo.xhbtroy.cn`。新增 v2 签名 ZIP 目录更新渠道，参见 [快速更新说明](../docs/fast-updates.md)。当前仍公开提供原有 2.4.0 安装包，新账户客户端与 ZIP 更新包尚未作为新版本发行。
+
 服务是只读的 Docker 容器：提供已签名版本信息、Windows 安装包和健康检查，不接收学习记录、用户资料或模型 API Key。应用内「设置 → 更新中心」提供检查、发布说明、下载进度、取消/重试及验证后安装。
 
 本工作区已经创建项目签名密钥并编入客户端公钥。私钥留在项目 `.build/update-secrets/release-private-key.pem`，不进入 Git、Docker 镜像或安装包；请自行备份。服务仅挂载发布目录，不需要私钥。
@@ -13,7 +15,7 @@ docker compose -f update-server/compose.yaml up -d --build
 docker compose -f update-server/compose.yaml ps
 ```
 
-默认地址 `http://127.0.0.1:8787`，Echo 默认更新地址与之相同。
+本地测试地址 `http://127.0.0.1:8787`。正式更新服务已部署到 `https://update.echo.xhbtroy.cn`，源码中新安装客户端默认使用正式地址；本地测试时在设置中改为本地地址。
 
 - `GET /healthz`：健康检查。
 - `GET /v1/releases/stable/windows-x64`：已签名稳定版本；未发布时返回 404。

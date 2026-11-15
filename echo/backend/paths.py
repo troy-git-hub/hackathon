@@ -35,7 +35,8 @@ def config_dir() -> str:
     if not is_frozen():
         return PROJECT_ROOT
     base = os.environ.get("APPDATA") or os.path.expanduser("~")
-    path = os.path.join(base, "Echo")
+    from echo import version
+    path = os.path.join(base, "Echo Beta" if getattr(version,'CHANNEL','stable')=='beta' else "Echo")
     try:
         os.makedirs(path, exist_ok=True)
     except OSError:

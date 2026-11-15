@@ -44,7 +44,7 @@ class LLM:
         return client, spec["model"]
 
     def json(self, system: str, user: str, temperature=0.3, max_tokens=1200,
-             timeout: float = None, attempts: int = 2) -> dict:
+             timeout: float = None, attempts: int = 2, purpose: str = None) -> dict:
         """调用 LLM 并返回解析后的 JSON dict；网络错误 / JSON 截断时重试一次。"""
         client, model = self._client_and_model()
         last = None
@@ -64,9 +64,16 @@ class LLM:
                     kwargs["response_format"] = {"type": "json_object"}
                 spec = providers.text()
                 kwargs["extra_body"] = providers.text_extra(spec) or None
+                if spec.get('id')=='echo':
+                    from echo.backend.request_purpose import infer
+                    kwargs['extra_body']={**(kwargs['extra_body'] or {}),'echo_purpose':purpose or infer()}
                 resp = client.chat.completions.create(**kwargs)
                 return parse_json(resp.choices[0].message.content or "")
             except Exception as e:
+                from echo.backend.account import AccountError
+                if isinstance(e,AccountError):
+                    # Never create a fresh billable request automatically after an uncertain account call.
+                    raise LLMError(str(e)) from e
                 if use_json_mode and _json_mode_unsupported(e):
                     use_json_mode = False
                     log.warning("这家模型不支持 JSON mode，改为普通输出再解析")
