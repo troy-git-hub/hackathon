@@ -8,6 +8,7 @@ import threading
 import uuid
 from datetime import datetime,timezone
 from fastapi import Request
+import storage
 
 def install(app,core):
     db=core['db'];seal=core['seal'];unseal=core['unseal'];fail=core['fail'];now=core['now'];auth=core['session_user'];rate=core['rate'];payload=core['payload'];field=core['field']
@@ -175,8 +176,8 @@ def install(app,core):
             if row and row['sha256']==sha:return {'ok':True,'changed':False,'revision':row['revision'],'updated':row['updated']}
             revision=data.get('base_revision',0)
             if type(revision)!=int or revision!=(row['revision'] if row else 0):fail(409,'设备版本发生变化，请先拉取同步状态后重试。')
-            total=c.execute('SELECT coalesce(sum(size),0) FROM cloud_devices').fetchone()[0]+c.execute('SELECT coalesce(sum(size),0) FROM learning_profiles').fetchone()[0]
-            if total-(row['size'] if row else 0)+size>64*1024*1024:fail(503,'云端存储暂满，请联系管理员。')
+            total=storage.used(c)
+            if total-(row['size'] if row else 0)+size>storage.LIMIT:fail(503,'云端128 MiB存储额度已满，请先删除旧资料。')
             c.execute('INSERT INTO cloud_devices(user_id,id,name,cipher,size,sha256,revision,updated,classroom_cipher) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,id) DO UPDATE SET name=excluded.name,cipher=excluded.cipher,size=excluded.size,sha256=excluded.sha256,revision=excluded.revision,updated=excluded.updated,classroom_cipher=excluded.classroom_cipher',(uid,ident,name,seal(raw,'device:'+uid+':'+ident),size,sha,revision+1,now(),seal(archive_raw,'classroom:'+uid+':'+ident)))
         return {'ok':True,'changed':True,'revision':revision+1,'updated':now()}
 
@@ -292,7 +293,7 @@ def install(app,core):
         auth(request,True)
         with db() as c:
             counts={name:c.execute('SELECT count(*) FROM '+table).fetchone()[0] for name,table in [('devices','cloud_devices'),('archives','learning_profiles'),('reviews','cloud_events'),('questions','practice_questions')]}
-            counts['storage_bytes']=c.execute('SELECT coalesce(sum(size),0) FROM cloud_devices').fetchone()[0]+c.execute('SELECT coalesce(sum(size),0) FROM learning_profiles').fetchone()[0]
+            counts['storage_bytes']=storage.used(c)
             counts['active_users_7d']=c.execute('SELECT count(distinct user_id) FROM sessions WHERE created>=?',(now()-7*86400,)).fetchone()[0]
             counts['mail_failed_24h']=c.execute("SELECT count(*) FROM mail_deliveries WHERE status IN ('failed','unknown') AND created>=?",(now()-86400,)).fetchone()[0]
             usage=[dict(row) for row in c.execute('SELECT state,count(*) AS count FROM inference_requests WHERE created>=? GROUP BY state',(now()-86400,))]
@@ -304,4 +305,4 @@ def install(app,core):
                 finished=point['succeeded']+point['failed']
                 point['success_rate']=round(point['succeeded']/finished*100,1) if finished else None
                 timeline.append(point)
-        return {'stats':counts,'usage_24h':usage,'timeline':timeline,'limits':{'storage_bytes':64*1024*1024,'devices_per_user':5,'profile_bytes':1048576,'ai_concurrent':8},'server_time':now()}
+        return {'stats':counts,'usage_24h':usage,'timeline':timeline,'limits':{'storage_bytes':storage.LIMIT,'devices_per_user':5,'profile_bytes':1048576,'ai_concurrent':8},'server_time':now()}

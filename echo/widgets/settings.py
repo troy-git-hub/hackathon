@@ -235,6 +235,13 @@ class SettingsDialog(QDialog):
         self.account_button = QPushButton(tr("用户中心 · 账户与学习点", "Account center · learning credits"))
         self.account_button.clicked.connect(self._open_account_center)
         body.addWidget(self.account_button)
+        from echo.backend import account
+        self.admin_button=QPushButton(tr('管理员后台 ↗','Administrator ↗'))
+        self.admin_button.setObjectName('Link')
+        self.admin_button.setToolTip(tr('仅管理员账户可用，在浏览器中打开','Available to administrators; opens in your browser'))
+        self.admin_button.clicked.connect(self._open_admin)
+        self.admin_button.setVisible((account.current_user() or {}).get('role')=='admin')
+        body.addWidget(self.admin_button)
         from echo.backend import cloud_sync
         self.cloud_auto=QCheckBox(tr('这台设备自动同步学习档案（登录后生效）','Automatically sync learning data when signed in'))
         self.cloud_auto.setChecked(cloud_sync.status()['enabled'])
@@ -285,6 +292,8 @@ class SettingsDialog(QDialog):
         root.addWidget(btns)
 
         self.setStyleSheet(dialog_qss() + f"QScrollArea#SettingsScroll, QWidget#SettingsContent {{ background:{Colors.WINDOW_BG}; border:none; }}")
+        from echo.widgets.window_chrome import install_chrome
+        install_chrome(self,root,minimize=False)
         self.setMinimumWidth(420)
         self.adjustSize()
         screen = QApplication.primaryScreen()
@@ -332,6 +341,13 @@ class SettingsDialog(QDialog):
     def _open_account_center(self):
         from echo.widgets.account_login import show_account_center
         show_account_center(self)
+
+    def _open_admin(self):
+        from echo.backend import account
+        if (account.current_user() or {}).get('role')!='admin':return
+        from PyQt5.QtCore import QUrl
+        from PyQt5.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl(account.USER_CENTER.rsplit('/user',1)[0]+'/admin'))
 
     def _sync_cloud_now(self):
         import threading

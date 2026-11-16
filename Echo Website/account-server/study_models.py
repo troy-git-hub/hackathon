@@ -6,8 +6,8 @@ from datetime import datetime,timedelta,timezone
 TZ=timezone(timedelta(hours=8))
 DEFAULTS={'daily_count':3,'exam_enabled':True,'exam_weekday':6,'exam_hour':20,'exam_minute':0,
           'exam_count':10,'exam_duration':30,'anti_cheat':False}
-LIMITS={'max_file_bytes':3*1024*1024,'max_image_bytes':1024*1024,'max_files':10,
-        'user_storage_bytes':10*1024*1024,'global_storage_bytes':40*1024*1024,
+LIMITS={'max_file_bytes':3*1024*1024,'max_image_bytes':1024*1024,'max_files':64,
+        'user_storage_bytes':128*1024*1024,'global_storage_bytes':128*1024*1024,
         'max_text_chars':30000,'max_analysis_questions':20,'analysis_scope_chars':12000,'max_pdf_pages':20,'max_sources':12,'max_attempts':200,
         'max_bank_questions':600,'ai_requests_per_day':15,'timezone':'Asia/Shanghai',
         'formats':['pdf','txt','md','docx','png','jpg','jpeg']}

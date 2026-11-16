@@ -94,7 +94,7 @@ class ProfilePage(QWidget):
         # 头像 + 名字
         head = QHBoxLayout()
         head.setSpacing(Spacing.LG)
-        self.avatar = AvatarView(84)
+        self.avatar = AvatarView(60)
         self.avatar.setToolTip(tr("点一下换头像", "Click to change your photo"))
         self.avatar.clicked.connect(self._pick_avatar)
         head.addWidget(self.avatar, 0, Qt.AlignVCenter)
@@ -146,7 +146,7 @@ class ProfilePage(QWidget):
         for i, (key, label) in enumerate(specs):
             cell = QVBoxLayout()
             cell.setSpacing(1)
-            num = _label("–", f"color: {Colors.TEXT_PRIMARY}; font-size: 22px; font-weight: 700;")
+            num = _label("–", f"color: {Colors.TEXT_PRIMARY}; font-size: 18px; font-weight: 600;")
             cell.addWidget(num)
             cell.addWidget(_label(label, CAPTION))
             grid.addLayout(cell, i // 2, i % 2)

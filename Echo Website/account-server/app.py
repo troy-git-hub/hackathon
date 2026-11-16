@@ -24,6 +24,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from jsonschema import Draft202012Validator, FormatChecker
 import billing
 import study
+import storage
+import qingjuan
 
 PROFILE_SCHEMA=json.loads(Path(__file__).with_name('learning-profile.schema.json').read_text(encoding='utf-8'))
 PROFILE_VALIDATOR=Draft202012Validator(PROFILE_SCHEMA,format_checker=FormatChecker())
@@ -103,6 +105,7 @@ def initialize():
         c.execute('CREATE UNIQUE INDEX IF NOT EXISTS ledger_reference ON ledger(reference) WHERE reference IS NOT NULL')
     with db(True) as c:billing.initialize(c)
     with db() as c:study.initialize(c)
+    with db() as c:qingjuan.initialize(c)
     # Never overwrite a persisted administrator's password during a restart.
     admin = os.environ.get('ECHO_ADMIN_EMAIL', '').strip().lower()
     encoded = os.environ.get('ECHO_ADMIN_PASSWORD_HASH', '')
@@ -156,7 +159,7 @@ async def protect(request, call_next):
         return Response('Origin not allowed', 403)
     if request.method not in ('GET', 'HEAD', 'OPTIONS') and request.headers.get('x-echo-csrf') != '1':
         return Response('Missing request header', 403)
-    max_size = 5*1024*1024 if request.url.path=='/v1/me/study/materials' else 512*1024 if request.url.path.startswith('/v1/me/study/') else 2*1024*1024 if request.url.path in ('/v1/echo/inference','/v1/me/profiles','/v1/me/sync') else 65536
+    max_size = 5*1024*1024 if request.url.path=='/v1/me/study/materials' else 512*1024 if request.url.path.startswith(('/v1/me/study/','/v1/me/qingjuan/')) else 2*1024*1024 if request.url.path in ('/v1/echo/inference','/v1/me/profiles','/v1/me/sync') else 65536
     try:
         if int(request.headers.get('content-length', '0')) > max_size: return Response('Request too large', 413)
     except ValueError: return Response('Bad length', 400)
@@ -336,9 +339,9 @@ async def upload_profile(request:Request):
     cipher=seal(raw,'profile:'+user['id']+':'+ident)
     with db(True) as c:
         count,total=c.execute('SELECT count(*),coalesce(sum(size),0) FROM learning_profiles WHERE user_id=?',(user['id'],)).fetchone()
-        global_total=c.execute('SELECT coalesce(sum(size),0) FROM learning_profiles').fetchone()[0]+c.execute('SELECT coalesce(sum(size),0) FROM cloud_devices').fetchone()[0]
+        global_total=storage.used(c)
         if count>=10 or total+size>10*1024*1024:fail(409,'云端最多保存 10 份、合计 10 MB，请先删除旧档案。')
-        if global_total+size>64*1024*1024:fail(503,'云端存储暂满，请联系管理员。')
+        if global_total+size>storage.LIMIT:fail(503,'云端128 MiB存储额度已满，请先删除旧资料。')
         c.execute('INSERT INTO learning_profiles VALUES(?,?,?,?,?,?,?,?)',(ident,user['id'],label,cipher,size,hashlib.sha256(raw.encode()).hexdigest(),json.dumps(summary),now()))
         audit(c,user['id'],'profile-uploaded',{'id':ident,'size':size})
     return {'ok':True,'id':ident}
@@ -820,6 +823,7 @@ def admin_requests(request:Request):
 from cloud import install as install_cloud
 install_cloud(app,globals())
 study.install(app,globals())
+qingjuan.install(app,globals())
 from admin_release import install as install_admin_release
 install_admin_release(app,globals())
 from release_manager import install as install_release_manager

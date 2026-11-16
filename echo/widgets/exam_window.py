@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (QApplication,QCheckBox,QComboBox,QDialog,QHBoxLayou
 from echo.backend import assessment, exam
 from echo.theme import Colors, dialog_qss
 from echo.widgets.echo_combo import EchoCombo
+from echo.widgets.window_chrome import install_chrome
 
 _windows = []
 
@@ -43,7 +44,11 @@ class ExamWindow(QDialog):
         self._closing = self._confirming = self._focus_lost = self._changing_window = False
         self._owner = exam.owner()
         root = QVBoxLayout(self)
-        root.addWidget(QLabel('考试机 · Beta　｜　多章组卷 · 整卷作答'))
+        heading=QHBoxLayout();heading.addWidget(QLabel('考试机 · Beta　｜　多章组卷 · 整卷作答'),1)
+        self.cloud_paper_button=QPushButton('清卷 · 云端 ↗')
+        self.cloud_paper_button.setToolTip('打开同一账户的网页试卷，在线作答。')
+        self.cloud_paper_button.clicked.connect(self.open_cloud)
+        heading.addWidget(self.cloud_paper_button);root.addLayout(heading)
         self.stack = QStackedWidget()
         root.addWidget(self.stack,1)
         setup = QWidget(); form = QVBoxLayout(setup)
@@ -68,11 +73,21 @@ class ExamWindow(QDialog):
         self.history = EchoCombo(); form.addWidget(self.history)
         resume = QPushButton('打开所选存档 / 继续考试'); resume.clicked.connect(self.restore); form.addWidget(resume)
         self.stack.addWidget(setup)
-        self.message = QLabel('答案会保存在本机；本轮尚未部署网页考试。'); self.message.setWordWrap(True);root.addWidget(self.message)
+        self.message = QLabel('本机试卷保存在本机；网页试卷可从“清卷 · 云端”打开并作答。'); self.message.setWordWrap(True);root.addWidget(self.message)
         self.generated.connect(self.built)
         self.timer = QTimer(self);self.timer.setInterval(1000);self.timer.timeout.connect(self.tick)
         QApplication.instance().applicationStateChanged.connect(self.focus_changed)
         self.refresh_history()
+        install_chrome(self,root)
+
+    def open_cloud(self):
+        if self.paper and self.paper['status']=='active':
+            self.message.setText('请先保存并退出本次考试，再打开云端试卷。');return
+        try:
+            from echo.widgets.cloud_workspace import open_cloud_workspace
+            self._cloud_workspace=open_cloud_workspace(parent=self,view='qingjuan')
+        except ImportError:
+            self.message.setText('当前版本尚未包含云端学习窗口，请使用完成集成后的版本。')
 
     def refresh_history(self):
         self.history.clear()
@@ -121,6 +136,7 @@ class ExamWindow(QDialog):
         except Exception as exc:
             self.message.setText('无法恢复考试：'+str(exc));return
         self.paper=paper
+        self.cloud_paper_button.setEnabled(paper['status']!='active')
         if self.stack.count()>1:
             old=self.stack.widget(1);self.stack.removeWidget(old);old.deleteLater()
         page=QWidget();layout=QVBoxLayout(page)

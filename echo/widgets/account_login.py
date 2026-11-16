@@ -10,17 +10,14 @@ from echo.theme import Colors,dialog_qss,apply_native_titlebar
 class _Result(QObject):
     done=pyqtSignal(str,object,str)
 
-class _AccountTitleBar(QWidget):
+from echo.widgets.window_chrome import EchoTitleBar
+
+
+class _AccountTitleBar(EchoTitleBar):
     def __init__(self,dialog):
-        super().__init__(dialog);self.dialog=dialog;self.offset=None;self.setFixedHeight(42)
-        row=QHBoxLayout(self);row.setContentsMargins(18,6,10,4)
-        title=QLabel('Echo · 登录');row.addWidget(title);row.addStretch(1)
-        close=QPushButton('×');close.setFixedSize(28,28);close.setStyleSheet('min-width:0;padding:0;border:none;font-size:20px;');close.clicked.connect(dialog.reject);row.addWidget(close)
-    def mousePressEvent(self,event):
-        if event.button()==Qt.LeftButton:self.offset=event.globalPos()-self.dialog.frameGeometry().topLeft();event.accept()
-    def mouseMoveEvent(self,event):
-        if self.offset is not None and event.buttons()&Qt.LeftButton:self.dialog.move(event.globalPos()-self.offset);event.accept()
-    def mouseReleaseEvent(self,event):self.offset=None
+        super().__init__(dialog,'Echo · 登录',minimize=False)
+        self.layout().setContentsMargins(18,6,10,4)
+
 
 class AccountLogin(QDialog):
     def __init__(self,parent=None,restore=False,allow_skip=False):
@@ -160,61 +157,5 @@ def ensure_account(parent=None,allow_skip=False):
 
 def show_account_center(parent=None):
     if not ensure_account(parent):return
-    dialog=QDialog(parent);dialog.setWindowTitle('Echo · 用户中心');dialog.setMinimumWidth(400);dialog.setStyleSheet(dialog_qss())
-    root=QVBoxLayout(dialog)
-    user=account.current_user()
-    title=QLabel(f"{user['name']}\n{user['email']}\n\n账户余额：{user['balance']} 学习点")
-    title.setTextFormat(Qt.PlainText);title.setWordWrap(True);root.addWidget(title)
-    root.addWidget(QLabel('课堂在本机，复习在云端。当前不提供充值。'))
-    sync_status=QLabel();sync_status.setTextFormat(Qt.PlainText);sync_status.setWordWrap(True);root.addWidget(sync_status)
-    enabled=QCheckBox('这台设备自动同步学习档案（推荐）');enabled.setChecked(cloud_sync.status()['enabled']);root.addWidget(enabled)
-    sync_button=QPushButton('立即同步学习数据');root.addWidget(sync_button)
-    bind_button=QPushButton('将本机学习资料关联到当前账户');root.addWidget(bind_button)
-    def update_status():
-        info=cloud_sync.status();sync_status.setText(info['message'])
-        bound=info.get('bound_account');bind_button.setVisible(bool(bound and bound!=account.current_user()['id']) if account.current_user() else False)
-    def toggle(value):
-        try:cloud_sync.configure(enabled=value);update_status()
-        except Exception as exc:sync_status.setText(str(exc))
-    enabled.toggled.connect(toggle)
-    def rebind():
-        from echo.widgets import dialogs
-        if dialogs.confirm(dialog,'确认本机资料归属','本机资料关联了另一个账户。继续会把这份本机学习资料同步到当前登录的账户，不会删除原账户的云端副本。确认这份资料属于你并继续？',ok_text='确认关联'):
-            cloud_sync.configure(bind=True);update_status()
-    bind_button.clicked.connect(rebind)
-    refresh_button=QPushButton('刷新账户余额');root.addWidget(refresh_button)
-    status=QLabel('');status.setTextFormat(Qt.PlainText);status.setWordWrap(True);root.addWidget(status)
-    result_bus=_Result(dialog)
-    def finished(kind,value,error):
-        refresh_button.setEnabled(True)
-        sync_button.setEnabled(True)
-        if error:status.setText(error);return
-        if kind=='sync':update_status();status.setText(value['message']);return
-        title.setText(f"{value['name']}\n{value['email']}\n\n账户余额：{value['balance']} 学习点")
-        status.setText('账户信息已刷新。')
-    result_bus.done.connect(finished)
-    def refresh():
-        refresh_button.setEnabled(False)
-        def run():
-            try:value=account.refresh();error=''
-            except Exception as exc:value=None;error=str(exc)
-            try:result_bus.done.emit('refresh',value,error)
-            except RuntimeError:pass
-        threading.Thread(target=run,daemon=True,name='echo-account-refresh').start()
-    refresh_button.clicked.connect(refresh)
-    def sync():
-        sync_button.setEnabled(False);status.setText('正在同步…')
-        def run():
-            value=cloud_sync.sync_once()
-            try:result_bus.done.emit('sync',value,'')
-            except RuntimeError:pass
-        threading.Thread(target=run,daemon=True,name='echo-manual-sync').start()
-    sync_button.clicked.connect(sync)
-    status_timer=QTimer(dialog);status_timer.setInterval(2000);status_timer.timeout.connect(update_status);status_timer.start();update_status()
-    QTimer.singleShot(0,refresh)
-    web=QPushButton('打开网页 · 学习分析、复习与在线练习 ↗');web.clicked.connect(lambda:QDesktopServices.openUrl(QUrl(account.USER_CENTER)));root.addWidget(web)
-    logout=QPushButton('退出当前账户');root.addWidget(logout)
-    def leave():
-        account.logout();dialog.accept()
-    logout.clicked.connect(leave)
-    dialog.exec_()
+    from echo.widgets.account_center import AccountCenter
+    return AccountCenter(parent).exec_()

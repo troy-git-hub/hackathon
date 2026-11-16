@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.parse import quote
 from fastapi import Request,Response
 import billing
+import storage
 import study_models as models
 
 _parser_lock=threading.BoundedSemaphore(1)
@@ -165,7 +166,8 @@ def install(app,core):
                 paper=decode(row['cipher'],'study-attempt:'+uid+':'+row['id'])
                 stats['pending']+=paper.get('pending_count',0);stats['wrong']+=sum(r['status'] in ('incorrect','partial','unanswered') for r in paper.get('results',{}).values())
             price=billing.public_pricing(c)
-        return {'preferences':pref,'limits':models.LIMITS,'billing':price,'plan':models.plan(pref,now(),last),'stats':stats,'knowledge':[{k:p.get(k) for k in ('id','topic','subject','state')} for p in knowledge(uid)]}
+        with db() as c:quota={'used_bytes':storage.used(c,uid),'limit_bytes':storage.LIMIT}
+        return {'preferences':pref,'limits':models.LIMITS,'storage':quota,'billing':price,'plan':models.plan(pref,now(),last),'stats':stats,'knowledge':[{k:p.get(k) for k in ('id','topic','subject','state')} for p in knowledge(uid)]}
 
     @app.get('/v1/me/study/preferences')
     def get_preferences(request:Request):
@@ -216,8 +218,8 @@ def install(app,core):
         parsed.pop('ok',None);parsed.update(content_base64=content,analysis=None,source_revision=0)
         mid=uuid.uuid4().hex;mime={'pdf':'application/pdf','docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','png':'image/png','jpg':'image/jpeg','jpeg':'image/jpeg','txt':'text/plain','md':'text/markdown'}[ext]
         with db(True) as c:
-            if c.execute('SELECT count(*) FROM study_materials WHERE user_id=?',(uid,)).fetchone()[0]>=10:fail(409,'每个账户最多保存10份资料。')
-            if c.execute('SELECT coalesce(sum(size),0) FROM study_materials WHERE user_id=?',(uid,)).fetchone()[0]+len(raw)>10*1024*1024 or c.execute('SELECT coalesce(sum(size),0) FROM study_materials').fetchone()[0]+len(raw)>40*1024*1024:fail(409,'资料存储额度已满，请删除旧资料。')
+            if c.execute('SELECT count(*) FROM study_materials WHERE user_id=?',(uid,)).fetchone()[0]>=models.LIMITS['max_files']:fail(409,'每个账户最多保存64份资料。')
+            if storage.used(c)+len(raw)>storage.LIMIT:fail(409,'云端128 MiB存储额度已满，请先删除旧资料。')
             existing=c.execute('SELECT * FROM study_materials WHERE user_id=? AND sha256=?',(uid,digest)).fetchone()
             if existing:return material_view(existing,decode(existing['cipher'],'study-material:'+uid+':'+existing['id']),True)
             c.execute('INSERT INTO study_materials VALUES(?,?,?,?,?,?,?,?,?)',(uid,mid,filename,mime,len(raw),digest,encode(parsed,'study-material:'+uid+':'+mid),now(),now()))
@@ -506,3 +508,5 @@ def install(app,core):
             current['revision']+=1;put_attempt(c,uid,current)
         await ai(user,rid,'exam_grading','text',context,'grade:'+aid,validate,persist,guard)
         return get_attempt(request,aid)
+    core['study_services']={'ai':ai,'bank_add':bank_add,'create_paper':create_paper,'public':public,
+                            'attempt':attempt,'put_attempt':put_attempt,'encode':encode,'decode':decode,'sources':sources,'room':room}

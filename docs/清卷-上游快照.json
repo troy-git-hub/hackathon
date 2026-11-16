@@ -1,0 +1,27 @@
+{
+  "source_project": "E:\\projects\\aiforge\\试卷生成器",
+  "original_name": "青卷",
+  "echo_name": "清卷",
+  "files": [
+    {
+      "source": "app/static/js/paper.js",
+      "destination": "Echo Website\\public\\qingjuan\\paper.js",
+      "sha256": "c9638d7ee7c4431245313dbe96c6322d984890b153057aba77d2e643c99ad318"
+    },
+    {
+      "source": "app/static/js/figures.js",
+      "destination": "Echo Website\\public\\qingjuan\\figures.js",
+      "sha256": "dcc7d56668272a5b76075057e974fb829ffbcc73401e448142969c2ebbec31fc"
+    },
+    {
+      "source": "app/static/css/paper.css",
+      "destination": "Echo Website\\public\\qingjuan\\paper.css",
+      "sha256": "8ab8478e7a2eac27d19a0b19c810ceb38d96aa3fccda77a970dbf9700d955243"
+    },
+    {
+      "source": "app/prompts.py",
+      "destination": "Echo Website\\account-server\\qingjuan_prompts.py",
+      "sha256": "3093bfe71af2a1b1f0b64f98aa4a256339b305f628fb8ae0a157b287da644efc"
+    }
+  ]
+}

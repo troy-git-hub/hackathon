@@ -63,7 +63,7 @@ LISTEN, MINI, BREAK, LESSON, ECHO, REVIEW, HOME, PRACTICE, DETAIL, MINDMAP, COUR
     PROFILE, ASK, LEARNED, WEEKLY = range(16)
 # 各页内容区宽度（不含阴影与内边距）
 PAGE_WIDTH = {LISTEN: 340, MINI: 300, BREAK: 380, LESSON: 400, ECHO: 380,
-              REVIEW: 380, HOME: 820, PRACTICE: 400, DETAIL: 380, MINDMAP: 480,
+              REVIEW: 380, HOME: 780, PRACTICE: 400, DETAIL: 380, MINDMAP: 480,
               COURSES: 420, RECALL: 400, PROFILE: 380, ASK: 400, LEARNED: 480,
               WEEKLY: 400}
 
@@ -1579,9 +1579,13 @@ class FloatingWindow(QWidget):
     # ----- 6 主页 -----
     def _build_home(self) -> QWidget:
         page = QWidget()
+        page.setObjectName('EchoHome')
+        page.setStyleSheet('''QWidget#EchoHome QPushButton {font-size:12px;padding:4px 10px;min-height:22px;}
+            QWidget#EchoHome QPushButton#Accent {font-size:13px;font-weight:600;padding:5px 14px;}
+            QWidget#EchoHome QPushButton#Link {font-size:11px;padding:2px 0;min-height:18px;}''')
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(Spacing.MD)
+        lay.setSpacing(10)
 
         head = QVBoxLayout()
         head.setSpacing(2)
@@ -1597,8 +1601,8 @@ class FloatingWindow(QWidget):
         self.home_start_panel.setObjectName('HomeStart')
         self.home_start_panel.setStyleSheet(f'QFrame#HomeStart{{background:{Colors.SURFACE};border:1px solid {Colors.BORDER};border-radius:14px;}}')
         start = QVBoxLayout(self.home_start_panel)
-        start.setContentsMargins(14,12,14,12)
-        start.setSpacing(8)
+        start.setContentsMargins(12,10,12,10)
+        start.setSpacing(6)
         hero.addWidget(self.home_start_panel,3)
         attention = QHBoxLayout()
         attention.setSpacing(Spacing.MD)
@@ -1644,7 +1648,7 @@ class FloatingWindow(QWidget):
             f"QFrame#GapCard {{ background: {Colors.WARNING_CARD};"
             f"border: 1px solid {Colors.WARNING_CARD_BORDER}; border-radius: {Radius.LG}px; }}")
         gv = QVBoxLayout(self.home_gap_card)
-        gv.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        gv.setContentsMargins(12,10,12,10)
         gv.setSpacing(4)
         ghead = QHBoxLayout()
         ghead.setSpacing(Spacing.SM)
@@ -1658,7 +1662,7 @@ class FloatingWindow(QWidget):
         gv.addWidget(self.gap_lbl)
         grow = QHBoxLayout()
         grow.addStretch()
-        self.gap_btn = _btn("", "Accent", self._practice_gap,
+        self.gap_btn = _btn("", "Quiet", self._practice_gap,
                             tr("针对这个前置知识点出几道题，把地基补上",
                                "Practise this prerequisite and shore up the foundation"))
         grow.addWidget(self.gap_btn)
@@ -1667,24 +1671,30 @@ class FloatingWindow(QWidget):
         attention.addWidget(self.home_gap_card,1)
 
         # 开课前先给这节课起个名，下课后在历史里一眼能认出来
-        start.addWidget(_label(tr("开始下一节课", "Your next lesson"), TITLE))
-        start.addWidget(_label(tr("这节课叫什么？", "What's this lesson called?"), CAPTION))
+        start.addWidget(_label(tr("新的一节课", "Your next lesson"),
+            f'color:{Colors.TEXT_PRIMARY};font-size:14px;font-weight:600;'))
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText(
-            tr("例如：初二数学 · 正比例函数（留空默认用开课时间命名）",
-               "e.g. Grade 8 Math · Direct proportion (leave blank to name by start time)"))
+            tr("课程名称（可选），例如：正比例函数",
+               "Lesson title (optional), e.g. Direct proportion"))
+        self.title_edit.setToolTip(tr('留空时用开课时间命名','Leave blank to use the start time'))
         self.title_edit.setStyleSheet(
             f"QLineEdit {{ background: {Colors.SURFACE}; color: {Colors.TEXT_PRIMARY};"
             f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.SM}px; padding: 7px 10px;"
             "font-size: 13px; }"
             f"QLineEdit:focus {{ border-color: {Colors.ACCENT}; }}")
         self.title_edit.returnPressed.connect(self._start_today)
+        self.title_edit.setFixedHeight(32)
         start.addWidget(self.title_edit)
 
-        self.btn_today = _btn(tr("开始今天的学习", "Start today's learning"), "Accent", self._start_today,
+        self.btn_today = _btn(tr("开始听课 →", "Start lesson →"), "Accent", self._start_today,
                               tr("开一节新课，Echo 开始听你的网课", "Start a new lesson and Echo will begin listening"))
-        self.btn_today.setMinimumHeight(40)
-        start.addWidget(self.btn_today)
+        self.btn_today.setFixedHeight(34)
+        start_actions=QHBoxLayout()
+        start_actions.addWidget(_label(tr('播放网课后，Echo 会开始听','Echo listens when your course plays'),
+            f'color:{Colors.TEXT_SECONDARY};font-size:11px;'),1)
+        start_actions.addWidget(self.btn_today)
+        start.addLayout(start_actions)
         self.home_booklet_card = QFrame()
         self.home_booklet_card.setObjectName('BookletHero')
         self.home_booklet_card.setStyleSheet('QFrame#BookletHero{background:transparent;border:0;}')
@@ -1721,11 +1731,16 @@ class FloatingWindow(QWidget):
             tr("最近 7 天学过的知识点，一页看全", "What you learned in the last 7 days, at a glance"),
             tr("查看", "View"), self._show_weekly)
         self.home_features_grid.addWidget(self.home_weekly_card,1,1)
+        self.home_cloud_paper_card = self._home_card(
+            tr('清卷 · 云端','Qingjuan · Cloud'),
+            tr('打开账户里的网页试卷，在线作答与复习','Open your cloud papers to answer and review'),
+            tr('打开','Open'),self._open_cloud_workspace)
+        self.home_features_grid.addWidget(self.home_cloud_paper_card,1,2)
         self.home_account_card = self._home_card(
             tr("用户中心", "Account center"), tr("自动同步、网页复习与学习点余额", "Cloud sync, web review and learning credits"),
             tr("打开", "Open"), self._show_account_center)
         booklet.addWidget(self.home_account_card)
-        self.home_tools_toggle = _btn(tr('更多工具 ▾','More tools ▾'),'Link',self._toggle_home_tools)
+        self.home_tools_toggle = _btn(tr('更多 ▾','More ▾'),'Link',self._toggle_home_tools)
         self.home_tools_toggle.setCheckable(True)
         lay.addLayout(hero)
         lay.addLayout(attention)
@@ -1736,12 +1751,20 @@ class FloatingWindow(QWidget):
     def _toggle_home_tools(self):
         expanded = self.home_tools_toggle.isChecked()
         self.home_tools_panel.setVisible(expanded)
-        self.home_tools_toggle.setText(tr('收起工具 ▴','Hide tools ▴') if expanded else tr('更多工具 ▾','More tools ▾'))
+        self.home_tools_toggle.setText(tr('收起 ▴','Less ▴') if expanded else tr('更多 ▾','More ▾'))
         self._fit()
 
     def _open_exam(self):
         from echo.widgets.exam_window import open_exam_window
         self._exam_window = open_exam_window(engine=getattr(getattr(self,'echo',None),'engine',None),parent=self)
+
+    def _open_cloud_workspace(self):
+        try:
+            from echo.widgets.cloud_workspace import open_cloud_workspace
+            self._cloud_workspace = open_cloud_workspace(parent=self,view='qingjuan')
+        except ImportError:
+            dialogs.info(self,tr('清卷 · 云端','Qingjuan · Cloud'),
+                tr('当前版本尚未包含云端学习窗口，请使用完成集成后的版本。','This version does not include the cloud workspace yet.'))
 
     def _open_booklets(self, current=False):
         from echo.widgets.booklet_window import BookletWindow
@@ -1769,24 +1792,25 @@ class FloatingWindow(QWidget):
             f"QFrame#RecallCard {{ background: {Colors.ACCENT_SOFT};"
             f"border: 1px solid {Colors.ACCENT_BORDER}; border-radius: {Radius.LG}px; }}")
         v = QVBoxLayout(card)
-        v.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        v.setContentsMargins(12,10,12,10)
         v.setSpacing(4)
 
-        self.recall_title = _label("", f"color: {Colors.TEXT_PRIMARY}; font-size: 16px;"
-                                      "font-weight: 700;", wrap=True)
+        self.recall_title = _label("", f"color: {Colors.TEXT_PRIMARY}; font-size: 13px;"
+                                      "font-weight: 600;", wrap=True)
         v.addWidget(self.recall_title)
         self.recall_hint = _label("", f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;", wrap=True)
         v.addWidget(self.recall_hint)
         self.recall_time = _label("", f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;")
-        v.addWidget(self.recall_time)
 
         row = QHBoxLayout()
+        row.addWidget(self.recall_time)
         row.addStretch()
-        self.btn_recall = _btn(tr("讲给 Echo 听", "Talk it through with Echo"), "Accent",
+        self.btn_recall = _btn(tr("去回忆 →", "Recall →"), "Quiet",
                                self._show_recall_session,
                                tr("不做题，用你自己的话讲一遍，Echo 听你说完给判断",
                                   "No quiz — explain it in your own words and Echo will judge"))
-        self.btn_recall.setMinimumHeight(40)
+        self.btn_recall.setFixedHeight(28)
+        self.btn_recall.setStyleSheet('min-height:0;padding:3px 10px;font-size:12px;')
         row.addWidget(self.btn_recall)
         v.addLayout(row)
         return card
@@ -1811,6 +1835,8 @@ class FloatingWindow(QWidget):
         card.setToolTip(desc)
         h.addLayout(col, 1)
         b = _btn(action, "Quiet", slot)
+        b.setFixedHeight(28)
+        b.setStyleSheet('min-height:0;padding:2px 8px;font-size:12px;')
         h.addWidget(b, 0, Qt.AlignVCenter)
         card.sub_lbl, card.btn = d, b
         return card
@@ -2086,7 +2112,7 @@ class FloatingWindow(QWidget):
         if not n:
             return
         self.recall_title.setText(
-            tr(f"今天有 {n} 个知识点需要确认", f"{n} knowledge points to confirm today"))
+            tr(f"今日复习 · {n} 个知识点", f"Today · {n} topics to review"))
         hint = (s.get("hint") or "").strip()
         if not hint:
             topics = s.get("topics") or []

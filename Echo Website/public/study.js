@@ -128,7 +128,7 @@
     const limits=S.root.limits||{};
     const maxBytes=limits.material_bytes||limits.max_file_bytes||limits.file_bytes||3*1024*1024;
     q('#material-file-hint').textContent='TXT / MD / 文字 PDF / DOCX ≤ '+(maxBytes/1024/1024).toFixed(0)+' MB；PNG / JPEG ≤ 1 MB。扫描件可手动补充文字。';
-    q('#material-quota').textContent='已保存 '+S.materials.length+' / '+(limits.max_files||10)+' 份资料 · '+(S.materials.reduce((sum,m)=>sum+m.size,0)/1024/1024).toFixed(1)+' / '+((limits.user_storage_bytes||10485760)/1024/1024).toFixed(0)+' MB · 可用题库 '+(S.root.stats?.bank_questions||0)+' 道。每次最多 '+(limits.max_sources||12)+' 个来源，AI 操作每日限 '+(limits.ai_requests_per_day||15)+' 次，服务器统一校验。';
+    q('#material-quota').textContent='已保存 '+S.materials.length+' / '+(limits.max_files||10)+' 份资料 · '+((S.root.storage?.used_bytes??S.materials.reduce((sum,m)=>sum+m.size,0))/1024/1024).toFixed(1)+' / '+((limits.user_storage_bytes||10485760)/1024/1024).toFixed(0)+' MiB 云端总使用量 · 可用题库 '+(S.root.stats?.bank_questions||0)+' 道。每次最多 '+(limits.max_sources||12)+' 个来源，AI 操作每日限 '+(limits.ai_requests_per_day||15)+' 次，服务器统一校验。';
   }
   function sources() {
     return [...(S.root?.knowledge||[]).map(k=>({value:'k:'+k.id,label:(k.subject?k.subject+' / ':'')+k.topic,kind:'knowledge'})),
@@ -367,6 +367,7 @@
     if(submitted)host.append(el('p',`已判得分 ${Number(a.score||0).toFixed(1)} 分 · ${a.pending_count||0} 题待批改${a.pending_count?'，当前分数不是最终成绩。':'。'} · 切屏等记录 ${a.events_count||0} 次`,'practice-feedback'));
     for(const item of a.questions) {
       const card=el('article',undefined,'study-question');card.append(el('span',(typeNames[item.type]||item.type)+' · '+item.points+' 分'+(item.source_label?' · '+item.source_label:''),'study-kicker'),el('h3',item.question));
+      if(item.figure&&window.QJFigures){const figure=el('div',undefined,'qj-paper-dark');figure.innerHTML=window.QJFigures.renderFigure(item.figure,'line');card.append(figure);}
       if(['single_choice','multiple_choice','true_false'].includes(item.type)) {
         const options=el('div',undefined,'practice-options');(item.options||[]).forEach((text,i)=>{
           const label=el('label'),input=el('input');input.type=item.type==='multiple_choice'?'checkbox':'radio';input.name='study-'+a.id+'-'+item.id;input.disabled=submitted;
@@ -377,7 +378,7 @@
           });label.append(input,el('span',String.fromCharCode(65+i)+'. '+text));options.append(label);
         });card.append(options);
       } else {
-        const input=el('textarea');input.value=typeof S.draft[item.id]==='string'?S.draft[item.id]:'';input.disabled=submitted;input.maxLength=12000;input.setAttribute('aria-label',item.question+' 作答');input.placeholder=item.type==='fill_blank'?'填写答案…':'写下你的思路和答案…';input.addEventListener('input',()=>answerChange(item.id,input.value));card.append(input);
+        const input=el('textarea');input.value=typeof S.draft[item.id]==='string'?S.draft[item.id]:'';input.disabled=submitted;input.maxLength=4000;input.setAttribute('aria-label',item.question+' 作答');input.placeholder=item.type==='fill_blank'?'填写答案…':'写下你的思路和答案…';input.addEventListener('input',()=>answerChange(item.id,input.value));card.append(input);
       }
       if(submitted) {
         const r=a.results?.[item.id],review=el('div',undefined,'study-review-answer');review.dataset.state=r?.status||'pending';
@@ -428,5 +429,8 @@
   document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement)void recordEvent('fullscreen_exit');});
   window.addEventListener('beforeunload',event=>{if(S.aiBusy||S.edit!==S.savedEdit){event.preventDefault();event.returnValue='';}});
   document.querySelectorAll('[data-study-refresh]').forEach(b=>b.addEventListener('click',()=>void refresh(true)));
+  window.openEchoStudyMaterial=async id=>{showWorkspace('materials');await refresh(true);await showMaterial(id);};
+  window.openEchoStudyAttempt=async id=>{await refresh(true);await openAttempt(id);};
+  window.echoStudyHasUnsaved=()=>Boolean(S.aiBusy||S.edit!==S.savedEdit);
   if(currentUser&&views.has(location.hash.slice(1)))void refresh();
 })();

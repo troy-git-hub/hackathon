@@ -5,9 +5,9 @@ import {fileURLToPath} from 'node:url';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'public');
 const upstream=process.env.UPDATE_ORIGIN||'http://127.0.0.1:8787';
-const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.png':'image/png','.ico':'image/x-icon','.json':'application/json; charset=utf-8'};
+const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.png':'image/png','.ico':'image/x-icon','.json':'application/json; charset=utf-8','.webmanifest':'application/manifest+json','.woff2':'font/woff2','.woff':'font/woff','.ttf':'font/ttf'};
 const headers={
-  'Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'",
+  'Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'",
   'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'strict-origin-when-cross-origin',
   'Permissions-Policy':'camera=(), microphone=(), geolocation=()','Cross-Origin-Opener-Policy':'same-origin'
 };
@@ -32,7 +32,7 @@ const server=http.createServer({maxHeaderSize:8192},async(req,res)=>{
     if(name==='/'||name==='/index.html')name='/index.html';
     if(name==='/beta')name='/beta.html';
     if(name==='/download')name='/download.html';
-    if(name==='/updates')name='/updates.html';
+    if(name==='/updates'||name==='/updates.html')return send(302,'请前往官网下载页面。',undefined,{Location:'https://echo.xhbtroy.cn/download'});
     if(name==='/user')name='/user.html';
     if(name==='/admin')name='/admin.html';
     if(name==='/mail')name='/email.html';

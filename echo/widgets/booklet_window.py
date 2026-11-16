@@ -7,6 +7,7 @@ from PyQt5.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,
 from echo.backend import booklets, config, providers
 from echo.theme import Colors, dialog_qss
 from echo.widgets.echo_combo import EchoCombo
+from echo.widgets.window_chrome import install_chrome
 
 
 class BookletComposer(QDialog):
@@ -43,6 +44,7 @@ class BookletComposer(QDialog):
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
         self.setStyleSheet(dialog_qss()+f'QListWidget{{background:{Colors.SURFACE};color:{Colors.TEXT_PRIMARY};border:1px solid {Colors.BORDER};border-radius:10px;padding:8px;}}QListWidget::item{{padding:9px;}}')
+        install_chrome(self,root,minimize=False)
 
     def selected(self):
         return [self.list.item(i).data(Qt.UserRole) for i in range(self.list.count()) if self.list.item(i).checkState()==Qt.Checked]
@@ -61,7 +63,7 @@ class BookletWindow(QDialog):
         root = QVBoxLayout(self)
         header = QHBoxLayout()
         title = QLabel('我的小本')
-        title.setStyleSheet('font-size:24px;font-weight:600;')
+        title.setStyleSheet('font-size:18px;font-weight:600;')
         header.addWidget(title,1)
         self.exam_button = QPushButton('考试机 · Beta')
         self.exam_button.setToolTip('选择几个章节，合并成完整试卷。')
@@ -82,6 +84,11 @@ class BookletWindow(QDialog):
         self.list.currentRowChanged.connect(self.read)
         self.reader = QTextBrowser()
         self.reader.setOpenExternalLinks(False)
+        self.reader.document().setDefaultStyleSheet(f'''
+            body{{color:{Colors.TEXT_PRIMARY};font-size:13px;}}
+            h1{{font-size:21px;margin-bottom:12px;}}h2{{font-size:16px;margin-top:22px;}}
+            h3{{font-size:13px;color:{Colors.ACCENT};}}p{{line-height:155%;margin:8px 0;}}
+        ''')
         split.addWidget(self.list)
         split.addWidget(self.reader)
         split.setStretchFactor(1,1)
@@ -90,6 +97,7 @@ class BookletWindow(QDialog):
         self.status.setWordWrap(True)
         root.addWidget(self.status)
         self.completed.connect(self.finish)
+        install_chrome(self,root)
         self.refresh()
 
     def refresh(self):

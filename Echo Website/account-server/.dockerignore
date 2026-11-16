@@ -4,6 +4,9 @@
 !study.py
 !study_models.py
 !material_parser.py
+!storage.py
+!qingjuan.py
+!qingjuan_prompts.py
 !billing.py
 !admin_release.py
 !release_manager.py
