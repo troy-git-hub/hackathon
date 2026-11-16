@@ -824,6 +824,8 @@ from cloud import install as install_cloud
 install_cloud(app,globals())
 study.install(app,globals())
 qingjuan.install(app,globals())
+from personal_summary import install as install_personal_summary
+install_personal_summary(app,globals())
 from admin_release import install as install_admin_release
 install_admin_release(app,globals())
 from release_manager import install as install_release_manager

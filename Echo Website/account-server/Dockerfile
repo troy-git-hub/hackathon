@@ -5,7 +5,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 COPY cloud.py .
 COPY study.py study_models.py material_parser.py ./
-COPY storage.py ./
+COPY storage.py personal_summary.py ./
 COPY qingjuan.py qingjuan_prompts.py ./
 COPY billing.py .
 COPY admin_release.py .

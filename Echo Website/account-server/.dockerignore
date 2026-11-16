@@ -14,3 +14,5 @@
 !requirements.txt
 !Dockerfile
 !learning-profile.schema.json
+
+!personal_summary.py

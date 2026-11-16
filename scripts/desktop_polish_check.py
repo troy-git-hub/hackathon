@@ -32,6 +32,7 @@ def child(theme):
             calls.append(path)
             if path=='/v1/me':return {'user':dict(user)}
             if path=='/v1/me/workspace':return {'stats':{'knowledge':28,'due':4,'weakness':3},'lessons':[{'title':'函数与图像','ended_at':time.time()}]}
+            if path=='/v1/me/summary':return {'user_id':user['id'],'server_time':time.time(),'study':{'answered':86,'average_score':87.5,'materials':4,'papers':3,'submitted':6,'in_progress':1,'wrong':12,'pending':2},'usage_7d':{'points':18.4,'completed':12,'input_tokens':6400,'output_tokens':6000},'storage':{'used_bytes':7*1048576},'daily':[{'day':day,'answered':count} for day,count in [('11-10',5),('11-11',12),('11-12',8),('11-13',18),('11-14',10),('11-15',20),('11-16',13)]],'recent_attempts':[{'title':'一次函数 · 清卷专项','status':'submitted','score':92},{'title':'每日小题 · 数学','status':'submitted','score':80},{'title':'函数图像综合检测','status':'active','deadline':time.time()+1000}]}
             if path=='/v1/me/requests':return {'items':[{'purpose_label':'课堂梳理','state':'succeeded','cost':3},{'purpose_label':'练习生成','state':'failed','cost':0}]}
             raise AssertionError('unexpected API '+path)
         account.request=request
@@ -77,7 +78,7 @@ def child(theme):
         center.refresh()
         deadline=time.monotonic()+3
         while center._busy and time.monotonic()<deadline:app.processEvents();time.sleep(.01)
-        assert not center._busy and set(calls)=={'/v1/me','/v1/me/workspace','/v1/me/requests'}
+        assert not center._busy and set(calls)=={'/v1/me','/v1/me/workspace','/v1/me/requests','/v1/me/summary'}
         assert center.metrics.text()=='云端 28 个知识点 · 4 项待复习 · 3 项待巩固'
         assert any('函数与图像'==n.text() for n in center.findChildren(QLabel))
         assert any('额度已返还' in n.text() for n in center.findChildren(QLabel))
@@ -85,6 +86,7 @@ def child(theme):
         center.sync_toggle.click();assert not center.sync_panel.isVisible()
         user['id']='u2';center.update_sync()
         assert not center.email.text() and not center.balance.text()
+        assert center.summary_values['answered'].text()=='—' and not center.trend.items
         assert not center.refresh_button.isEnabled()
         user['id']='u1';user['role']='user'
         regular=SettingsDialog(window);assert regular.admin_button.isHidden();regular.close()
@@ -99,7 +101,7 @@ def child(theme):
             window.grab().save(str(output/'echo-desktop-home-compact.png'))
             shelf.grab().save(str(output/'echo-desktop-notebook.png'))
             # Re-open a fresh account view for the sample, without real APIs.
-            preview=AccountCenter(window,autoload=False);preview.setAttribute(Qt.WA_DontShowOnScreen,native);preview.finished_request('summary',{'user':{'user':dict(user)},'workspace':request('/v1/me/workspace'),'requests':request('/v1/me/requests')},'')
+            preview=AccountCenter(window,autoload=False);preview.setAttribute(Qt.WA_DontShowOnScreen,native);preview.finished_request('summary',{'user':{'user':dict(user)},'workspace':request('/v1/me/workspace'),'requests':request('/v1/me/requests'),'summary':request('/v1/me/summary')},'')
             preview.show();app.processEvents();preview.grab().save(str(output/'echo-desktop-account.png'));preview.close()
         for widget in (center,settings,composer,shelf):widget.close()
         window.close()

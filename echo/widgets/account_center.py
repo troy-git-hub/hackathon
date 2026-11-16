@@ -2,10 +2,10 @@
 import threading
 import datetime
 from concurrent.futures import ThreadPoolExecutor
-from PyQt5.QtCore import Qt, QTimer, QObject, pyqtSignal, QUrl
-from PyQt5.QtGui import QDesktopServices
+from PyQt5.QtCore import Qt, QTimer, QObject, pyqtSignal, QUrl, QPointF
+from PyQt5.QtGui import QDesktopServices, QPainter, QPainterPath, QColor, QPen
 from PyQt5.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,
-    QCheckBox,QFrame,QScrollArea,QWidget)
+    QCheckBox,QFrame,QScrollArea,QWidget,QGridLayout)
 from echo.backend import account, cloud_sync, store
 from echo.theme import Colors, dialog_qss
 from echo.widgets.window_chrome import install_chrome
@@ -21,13 +21,37 @@ def label(text='',size=12,muted=False):
     return widget
 
 
+class LearningTrend(QWidget):
+    def __init__(self,parent=None):
+        super().__init__(parent);self.items=[];self.setMinimumHeight(105)
+    def set_items(self,items):
+        self.items=list(items or [])[-7:];self.setAccessibleName('近七天已提交题次');self.setToolTip('；'.join(str(i['day'])+'：'+str(i['answered'])+'题次' for i in self.items));self.update()
+    def paintEvent(self,event):
+        painter=QPainter(self);painter.setRenderHint(QPainter.Antialiasing)
+        w,h=self.width(),self.height();left,right,top,bottom=18,w-18,20,h-26
+        painter.setPen(QPen(QColor(Colors.BORDER),1));painter.drawLine(left,bottom,right,bottom)
+        if not self.items or not any(i.get('answered',0) for i in self.items):
+            painter.setPen(QColor(Colors.TEXT_SECONDARY));painter.drawText(self.rect(),Qt.AlignCenter,'完成一次作答后，这里会记录你的学习节奏。');return
+        maximum=max(1,max(i['answered'] for i in self.items));path=QPainterPath()
+        for ix,item in enumerate(self.items):
+            x=left+(right-left)*ix/max(1,len(self.items)-1);y=bottom-(bottom-top)*item['answered']/maximum
+            if ix:path.lineTo(x,y)
+            else:path.moveTo(x,y)
+        painter.setPen(QPen(QColor(Colors.ACCENT),2));painter.drawPath(path)
+        for ix,item in enumerate(self.items):
+            x=left+(right-left)*ix/max(1,len(self.items)-1);y=bottom-(bottom-top)*item['answered']/maximum
+            painter.setBrush(QColor(Colors.ACCENT));painter.drawEllipse(QPointF(x,y),3,3)
+            painter.setPen(QColor(Colors.TEXT_SECONDARY));painter.drawText(int(x)-18,h-19,40,18,Qt.AlignCenter,item['day'])
+            painter.drawText(int(x)-18,int(y)-19,36,16,Qt.AlignCenter,str(item['answered']))
+
+
 class AccountCenter(QDialog):
     def __init__(self,parent=None,autoload=True):
         super().__init__(parent,Qt.Window)
         self.setWindowTitle('Echo · 我的学习')
         self._owner=str((account.current_user() or {}).get('id') or '')
         self._busy=False;self._closed=False
-        self.setMinimumSize(480,400);self.resize(650,520)
+        self.setMinimumSize(480,400);self.resize(740,670)
         self.setStyleSheet(dialog_qss()+f'''
             QScrollArea,QWidget#AccountContent{{background:{Colors.WINDOW_BG};border:0;}}
             QFrame#LearningSummary{{background:{Colors.SURFACE};border:1px solid {Colors.BORDER};border-radius:10px;}}
@@ -46,6 +70,14 @@ class AccountCenter(QDialog):
         content=QVBoxLayout(body);content.setContentsMargins(0,0,5,0);content.setSpacing(12)
         scroll.setWidget(body);root.addWidget(scroll,1)
         self.metrics=label('');content.addWidget(self.metrics)
+        grid=QGridLayout();grid.setSpacing(9);self.summary_values={}
+        for ix,(key,title) in enumerate([('answered','已提交题次'),('average_score','已批试卷均分'),('materials','资料 / 清卷'),('points','近七日学习点')]):
+            card=QFrame();card.setObjectName('LearningSummary');box=QVBoxLayout(card);box.setContentsMargins(12,10,12,10)
+            box.addWidget(label(title,10,True));value=label('—',21);box.addWidget(value);self.summary_values[key]=value;grid.addWidget(card,ix//2,ix%2)
+        content.addLayout(grid)
+        self.study_detail=label('刷新后显示账户中的试卷、资料与作答数据。',11,True);content.addWidget(self.study_detail)
+        self.trend=LearningTrend();content.addWidget(self.trend)
+        self.attempts=self.section(content,'最近的试卷与每日小题')
         self.lessons=self.section(content,'最近学习')
         self.requests=self.section(content,'最近的 AI 辅助')
         self.notice=label('',11,True);content.addWidget(self.notice)
@@ -53,6 +85,7 @@ class AccountCenter(QDialog):
         self.refresh_button=self.button('刷新摘要',self.refresh);links.addWidget(self.refresh_button)
         web=self.button('打开网页学习空间 ↗',lambda:QDesktopServices.openUrl(QUrl(account.USER_CENTER)))
         links.addWidget(web);links.addStretch();content.addLayout(links)
+        tools=QHBoxLayout();tools.addWidget(self.button('云端试卷与错题',lambda:self.open_cloud('exams')));tools.addWidget(self.button('清卷 · 拍卷与命题',lambda:self.open_cloud('qingjuan')));tools.addStretch();content.addLayout(tools)
         self.sync_toggle=self.button('同步与账户 ▸',self.toggle_sync);self.sync_toggle.setCheckable(True)
         self.sync_toggle.setObjectName('AccountLink');content.addWidget(self.sync_toggle)
         self.sync_panel=QWidget();sync=QVBoxLayout(self.sync_panel);sync.setContentsMargins(0,2,0,0);sync.setSpacing(8)
@@ -130,7 +163,7 @@ class AccountCenter(QDialog):
                 try:return key,account.request(path,timeout=12,max_bytes=1024*1024,auth_token=session),''
                 except Exception as exc:return key,None,str(exc)
             with ThreadPoolExecutor(max_workers=3) as pool:
-                jobs=[pool.submit(fetch,key,path) for key,path in [('user','/v1/me'),('workspace','/v1/me/workspace'),('requests','/v1/me/requests')]]
+                jobs=[pool.submit(fetch,key,path) for key,path in [('user','/v1/me'),('workspace','/v1/me/workspace'),('requests','/v1/me/requests'),('summary','/v1/me/summary')]]
                 for job in jobs:
                     key,value,error=job.result()
                     if error:errors.append(error)
@@ -158,6 +191,7 @@ class AccountCenter(QDialog):
             stats=workspace.get('stats',{})
             self.metrics.setText(f"云端 {stats.get('knowledge',0)} 个知识点 · {stats.get('due',0)} 项待复习 · {stats.get('weakness',0)} 项待巩固")
             if workspace.get('lessons'):self.render_lessons(workspace['lessons'])
+        if value.get('summary'):self.render_summary(value['summary'])
         if 'requests' in value:
             self.clear(self.requests)
             items=value['requests'].get('items',[])[:3]
@@ -170,6 +204,26 @@ class AccountCenter(QDialog):
             if not items:self.requests.addWidget(label('还没有账户 AI 请求。听课时需要帮助，再让 Echo 出手。',12,True))
         self.notice.setText(('部分云端摘要暂未加载：'+error+'；已保留可用内容，可重试。') if error else '近期摘要已更新。AI 任务由你使用时触发，刷新不会调用模型。')
 
+    def open_cloud(self,view):
+        if not self.same_owner():return
+        from echo.widgets.cloud_workspace import open_cloud_workspace
+        self._cloud=open_cloud_workspace(self,view)
+        self._cloud.finished.connect(lambda _:self.refresh() if self.same_owner() else None)
+
+    def render_summary(self,data):
+        if str(data.get('user_id',''))!=self._owner:return
+        stats=data.get('study',{});usage=data.get('usage_7d',{});quota=data.get('storage',{})
+        values={'answered':str(stats.get('answered',0)), 'average_score':'—' if stats.get('average_score') is None else str(stats['average_score']),
+                'materials':str(stats.get('materials',0))+' / '+str(stats.get('papers',0)), 'points':str(usage.get('points',0))}
+        for key,text in values.items():self.summary_values[key].setText(text)
+        self.study_detail.setText(f"已交 {stats.get('submitted',0)} 卷 · 进行中 {stats.get('in_progress',0)} · 待回顾 {stats.get('wrong',0)} 题次 · 待批 {stats.get('pending',0)} 题\n个人云端占用 {quota.get('used_bytes',0)/1048576:.1f} MiB · 近七日已完成 {usage.get('completed',0)} 次 AI 辅助，{usage.get('input_tokens',0)+usage.get('output_tokens',0):,} token。均分不含待批试卷。")
+        self.trend.set_items(data.get('daily',[]));self.clear(self.attempts)
+        for item in data.get('recent_attempts',[])[:3]:
+            if item.get('status')=='submitted':state='待批改' if item.get('pending_count') else str(item.get('score',0))+' 分'
+            else:state='进行中' if item.get('deadline',0)>data.get('server_time',0) else '到时待交卷'
+            row=QHBoxLayout();row.setContentsMargins(0,0,0,0);row.addWidget(label(item.get('title') or '学习检测',12),1);row.addWidget(label(state,11,True));host=QWidget();host.setLayout(row);self.attempts.addWidget(host)
+        if not data.get('recent_attempts'):self.attempts.addWidget(label('还没有云端试卷。可从清卷导入，或开始每日小题。',11,True))
+
     def toggle_sync(self):
         expanded=self.sync_toggle.isChecked();self.sync_panel.setVisible(expanded)
         self.sync_toggle.setText('同步与账户 ▾' if expanded else '同步与账户 ▸')
@@ -177,7 +231,9 @@ class AccountCenter(QDialog):
     def update_sync(self):
         if not self.same_owner():
             self.name.setText('账户已变更');self.email.clear();self.balance.clear();self.metrics.clear()
-            self.clear(self.lessons);self.clear(self.requests)
+            self.clear(self.lessons);self.clear(self.requests);self.clear(self.attempts)
+            for value in self.summary_values.values():value.setText('—')
+            self.study_detail.clear();self.trend.set_items([])
             self.notice.setText('账户已变更，请关闭后重新打开。');self.refresh_button.setEnabled(False);self.sync_panel.setEnabled(False)
             self.status_timer.stop();return
         info=cloud_sync.status();self.sync_status.setText(info.get('message',''))
