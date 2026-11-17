@@ -2,11 +2,20 @@
 from types import SimpleNamespace
 from echo.backend import account
 
-class _SingleResultStream:
-    def __init__(self,text):self.text=text;self.closed=False
+class _AccountStream:
+    def __init__(self,events):self.events=events;self.closed=False
     def __iter__(self):
-        if not self.closed:yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=self.text))])
-    def close(self):self.closed=True
+        try:
+            for event,data in self.events:
+                if self.closed:break
+                if event in ('delta','reasoning'):
+                    yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(
+                        content=data['text'] if event=='delta' else None,
+                        reasoning_content=data['text'] if event=='reasoning' else None))])
+        finally:self.close()
+    def close(self):
+        self.closed=True
+        self.events.close()
 
 class EchoModelClient:
     def __init__(self):self.chat=SimpleNamespace(completions=self)
@@ -16,6 +25,10 @@ class EchoModelClient:
         if response_format is not None:context['response_format']=response_format
         extra=kwargs.get('extra_body') or {}
         purpose=extra.get('echo_purpose') if isinstance(extra,dict) else None
-        result=account.inference('vision' if model=='echo-vision' else 'text',context,purpose=purpose)
-        if stream:return _SingleResultStream(result['text'])
+        task='vision' if model=='echo-vision' else 'text'
+        if stream:
+            import os
+            context['reasoning_effort']=os.getenv('ECHO_REASONING_EFFORT','low')
+            return _AccountStream(account.inference_stream(task,context,purpose=purpose))
+        result=account.inference(task,context,purpose=purpose)
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=result['text']),finish_reason=result.get('finish_reason','stop'))],usage=result.get('usage',{}))

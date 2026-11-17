@@ -118,3 +118,43 @@ def logout():
         import keyring
         keyring.delete_password(_vault_service(),'session')
     except Exception:pass
+
+
+def inference_stream(task,context,purpose=None):
+    """Yield real upstream events. Never replay a partially displayed answer."""
+    global _user
+    if not _token or not _user:raise AccountError('请先登录 Echo 账户。')
+    identity=_user['id'];session=_token
+    from echo.backend.request_purpose import infer
+    body={'protocol':'echo.inference/2','account_id':identity,'request_id':uuid.uuid4().hex,
+          'task':task,'purpose':purpose or infer('vision' if task=='vision' else 'assistant'),
+          'context':copy.deepcopy(context),'stream':True}
+    headers={'Content-Type':'application/json','Accept':'text/event-stream','X-Echo-CSRF':'1',
+             'Authorization':'Bearer '+session,'User-Agent':'Echo-Desktop/Account-2'}
+    req=urllib.request.Request(API_ORIGIN+'/v1/echo/inference',data=json.dumps(body).encode(),headers=headers)
+    try:
+        with urllib.request.build_opener(_NoRedirect()).open(req,timeout=100) as reply:
+            if 'text/event-stream' not in reply.headers.get('Content-Type',''):
+                raise AccountError('账户服务暂未支持流式回答，请稍后重试。')
+            event='';size=0;completed=False
+            for raw in reply:
+                size+=len(raw)
+                if size>4*1024*1024:raise AccountError('账户响应内容过大。')
+                if _token!=session or not _user or _user['id']!=identity:
+                    raise AccountError('当前账户已变化，请重新提问。')
+                line=raw.decode('utf-8').strip()
+                if line.startswith('event:'):event=line[6:].strip()
+                elif line.startswith('data:'):
+                    value=json.loads(line[5:])
+                    if event=='error':raise AccountError(value.get('detail','生成未完成，请重试。'))
+                    if event=='done':
+                        if value.get('account',{}).get('id')!=identity:raise AccountError('账户响应不匹配。')
+                        _user=dict(_user,balance=value['account']['balance']);completed=True
+                    yield event,value
+            if not completed:raise AccountError('连接已中断，回答尚未完成，请重试。')
+    except urllib.error.HTTPError as exc:
+        try:detail=json.loads(exc.read(65536)).get('detail')
+        except (ValueError,AttributeError):detail=None
+        raise AccountError(detail if isinstance(detail,str) else '账户请求未完成，请重试。',exc.code) from None
+    except (urllib.error.URLError,TimeoutError,OSError):
+        raise AccountError('连接中断或超时，请检查网络后重试。') from None

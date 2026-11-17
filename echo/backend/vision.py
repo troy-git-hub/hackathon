@@ -12,6 +12,7 @@ Echo - 「圈一下问 AI」（视觉问答）
 import base64
 import logging
 import threading
+import io
 from echo.backend.context import bounded_text, recent_turns
 from typing import Callable, List, Optional
 
@@ -85,6 +86,14 @@ class VisionChat:
 
     def __init__(self, image_png: Optional[bytes], context: str = ""):
         self.image_png = image_png
+        self.image_url = None
+        if image_png:
+            from PIL import Image
+            with Image.open(io.BytesIO(image_png)) as image:
+                if image.width*image.height>24_000_000:raise ValueError('截图过大，请缩小圈选范围。')
+                image=image.convert('RGB');image.thumbnail((1600,1600))
+                output=io.BytesIO();image.save(output,format='JPEG',quality=88)
+            self.image_url='data:image/jpeg;base64,'+base64.b64encode(output.getvalue()).decode()
         self.context = context
         self.history: List[dict] = []
         self._busy = threading.Lock()
@@ -93,13 +102,13 @@ class VisionChat:
     def ask(self, question: str,
             on_delta: Callable[[str], None],
             on_done: Callable[[str], None],
-            on_error: Callable[[str], None]):
+            on_error: Callable[[str], None], on_reasoning=None):
         """后台线程流式回答。on_delta 收增量文本，on_done 收完整答案。"""
         if not self._busy.acquire(blocking=False):
             on_error("上一个问题还在回答中")
             return
         self._cancel.clear()
-        threading.Thread(target=self._run, args=(question, on_delta, on_done, on_error),
+        threading.Thread(target=self._run, args=(question, on_delta, on_done, on_error, on_reasoning),
                          daemon=True, name="echo-vision").start()
 
     def cancel(self):
@@ -113,19 +122,17 @@ class VisionChat:
             text = f"【学生的问题】{question}"
             content = [{"type": "text", "text": text}]
             if self.image_png:
-                b64 = base64.b64encode(self.image_png).decode()
-                content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}})
+                content.append({"type": "image_url", "image_url": {"url": self.image_url}})
             msgs.append({"role": "user", "content": content})
         else:
             # 追问时把图再带上，避免模型丢掉视觉上下文
             content = [{"type": "text", "text": question}]
             if self.image_png:
-                b64 = base64.b64encode(self.image_png).decode()
-                content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}})
+                content.append({"type": "image_url", "image_url": {"url": self.image_url}})
             msgs.append({"role": "user", "content": content})
         return msgs
 
-    def _run(self, question, on_delta, on_done, on_error):
+    def _run(self, question, on_delta, on_done, on_error, on_reasoning=None):
         spec = providers.vision()
         try:
             client, model, extra = _make_client()
@@ -140,12 +147,14 @@ class VisionChat:
                 if self._cancel.is_set():
                     stream.close()
                     return
+                thought = getattr(chunk.choices[0].delta, "reasoning_content", None) if chunk.choices else None
+                if thought and on_reasoning:on_reasoning(thought)
                 delta = chunk.choices[0].delta.content if chunk.choices else None
                 if delta:
                     parts.append(delta)
                     on_delta(delta)
             answer = "".join(parts).strip()
-            self.history = recent_turns(msgs[1:] + [{"role": "assistant", "content": answer}])
+            self.history = recent_turns(self.history + [{"role":"user","content":question}, {"role": "assistant", "content": answer}])
             awareness.note("circle", question, answer)
             on_done(answer)
         except Exception as e:
@@ -180,18 +189,18 @@ class LessonAsk:
         self._busy = threading.Lock()
         self._cancel = threading.Event()
 
-    def ask(self, question, on_delta, on_done, on_error):
+    def ask(self, question, on_delta, on_done, on_error, on_reasoning=None):
         if not self._busy.acquire(blocking=False):
             on_error("上一个问题还在回答中")
             return
         self._cancel.clear()
-        threading.Thread(target=self._run, args=(question, on_delta, on_done, on_error),
+        threading.Thread(target=self._run, args=(question, on_delta, on_done, on_error, on_reasoning),
                          daemon=True, name="echo-ask").start()
 
     def cancel(self):
         self._cancel.set()
 
-    def _run(self, question, on_delta, on_done, on_error):
+    def _run(self, question, on_delta, on_done, on_error, on_reasoning=None):
         try:
             if getattr(self.engine, "session", None) != self.session:
                 raise RuntimeError("课程已切换，请重新打开答疑")
@@ -218,6 +227,8 @@ class LessonAsk:
                 if self._cancel.is_set() or getattr(self.engine, "session", None) != self.session:
                     stream.close()
                     return
+                thought = getattr(chunk.choices[0].delta, "reasoning_content", None) if chunk.choices else None
+                if thought and on_reasoning:on_reasoning(thought)
                 delta = chunk.choices[0].delta.content if chunk.choices else None
                 if delta:
                     parts.append(delta)

@@ -172,6 +172,13 @@ class SettingsDialog(QDialog):
         self.user_edit.setFont(font(12))
         form.addRow(tr("用户：", "User:"), self.user_edit)
 
+        self.reasoning_combo = _Combo()
+        for title, value in [("关闭 · 直接回答", "none"), ("低 · 默认", "low"), ("高", "high"), ("最高", "max")]:
+            self.reasoning_combo.addItem(title, value)
+        self.reasoning_combo.setCurrentIndex(max(0, self.reasoning_combo.findData(self._kv.get("ECHO_REASONING_EFFORT", "low"))))
+        self.reasoning_combo.setToolTip("用于支持思考的 DS 模型；思考会增加等待和学习点消耗。")
+        form.addRow("DS 思考强度：", self.reasoning_combo)
+
         self.advanced_widget = QWidget()
         advanced_form = QFormLayout(self.advanced_widget)
         self.custom_api = QCheckBox(tr("使用自己的模型 API（高级）", "Use my own model API (advanced)"))
@@ -215,7 +222,7 @@ class SettingsDialog(QDialog):
         from echo.widgets.update_center import DEFAULT_URL
         update_settings = QSettings("Echo", "Echo")
         configured_url = update_settings.value("update_url", DEFAULT_URL, type=str)
-        if configured_url in ('http://127.0.0.1:8787','http://localhost:8787') and not update_settings.value('advanced_update_override',False,type=bool):
+        if configured_url.rstrip('/') in ('http://127.0.0.1:8787','http://localhost:8787'):
             configured_url=DEFAULT_URL
         self.update_url = QLineEdit(configured_url)
         self.update_url.setPlaceholderText("https://update.echo.xhbtroy.cn")
@@ -605,6 +612,7 @@ class SettingsDialog(QDialog):
         vid = self.vprov.currentData()
         updates = {k: cb.currentData() for k, cb in self.combos.items()}
         updates.update({
+            "ECHO_REASONING_EFFORT": self.reasoning_combo.currentData(),
             "ECHO_ACCOUNT_CUSTOM_API": "1" if self.custom_api.isChecked() else "0",
             "ECHO_LLM_PROVIDER": pid,
             "ECHO_LLM_API_KEY": self.key_edit.text().strip(),

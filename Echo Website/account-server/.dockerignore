@@ -8,6 +8,7 @@
 !qingjuan.py
 !qingjuan_prompts.py
 !billing.py
+!model_stream.py
 !admin_release.py
 !release_manager.py
 !update-public-key.pem

@@ -8,6 +8,7 @@ COPY study.py study_models.py material_parser.py ./
 COPY storage.py personal_summary.py ./
 COPY qingjuan.py qingjuan_prompts.py ./
 COPY billing.py .
+COPY model_stream.py .
 COPY admin_release.py .
 COPY release_manager.py .
 COPY update-public-key.pem .

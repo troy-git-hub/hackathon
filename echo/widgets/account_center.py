@@ -206,9 +206,9 @@ class AccountCenter(QDialog):
 
     def open_cloud(self,view):
         if not self.same_owner():return
-        from echo.widgets.cloud_workspace import open_cloud_workspace
-        self._cloud=open_cloud_workspace(self,view)
-        self._cloud.finished.connect(lambda _:self.refresh() if self.same_owner() else None)
+        from echo.widgets.paper_book import open_paper_book
+        self._cloud=open_paper_book(self,view)
+        if self._cloud:self._cloud.finished.connect(lambda _:self.refresh() if self.same_owner() else None)
 
     def render_summary(self,data):
         if str(data.get('user_id',''))!=self._owner:return
@@ -216,7 +216,7 @@ class AccountCenter(QDialog):
         values={'answered':str(stats.get('answered',0)), 'average_score':'—' if stats.get('average_score') is None else str(stats['average_score']),
                 'materials':str(stats.get('materials',0))+' / '+str(stats.get('papers',0)), 'points':str(usage.get('points',0))}
         for key,text in values.items():self.summary_values[key].setText(text)
-        self.study_detail.setText(f"已交 {stats.get('submitted',0)} 卷 · 进行中 {stats.get('in_progress',0)} · 待回顾 {stats.get('wrong',0)} 题次 · 待批 {stats.get('pending',0)} 题\n个人云端占用 {quota.get('used_bytes',0)/1048576:.1f} MiB · 近七日已完成 {usage.get('completed',0)} 次 AI 辅助，{usage.get('input_tokens',0)+usage.get('output_tokens',0):,} token。均分不含待批试卷。")
+        self.study_detail.setText(f"已交 {stats.get('submitted',0)} 卷 · 进行中 {stats.get('in_progress',0)} · 待回顾 {stats.get('wrong',0)} 题次 · 待批 {stats.get('pending',0)} 题\n个人云端占用 {quota.get('used_bytes',0)/1048576:.1f} MiB · 近七日已完成 {usage.get('completed',0)} 次 AI 辅助。均分不含待批试卷。")
         self.trend.set_items(data.get('daily',[]));self.clear(self.attempts)
         for item in data.get('recent_attempts',[])[:3]:
             if item.get('status')=='submitted':state='待批改' if item.get('pending_count') else str(item.get('score',0))+' 分'

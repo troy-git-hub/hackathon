@@ -201,6 +201,8 @@ class FloatingWindow(QWidget):
     # 断点页的麦克风：转写在后台线程，结果经信号回主线程填进输入框
     _ask_voice_done = pyqtSignal(str)
     # 随时问：回答是流式的，回调在后台线程，经信号回主线程追加文字
+    _qa_reasoning = pyqtSignal(str)
+    _ask_reasoning = pyqtSignal(str)
     _qa_delta = pyqtSignal(str)
     _qa_done = pyqtSignal(str)
     _qa_err = pyqtSignal(str)
@@ -272,6 +274,8 @@ class FloatingWindow(QWidget):
         self._recall_voice_done.connect(self._on_recall_voice_done)
         self._why_ready.connect(self._on_why_ready)
         self._ask_voice_done.connect(self._on_ask_voice_done)
+        self._qa_reasoning.connect(self._on_qa_reasoning)
+        self._ask_reasoning.connect(self._on_ask_reasoning)
         self._qa_delta.connect(self._on_qa_delta)
         self._qa_done.connect(self._on_qa_done)
         self._qa_err.connect(self._on_qa_err)
@@ -1733,7 +1737,7 @@ class FloatingWindow(QWidget):
         self.home_features_grid.addWidget(self.home_weekly_card,1,1)
         self.home_cloud_paper_card = self._home_card(
             tr('清卷 · 云端','Qingjuan · Cloud'),
-            tr('打开账户里的网页试卷，在线作答与复习','Open your cloud papers to answer and review'),
+            tr('通过账户 API 获取试卷，在 Echo 原生界面答题','Get account papers and answer in native Echo'),
             tr('打开','Open'),self._open_cloud_workspace)
         self.home_features_grid.addWidget(self.home_cloud_paper_card,1,2)
         self.home_account_card = self._home_card(
@@ -1760,8 +1764,8 @@ class FloatingWindow(QWidget):
 
     def _open_cloud_workspace(self):
         try:
-            from echo.widgets.cloud_workspace import open_cloud_workspace
-            self._cloud_workspace = open_cloud_workspace(parent=self,view='qingjuan')
+            from echo.widgets.paper_book import open_paper_book
+            self._cloud_workspace = open_paper_book(parent=self,view='qingjuan')
         except ImportError:
             dialogs.info(self,tr('清卷 · 云端','Qingjuan · Cloud'),
                 tr('当前版本尚未包含云端学习窗口，请使用完成集成后的版本。','This version does not include the cloud workspace yet.'))
@@ -3098,7 +3102,15 @@ class FloatingWindow(QWidget):
         self.qa_dots.start()
         self.qa_loading.show()
         self._qa_reply = None
-        self._qa_chat.ask(q, self._qa_delta.emit, self._qa_done.emit, self._qa_err.emit)
+        self._qa_thought = None
+        self._qa_chat.ask(q, self._qa_delta.emit, self._qa_done.emit, self._qa_err.emit, self._qa_reasoning.emit)
+
+    def _on_qa_reasoning(self, piece):
+        if self._qa_thought is None:
+            self._qa_thought=self._qa_bubble("思考过程\n", "echo")
+            self._qa_thought.setStyleSheet(self._qa_thought.styleSheet()+f"color:{Colors.TEXT_SECONDARY};font-size:11px;")
+        self._qa_thought.setText((self._qa_thought.text()+piece)[-12000:])
+        self._fit()
 
     def _on_qa_delta(self, piece: str):
         if self._qa_reply is None:
@@ -3672,6 +3684,7 @@ class FloatingWindow(QWidget):
                               f"{tr('Echo 正在想…', 'Echo is thinking…')}</span>")
         self.ask_btn.setEnabled(False)
         self._ask_buf = ""
+        self._ask_thought = ""
         bp = self.last_bp
         if self._ask is None:
             from echo.backend.vision import LessonAsk
@@ -3680,7 +3693,11 @@ class FloatingWindow(QWidget):
                 extra = (f"刚才定位到的知识断点：{bp.concept}\n缺失的这一步：{bp.missing}"
                          f"\n为什么容易掉队：{bp.reason}")
             self._ask = LessonAsk(self.echo.engine, extra, kind="lost")
-        self._ask.ask(q, self._ask_delta.emit, self._ask_done.emit, self._ask_err.emit)
+        self._ask.ask(q, self._ask_delta.emit, self._ask_done.emit, self._ask_err.emit, self._ask_reasoning.emit)
+
+    def _on_ask_reasoning(self, piece):
+        self._ask_thought=(self._ask_thought+piece)[-12000:]
+        self._render_ask()
 
     def _on_ask_delta(self, d):
         self._ask_buf += d
@@ -3698,7 +3715,8 @@ class FloatingWindow(QWidget):
 
     def _render_ask(self):
         body = html.escape(self._ask_buf).replace("\n", "<br>")
-        self.ask_view.setHtml(body)
+        thought=html.escape(getattr(self,"_ask_thought","")).replace("\n","<br>")
+        self.ask_view.setHtml((f"<p style='color:{Colors.TEXT_SECONDARY};font-size:11px'>思考过程<br>{thought}</p>" if thought else "")+body)
         self.ask_view.verticalScrollBar().setValue(self.ask_view.verticalScrollBar().maximum())
 
     def _ack(self, btn):

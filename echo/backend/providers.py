@@ -146,16 +146,23 @@ def vision() -> dict:
 
 def vision_extra(spec):
     """Common request options for every visual entry point."""
-    return {"thinking": {"type": "disabled"}} if spec["id"] == "deepseek" else {}
+    if spec["id"] == "deepseek":
+        return {"thinking": {"type": "disabled"}}
+    if spec["id"] == "qwen" and spec["model"].startswith("qwen3-vl"):
+        return {"enable_thinking": False}
+    return {}
 
 
 def text_extra(spec):
-    # These UI flows need a direct answer within a small output budget.
-    return {"thinking": {"type": "disabled"}} if spec["id"] == "deepseek" and spec["model"] == "deepseek-flash" else {}
+    if spec['id']=='deepseek' and spec['model'] in ('deepseek-flash','deepseek-v4-pro'):
+        level=os.getenv('ECHO_REASONING_EFFORT','low')
+        return {'thinking':{'type':'disabled' if level=='none' else 'enabled'}, **({'reasoning_effort':level} if level!='none' else {})}
+    return {}
 
 
 def api_error(error, spec):
     """Actionable diagnostics without displaying raw responses or credentials."""
+    if spec.get("id")=="echo":return str(error)
     detail = f"{label(spec['id'])} · {spec['model']}"
     status = getattr(error, "status_code", None)
     if status == 404:

@@ -366,7 +366,7 @@
     toolbar.append(actions);host.append(toolbar);const note=el('p',submitted?'客观判分完成；待批题不等于判错。':'答案自动保存；网络失败时草稿暂存当前浏览器会话。','study-save-note');note.id='study-save-note';host.append(note);
     if(submitted)host.append(el('p',`已判得分 ${Number(a.score||0).toFixed(1)} 分 · ${a.pending_count||0} 题待批改${a.pending_count?'，当前分数不是最终成绩。':'。'} · 切屏等记录 ${a.events_count||0} 次`,'practice-feedback'));
     for(const item of a.questions) {
-      const card=el('article',undefined,'study-question');card.append(el('span',(typeNames[item.type]||item.type)+' · '+item.points+' 分'+(item.source_label?' · '+item.source_label:''),'study-kicker'),el('h3',item.question));
+      const card=el('article',undefined,'study-question');card.append(el('span',(typeNames[item.type]||item.type)+' · '+Number(item.points||0).toFixed(2)+' 分'+(item.source_label?' · '+item.source_label:''),'study-kicker'),el('h3',item.question));
       if(item.figure&&window.QJFigures){const figure=el('div',undefined,'qj-paper-dark');figure.innerHTML=window.QJFigures.renderFigure(item.figure,'line');card.append(figure);}
       if(['single_choice','multiple_choice','true_false'].includes(item.type)) {
         const options=el('div',undefined,'practice-options');(item.options||[]).forEach((text,i)=>{
@@ -389,6 +389,7 @@
       }
       host.append(card);
     }
+    if(window.renderMathInElement)window.renderMathInElement(host,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\(',right:'\\)',display:false},{left:'\\[',right:'\\]',display:true}],throwOnError:false,trust:false});
   }
   function formatAnswer(question,answer) {
     if(Array.isArray(answer))return answer.map(a=>typeof a==='number'?String.fromCharCode(65+a):String(a)).join('、');

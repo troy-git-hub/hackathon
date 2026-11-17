@@ -168,7 +168,7 @@ def install(app,core):
                 if previous.get('qingjuan_id')!=pid:fail(409,'该请求编号已用于另一场考试，请刷新后重试。')
                 return services['public'](previous)
             questions=convert(paper,pid)
-            record=services['create_paper'](c,uid,aid,'exam','清卷 · '+paper['meta']['title'],questions,paper['meta']['duration'],anti)
+            record=services['create_paper'](c,uid,aid,'exam',paper['meta']['title'],questions,paper['meta']['duration'],anti)
             total=sum(q['qingjuan_score'] for q in record['questions'])
             for q in record['questions']:q['points']=100*q['qingjuan_score']/total
             record['qingjuan_id']=pid;services['put_attempt'](c,uid,record)

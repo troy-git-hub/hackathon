@@ -369,6 +369,7 @@ def _plain(text: str) -> str:
 
 class AskPanel(QWidget):
     _delta = pyqtSignal(str)
+    _reasoning = pyqtSignal(str)
     _done = pyqtSignal(str)
     _error = pyqtSignal(str)
 
@@ -385,6 +386,8 @@ class AskPanel(QWidget):
         self._last_q = ""
         self.transcript_html = ""
         self._drag = None
+        self.reasoning = ""
+        self._reasoning.connect(self._on_reasoning)
         self._delta.connect(self._on_delta)
         self._done.connect(self._on_done)
         self._error.connect(self._on_error)
@@ -536,7 +539,8 @@ class AskPanel(QWidget):
         self.answer = ""
         self._set_busy(True)
         self._render(thinking=True)
-        self.chat.ask(q, self._delta.emit, self._done.emit, self._error.emit)
+        self.reasoning = ""
+        self.chat.ask(q, self._delta.emit, self._done.emit, self._error.emit, self._reasoning.emit)
         self.adjustSize()
 
     def _set_busy(self, busy):
@@ -549,9 +553,19 @@ class AskPanel(QWidget):
         if thinking and not self.answer:
             body = (f"<span style='color:{Colors.TEXT_SECONDARY}'>"
                     f"{tr('Echo 正在看你圈的地方…', 'Echo is looking at what you circled…')}</span>")
-        self.view.setHtml(self.transcript_html + f"<p style='line-height:150%; margin:0'>{body}</p>")
+        thought = self._thought_html()
+        self.view.setHtml(self.transcript_html + thought + f"<p style='line-height:150%; margin:0'>{body}</p>")
         sb = self.view.verticalScrollBar()
         sb.setValue(sb.maximum())
+
+    def _thought_html(self):
+        if not self.reasoning:return ""
+        text=html.escape(self.reasoning[-12000:]).replace("\n", "<br>")
+        return f"<p style='color:{Colors.TEXT_SECONDARY};font-size:11px'>思考过程<br>{text}</p>"
+
+    def _on_reasoning(self, text):
+        self.reasoning += text
+        self._render(thinking=True)
 
     def _on_delta(self, d):
         self.answer += d
@@ -560,7 +574,7 @@ class AskPanel(QWidget):
     def _on_done(self, answer):
         self.answer = answer
         body = html.escape(_plain(answer)).replace("\n", "<br>")
-        self.transcript_html += f"<p style='line-height:150%; margin:0'>{body}</p>"
+        self.transcript_html += self._thought_html() + f"<p style='line-height:150%; margin:0'>{body}</p>"
         self.view.setHtml(self.transcript_html)
         self.view.verticalScrollBar().setValue(self.view.verticalScrollBar().maximum())
         self._set_busy(False)

@@ -736,6 +736,7 @@ async def call_model(task,context):
     if not origin.startswith('https://') or not key or not model:fail(503,'账户模型服务尚未配置。')
     body={'model':model,'messages':context['messages'],'max_tokens':context.get('max_tokens',1200),'stream':False}
     if urlsplit(origin).hostname=='api.deepseek.com' and model=='deepseek-flash':body['thinking']={'type':'disabled'}
+    if task=='vision' and model.startswith('qwen3-vl') and urlsplit(origin).hostname in ('dashscope.aliyuncs.com','dashscope-intl.aliyuncs.com'):body['enable_thinking']=False
     if context.get('response_format')=={'type':'json_object'}:body['response_format']={'type':'json_object'}
     body['temperature']=context.get('temperature',0.3)
     async with httpx.AsyncClient(timeout=50) as client:
@@ -773,6 +774,7 @@ async def echo_inference(request:Request):
     task=data.get('task');context=data.get('context')
     if task not in ('text','vision') or not isinstance(context,dict):fail(400,'Echo 请求任务不正确。')
     messages=context.get('messages');length=context.get('max_tokens',1200);temperature=context.get('temperature',0.3)
+    if context.get('reasoning_effort','low') not in ('none','low','high','max'):fail(400,'思考强度不正确。')
     output_limit=10000 if purpose=='quiz' and task=='text' else 4096
     if not isinstance(messages,list) or not 1<=len(messages)<=60 or type(length)!=int or not 1<=length<=output_limit or type(temperature) not in (int,float) or not 0<=temperature<=2:fail(400,'模型请求超出限制。')
     for msg in messages:
@@ -789,6 +791,9 @@ async def echo_inference(request:Request):
             fail(429,'已有请求正在处理，请稍后再试。')
         context=billing.reserve(c,globals(),user,request_id,request_hash,task,purpose,context)
         c.execute('UPDATE inference_requests SET result=NULL WHERE finished<?',(now()-600,))
+    if data.get('stream') is True:
+        from model_stream import response
+        return response(globals(),user,request_id,task,context,protocol)
     try:
         async with asyncio.timeout(55):result=await call_model(task,context)
         encoded=seal(json.dumps(result,ensure_ascii=False),'result:'+user['id']+':'+request_id)

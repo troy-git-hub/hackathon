@@ -70,6 +70,7 @@ class DockChat(QWidget):
     """挂边小球点开的小窗。engine 可为 None（无课堂上下文，只提示不能回答）。"""
 
     W, H = 260, 360
+    _reasoning = pyqtSignal(str)
     _delta = pyqtSignal(str)
     _done = pyqtSignal(str)
     _error = pyqtSignal(str)
@@ -82,6 +83,7 @@ class DockChat(QWidget):
         self._ask = LessonAsk(engine, kind="dock") if engine is not None else None
         self._stream_lbl = None
 
+        self._reasoning.connect(self._on_reasoning)
         self._delta.connect(self._on_delta)
         self._done.connect(self._on_done)
         self._error.connect(self._on_error)
@@ -215,7 +217,15 @@ class DockChat(QWidget):
         lb = self._add_msg("", False)
         self._stream_lbl = lb
         self.btn_send.setEnabled(False)
-        self._ask.ask(text, self._delta.emit, self._done.emit, self._error.emit)
+        self._thought_lbl=None
+        self._ask.ask(text, self._delta.emit, self._done.emit, self._error.emit, self._reasoning.emit)
+
+    def _on_reasoning(self, text):
+        if self._thought_lbl is None:
+            self._thought_lbl=self._add_msg("思考过程\n",False)
+            self._thought_lbl.setStyleSheet(self._thought_lbl.styleSheet()+f"color:{Colors.TEXT_SECONDARY};font-size:11px;")
+        self._thought_lbl.setText((self._thought_lbl.text()+text)[-12000:])
+        self._scroll_bottom()
 
     def _on_delta(self, d):
         if self._stream_lbl is not None:

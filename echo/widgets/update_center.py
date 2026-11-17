@@ -51,7 +51,9 @@ class UpdateController(QObject):
     def url(self):
         settings=QSettings("Echo", "Echo")
         configured=settings.value("update_url", DEFAULT_URL, type=str)
-        if configured in ("http://127.0.0.1:8787", "http://localhost:8787") and not settings.value('advanced_update_override',False,type=bool):
+        if configured in ("http://127.0.0.1:8787", "http://localhost:8787", "http://127.0.0.1:8787/", "http://localhost:8787/"):
+            settings.setValue("update_url",DEFAULT_URL)
+            settings.setValue("advanced_update_override",False)
             return DEFAULT_URL
         return configured
 

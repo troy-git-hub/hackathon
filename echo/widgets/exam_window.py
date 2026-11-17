@@ -15,15 +15,8 @@ _windows = []
 
 
 def open_exam_window(engine=None, parent=None):
-    for existing in _windows:
-        if existing._owner == exam.owner():
-            existing.show(); existing.raise_(); existing.activateWindow()
-            return existing
-    window = ExamWindow(engine,parent)
-    _windows.append(window)
-    window.finished.connect(lambda: _windows.remove(window) if window in _windows else None)
-    window.show()
-    return window
+    from echo.widgets.paper_book import open_paper_book
+    return open_paper_book(parent=parent)
 
 
 class ExamWindow(QDialog):
