@@ -9,7 +9,8 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-os.environ.update(ECHO_THEME="dark",QT_QPA_PLATFORM="windows")
+native_shots="--shots" in sys.argv
+os.environ.update(ECHO_THEME="dark",QT_QPA_PLATFORM="windows" if native_shots and os.name=="nt" else "offscreen")
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication,QLabel,QRadioButton,QCheckBox,QTextEdit
 QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
@@ -71,14 +72,17 @@ def main():
         assert paper['answers']['q3'].startswith('斜率')
         # Screenshot a real native widget, including its QPainter coordinate chart.
         output=Path(__file__).resolve().parents[1]/'artifacts';output.mkdir(exist_ok=True)
-        app.processEvents();window.grab().save(str(output/'echo-native-paper-answer.png'))
+        app.processEvents()
+        if native_shots:window.grab().save(str(output/'echo-native-paper-answer.png'))
         window.submit();wait(window);assert window.paper['status']=='submitted'
         assert any('支出用负数' in label.text() for label in window.findChildren(QLabel))
         user.clear();window.tick();assert window.paper is None and not window.stack.isEnabled()
         assert window.list.count()==0
         window.closed=True;window.close()
         user.update(id=uid)
-        library=PaperBook(autoload=False);library.show();library.refresh();wait(library);app.processEvents();library.grab().save(str(output/'echo-native-paper-library.png'));library.closed=True;library.close()
+        library=PaperBook(autoload=False);library.show();library.refresh();wait(library);app.processEvents()
+        if native_shots:library.grab().save(str(output/'echo-native-paper-library.png'))
+        library.closed=True;library.close()
     assert '$' not in rich('$-5$') and '<sup>2</sup>' in rich('$x^2$')
     assert expression('2*x+1',3)==7
     try:expression('__import__("os").system("x")',1)

@@ -18,8 +18,8 @@ def main():
         root=Path(d);built=root/'built';built.mkdir();(built/'_internal').mkdir();(built/'_internal/runtime.dll').write_bytes(b'fixture');(built/'Echo.exe').write_bytes(b'MZ'+b'fixture'*400)
         private=root/'private.pem';public=root/'public.pem';generate_keys(private,public)
         data=root/'data';package=publish(built,'2.4.1',data,private,public.read_bytes(),['Fixture'])
-        spec=importlib.util.spec_from_file_location('echo_test_release_server',ROOT/'update-server/server.py');server_module=importlib.util.module_from_spec(spec);spec.loader.exec_module(server_module)
-        server=server_module.create_server(data,host='127.0.0.1',port=0)
+        from scripts.update_http_fixture import create_server
+        server=create_server(data,host='127.0.0.1',port=0)
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         try:
             info=updater.check_update('http://127.0.0.1:'+str(server.server_port),current='2.4.0',public_key=public.read_bytes())

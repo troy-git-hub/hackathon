@@ -31,9 +31,13 @@ def main():
         with patch.object(account,'request',side_effect=[account.AccountError('temporary network'),reply]) as call:
             account.inference('text',{'messages':[{'role':'user','content':'fixture'}]})
             assert call.call_args_list[0].args[1]['request_id']==call.call_args_list[1].args[1]['request_id']
-        with patch.object(account,'inference',return_value={'text':'stream fixture'}) as call:
+        events=iter([('reasoning',{'text':'fixture thought'}),('delta',{'text':'stream '}),('delta',{'text':'fixture'})])
+        with patch.object(account,'inference_stream',return_value=(item for item in events)) as call:
             stream=providers.client(providers.vision()).chat.completions.create(model='echo-vision',messages=[{'role':'user','content':'fixture'}],stream=True)
-            assert ''.join(chunk.choices[0].delta.content for chunk in stream)=='stream fixture'
+            chunks=list(stream)
+            assert ''.join(chunk.choices[0].delta.content or '' for chunk in chunks)=='stream fixture'
+            assert chunks[0].choices[0].delta.reasoning_content=='fixture thought'
+            assert call.call_args.args[0]=='vision'
             stream.close()
         with patch.dict(os.environ,{'ECHO_ACCOUNT_CUSTOM_API':'1'}):assert providers.text()['id']!='echo'
         with patch.object(account,'request',return_value={'ok':True}):account.logout()

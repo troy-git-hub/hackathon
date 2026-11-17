@@ -82,18 +82,15 @@ def main():
             window.home_exam_entry.btn.click()
             assert fake_exam.open_exam_window.call_args.kwargs['engine'] is window.echo.engine
             assert fake_exam.open_exam_window.call_args.kwargs['parent'] is window
-        fake_cloud=ModuleType('echo.widgets.cloud_workspace')
-        fake_cloud.open_cloud_workspace=Mock(return_value=SimpleNamespace())
-        with patch.dict(sys.modules,{'echo.widgets.cloud_workspace':fake_cloud}):
+        fake_native=ModuleType('echo.widgets.paper_book')
+        fake_native.open_paper_book=Mock(return_value=SimpleNamespace())
+        with patch.dict(sys.modules,{'echo.widgets.paper_book':fake_native}):
             window.home_cloud_paper_card.btn.click()
-            fake_cloud.open_cloud_workspace.assert_called_once_with(parent=window,view='qingjuan')
-            assert window._cloud_workspace is fake_cloud.open_cloud_workspace.return_value
-            from echo.widgets.exam_window import ExamWindow
-            cloud_exam=ExamWindow(parent=window)
-            cloud_exam.cloud_paper_button.click()
-            assert fake_cloud.open_cloud_workspace.call_args.kwargs=={'parent':cloud_exam,'view':'qingjuan'}
-            assert cloud_exam._cloud_workspace is fake_cloud.open_cloud_workspace.return_value
-            cloud_exam.close()
+            fake_native.open_paper_book.assert_called_once_with(parent=window,view='qingjuan')
+            assert window._cloud_workspace is fake_native.open_paper_book.return_value
+            from echo.widgets.exam_window import open_exam_window
+            assert open_exam_window(parent=window) is fake_native.open_paper_book.return_value
+            assert fake_native.open_paper_book.call_args.kwargs=={'parent':window}
         assert not any('课前资料库' in button.text() for button in window.stack.widget(HOME).findChildren(QPushButton))
         with patch.object(window,'_open_settings') as open_settings:
             # Rewire the signal only for this isolated navigation check.

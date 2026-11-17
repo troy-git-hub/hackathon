@@ -35,21 +35,19 @@ def main():
         private, public = base/'key.pem', base/'public.pem'
         generate_keys(private, public)
         pub = public.read_bytes()
-        file = base/'Echo-Setup-2.4.1.exe'
+        file = base/'Echo-Setup-9.4.1.exe'
         file.write_bytes(b'MZ' + b'TEST PACKAGE' * 40000)
         data = base/'server'
-        envelope = publish(file, '2.4.1', private, data, ['测试更新；不是真实安装程序'], pub, validate_pe=False)
-        spec = importlib.util.spec_from_file_location('update_server', ROOT/'update-server/server.py')
-        service = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(service)
-        server = service.create_server(data, host='127.0.0.1', port=0)
+        envelope = publish(file, '9.4.1', private, data, ['测试更新；不是真实安装程序'], pub, validate_pe=False)
+        from scripts.update_http_fixture import create_server
+        server = create_server(data, host='127.0.0.1', port=0)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         url = f'http://127.0.0.1:{server.server_port}'
         try:
             result = updater.check_update(url, public_key=pub)
-            assert result['available'] and result['release']['version'] == '2.4.1'
-            assert not updater.check_update(url, current='2.4.1', public_key=pub)['available']
-            assert not updater.check_update(url, current='2.5.0', public_key=pub)['available']
+            assert result['available'] and result['release']['version'] == '9.4.1'
+            assert not updater.check_update(url, current='9.4.1', public_key=pub)['available']
+            assert not updater.check_update(url, current='9.5.0', public_key=pub)['available']
             progress = []
             package = updater.download_update(url, envelope, base/'downloads', lambda n,t: progress.append(n), public_key=pub)
             assert package.read_bytes() == file.read_bytes() and progress[-1] == file.stat().st_size
