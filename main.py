@@ -90,15 +90,6 @@ def main():
     app.aboutToQuit.connect(win._cloud.stop)
     from echo.widgets.update_center import UpdateController
     win._updates = UpdateController(win)
-    def offer_update(version):
-        from PyQt5.QtCore import QSettings
-        from echo.widgets import dialogs
-        settings=QSettings('Echo','Echo')
-        if settings.value('update_notice_version','')==version or win._updates.in_class():return
-        settings.setValue('update_notice_version',version)
-        if dialogs.confirm(win,'Echo 有新版本',f'Echo {version} 已可更新。现在查看更新说明并选择下载吗？\n课堂期间不会自动安装。',ok_text='查看更新'):
-            win._updates.show()
-    win._updates.available.connect(offer_update)
     win._updates.start()
     app.aboutToQuit.connect(win.echo.shutdown)
 

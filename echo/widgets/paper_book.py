@@ -65,6 +65,7 @@ class PaperBook(QDialog):
             QRadioButton::indicator,QCheckBox::indicator{{width:16px;height:16px;border:1px solid {Colors.BORDER_STRONG};background:{Colors.WINDOW_BG};border-radius:8px;}}
             QRadioButton::indicator:checked,QCheckBox::indicator:checked{{background:{Colors.ACCENT};border:3px solid {Colors.SURFACE};}}
             QCheckBox::indicator{{border-radius:4px;}}
+            QSplitter::handle{{background:{Colors.WINDOW_BG};width:8px;}}
         ''')
         root=QVBoxLayout(self);root.setSpacing(10);install_chrome(self,root)
         self.stack=QStackedWidget();root.addWidget(self.stack,1)
@@ -81,6 +82,7 @@ class PaperBook(QDialog):
     def lock(self):
         self.release_focus();self.saver.stop();self.stack.setEnabled(False)
         self.list.clear();self.paper=None;self.answers={};self.rows=[]
+        self.detail_title.clear();self.detail.clear();self.stack.hide()
         self.notice.setText('请登录当前账户后重新打开试卷本。')
         if self.stack.count()>1:
             old=self.stack.widget(1);self.stack.removeWidget(old);old.deleteLater()
@@ -206,6 +208,8 @@ class PaperBook(QDialog):
         top=QHBoxLayout();self.clock=QLabel(paper.get('title','试卷'));top.addWidget(self.clock,1)
         top.addWidget(self.button('保存进度',self.sync));top.addWidget(self.button('重新加载',self.reload))
         self.submit_button=self.button('交卷',self.submit);top.addWidget(self.submit_button)
+        if paper['status']=='submitted' and paper.get('wrong_count',0):top.addWidget(self.button('错题重做',self.retry_wrong))
+        if paper['status']=='submitted' and paper.get('pending_count',0):top.addWidget(self.button('批改主观题',self.grade))
         top.addWidget(self.button('返回试卷本',self.back));layout.addLayout(top)
         self.progress=QLabel();layout.addWidget(self.progress)
         scroll=QScrollArea();scroll.setWidgetResizable(True);self.body=QWidget();self.body.setObjectName("PaperBody");self.body.setAttribute(Qt.WA_StyledBackground,True);questions=QVBoxLayout(self.body);questions.setContentsMargins(0,0,5,10);questions.setSpacing(12)
@@ -272,6 +276,17 @@ class PaperBook(QDialog):
         self.run('submit',lambda:(self.api('/v1/me/study/attempts/'+paper['id']+'/submit',{'answers':answers,'revision':paper['revision']}),version))
     def reload(self):
         if self.paper:self.run('attempt',lambda:self.api('/v1/me/study/attempts/'+self.paper['id']))
+    def retry_wrong(self):
+        if self.busy or not self.paper:return
+        aid=self.paper['id']
+        if getattr(self,'_retry_for',None)!=aid:self._retry_for=aid;self._retry_id=uuid.uuid4().hex
+        self.run('attempt',lambda:self.api('/v1/me/study/attempts/'+aid+'/retry',{'request_id':self._retry_id}))
+    def grade(self):
+        if self.busy or not self.paper:return
+        if QMessageBox.question(self,'主观题批改','使用账户学习点批改主观题？客观题已自动判分。')!=QMessageBox.Yes:return
+        aid=self.paper['id']
+        if getattr(self,'_grade_for',None)!=aid:self._grade_for=aid;self._grade_id=uuid.uuid4().hex
+        self.run('attempt',lambda:self.api('/v1/me/study/attempts/'+aid+'/grade',{'request_id':self._grade_id}))
     def tick(self):
         if not self.same_owner():
             if self.stack.isEnabled():self.lock()

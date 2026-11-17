@@ -24,7 +24,9 @@ try {
     $movedOld = $true
     [IO.Directory]::Move($stagePath, $targetPath)
     $movedNew = $true
-    Start-Process -FilePath (Join-Path $targetPath 'Echo.exe') -WorkingDirectory $targetPath
+    if ($null -eq $updateConfig.restart -or $updateConfig.restart) {
+        Start-Process -FilePath (Join-Path $targetPath 'Echo.exe') -WorkingDirectory $targetPath -WindowStyle Hidden
+    }
     'Update applied. Previous version: ' + $backupPath | Set-Content -LiteralPath $logPath -Encoding UTF8
 } catch {
     if ($movedNew) {

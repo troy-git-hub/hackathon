@@ -227,7 +227,7 @@ class SettingsDialog(QDialog):
         self.update_url = QLineEdit(configured_url)
         self.update_url.setPlaceholderText("https://update.echo.xhbtroy.cn")
         advanced_form.addRow(tr("更新服务地址：", "Update service:"), self.update_url)
-        self.auto_update = QCheckBox(tr("闲置时每天自动检查更新", "Check daily when idle"))
+        self.auto_update = QCheckBox(tr("每次启动检查并后台下载更新", "Check and download on startup"))
         self.auto_update.setChecked(QSettings("Echo", "Echo").value("auto_update_check", True, type=bool))
         form.addRow("", self.auto_update)
         from echo.version import VERSION
@@ -390,7 +390,7 @@ class SettingsDialog(QDialog):
             from echo.widgets import dialogs
             dialogs.warn(self, "更新地址不可用", str(exc))
             return
-        self._update_controller().show()
+        self._update_controller().show(parent=self)
 
     def _export_format_help(self):
         from echo.widgets import dialogs

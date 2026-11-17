@@ -32,6 +32,10 @@ class UpdateController(QObject):
         self.cancel_event = threading.Event()
         self.next_auto = 0
         self.dialog = None
+        self._startup_checked = False
+        self._automatic = False
+        self._exit_applied = False
+        if QApplication.instance():QApplication.instance().aboutToQuit.connect(self._apply_on_exit)
         self.completed.connect(self._finished)
         self.progressed.connect(self._progress)
         self.poll = QTimer(self, interval=60000)
@@ -43,7 +47,7 @@ class UpdateController(QObject):
         if not paths.is_frozen():
             return
         self.poll.start()
-        QTimer.singleShot(15000, self.auto_check)
+        QTimer.singleShot(3000, self.auto_check)
 
     def in_class(self):
         return bool(getattr(getattr(getattr(self.owner, "echo", None), "engine", None), "active", False))
@@ -61,17 +65,14 @@ class UpdateController(QObject):
         if not paths.is_frozen():
             return
         settings = QSettings("Echo", "Echo")
-        if self.in_class() or self.state in ("checking", "downloading", "ready", "available"):
+        if self.state in ("checking", "downloading", "ready", "available"):
             self.changed.emit()
             return
         if not settings.value("auto_update_check", True, type=bool) or time.monotonic() < self.next_auto:
             return
-        try:
-            last = float(settings.value("last_update_check", 0))
-        except (TypeError, ValueError):
-            last = 0
-        if time.time() - last >= 86400:
-            self.check()
+        if not self._startup_checked or time.monotonic()>=self.next_auto:
+            self._startup_checked=True
+            self.check(automatic=True)
 
     def configure(self, url, automatic):
         url = updater.validate_base_url(url)
@@ -85,15 +86,16 @@ class UpdateController(QObject):
         self.state, self.message = "idle", "更新地址已保存"
         self.changed.emit()
 
-    def show(self):
-        if self.dialog is None:
-            self.dialog = UpdateCenter(self)
+    def show(self, parent=None):
+        if self.dialog is None or (parent is not None and self.dialog.parentWidget() is not parent):
+            if self.dialog:self.dialog.close()
+            self.dialog = UpdateCenter(self,parent)
         self.dialog.render()
         self.dialog.show()
         self.dialog.raise_()
         self.dialog.activateWindow()
 
-    def check(self):
+    def check(self, automatic=False):
         if not paths.is_frozen():
             self.state, self.message = 'disabled', '当前为源码开发版，不检查、下载或安装更新。请通过源码仓库更新。'
             self.changed.emit()
@@ -101,6 +103,7 @@ class UpdateController(QObject):
         if self.state in ("checking", "downloading"):
             return
         self.generation += 1
+        self._automatic=automatic
         generation, base = self.generation, self.url()
         self.state, self.message = "checking", "正在连接更新服务…"
         self.changed.emit()
@@ -130,7 +133,7 @@ class UpdateController(QObject):
             try:
                 package = updater.download_update(base, envelope, Path(paths.config_dir()) / "updates",
                     lambda done, total: self.progressed.emit(generation, done, total) if generation == self.generation else None,
-                    cancelled=cancel.is_set)
+                    cancelled=cancel.is_set,max_bytes_per_second=1024*1024 if self._automatic else 0)
                 self.completed.emit(generation, "download", str(package), "")
             except Exception as exc:
                 self.completed.emit(generation, "download", None, str(exc))
@@ -161,16 +164,22 @@ class UpdateController(QObject):
             self.state = "available" if result["available"] else "current"
             self.message = "新版本已就绪，选择下载即可。" if result["available"] else "你正在使用最新版本。"
             QSettings("Echo", "Echo").setValue("last_update_check", time.time())
+            self.next_auto=time.monotonic()+86400
             if result["available"]:
-                self.available.emit(result["release"]["version"])
+                if self._automatic:QTimer.singleShot(0,self.download)
+                else:self.available.emit(result["release"]["version"])
         else:
             logging.getLogger('echo.updater').info('Update package verified: %s', result)
             self.package = Path(result)
             self.state, self.message = "ready", "更新已下载并验证。安装会保留个人资料与学习记录。"
         self.changed.emit()
 
-    def install(self):
-        if self.in_class():
+    def _apply_on_exit(self):
+        if self._automatic and self.state=='ready' and not self._exit_applied and paths.is_frozen():
+            self._exit_applied=True;self.install(quitting=True)
+
+    def install(self, quitting=False):
+        if self.in_class() and not quitting:
             self.message = "请先下课，再安装更新；课堂不会被中断。"
             self.changed.emit()
             return
@@ -188,21 +197,24 @@ class UpdateController(QObject):
             if release['format']=='echo.update/2':
                 from echo.backend import fast_update
                 staged=fast_update.stage(package,paths.app_dir())
-                fast_update.launch(staged,paths.app_dir(),package.parent)
+                fast_update.launch(staged,paths.app_dir(),package.parent,restart=not quitting)
             else:
-                subprocess.Popen([str(package), "/SP-", "/UPDATE=1", f"/DIR={paths.app_dir()}"], close_fds=True)
+                subprocess.Popen([str(package), "/SP-", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/UPDATE=1", f"/DIR={paths.app_dir()}"], close_fds=True)
         except Exception as exc:
             self.state, self.message = "error", str(exc)
             self.changed.emit()
             return
-        if self.owner:
-            self.owner.echo.shutdown()
-        QApplication.instance().quit()
+        self._exit_applied=True
+        self.state='installing';self.changed.emit()
+        if not quitting:
+            if getattr(self.owner,'echo',None):self.owner.echo.shutdown()
+            QApplication.instance().quit()
 
 
 class UpdateCenter(QDialog):
-    def __init__(self, controller):
-        super().__init__(controller.owner)
+    def __init__(self, controller, parent=None):
+        super().__init__(parent or controller.owner,Qt.Window|Qt.WindowStaysOnTopHint)
+        self.setWindowModality(Qt.WindowModal if parent else Qt.NonModal)
         self.controller = controller
         self.setWindowTitle("Echo · 更新中心")
         self.setMinimumWidth(520)
@@ -235,7 +247,7 @@ class UpdateCenter(QDialog):
         self.download_size = QLabel()
         root.addWidget(self.download_size)
         root.addStretch()
-        self.notice = QLabel("课堂期间不会自动检查或安装。下载完成会验证来源和完整性。")
+        self.notice = QLabel("启动时后台检查并限速下载；退出后应用更新，不会中断课堂。")
         self.notice.setWordWrap(True)
         self.notice.setStyleSheet(f"color:{Colors.TEXT_SECONDARY};font-size:12px;")
         root.addWidget(self.notice)
@@ -251,6 +263,8 @@ class UpdateCenter(QDialog):
         self.primary.clicked.connect(self.primary_action)
         row.addWidget(self.primary)
         root.addLayout(row)
+        from echo.widgets.window_chrome import install_chrome
+        install_chrome(self,root)
         controller.changed.connect(self.render)
         self.render()
 
@@ -285,7 +299,7 @@ class UpdateCenter(QDialog):
         if c.state in ("error", "cancelled") and c.info and c.info["available"]:
             text = "重试下载"
         self.primary.setText(text)
-        self.primary.setEnabled(paths.is_frozen() and c.state not in ("checking", "downloading", "disabled") and not (c.state == "ready" and c.in_class()))
+        self.primary.setEnabled(paths.is_frozen() and c.state not in ("checking", "downloading", "disabled", "installing") and not (c.state == "ready" and c.in_class()))
         if c.state == "ready" and c.in_class():
             self.notice.setText("正在上课，更新已经保留。下课后再安装。")
         elif c.state == "ready" and not paths.is_frozen():

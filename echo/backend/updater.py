@@ -9,6 +9,7 @@ import tempfile
 import urllib.parse
 import urllib.request
 import zipfile
+import time
 from pathlib import Path
 
 from echo.backend import paths
@@ -55,8 +56,15 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 def _open(url, timeout=15, auth_token=None):
     headers={"User-Agent": "Echo-Updater/1", "Accept-Encoding": "identity"}
     if auth_token:headers['Authorization']='Bearer '+auth_token
-    return urllib.request.build_opener(_NoRedirect()).open(
-        urllib.request.Request(url, headers=headers), timeout=timeout)
+    import urllib.error,logging
+    try:
+        return urllib.request.build_opener(_NoRedirect()).open(
+            urllib.request.Request(url, headers=headers), timeout=timeout)
+    except urllib.error.HTTPError:
+        raise
+    except (urllib.error.URLError,OSError,TimeoutError):
+        logging.getLogger('echo.updater').exception('Update connection failed')
+        raise UpdateError('无法连接更新服务，请检查网络或代理后重试。') from None
 
 
 def verify_for_client(envelope, public_key=None):
@@ -157,7 +165,7 @@ def _verify_header(path, release):
             if stream.read(2)!=b'MZ':raise UpdateError('下载的文件不是 Windows 安装程序')
 
 
-def download_update(base, envelope, destination, progress=lambda done, total: None, cancelled=lambda: False, public_key=None):
+def download_update(base, envelope, destination, progress=lambda done, total: None, cancelled=lambda: False, public_key=None,max_bytes_per_second=0):
     base = validate_base_url(base)
     release = verify_for_client(envelope, public_key)
     folder = Path(destination).resolve()
@@ -183,7 +191,7 @@ def download_update(base, envelope, destination, progress=lambda done, total: No
                 response=_open(account.API_ORIGIN+'/v1/beta/download',timeout=20,auth_token=account.token())
             else:response=_open(base + '/artifacts/' + release['filename'],timeout=20)
             with response:
-                received = 0
+                received = 0;started=time.monotonic()
                 while True:
                     if cancelled():
                         raise Cancelled("已取消下载")
@@ -195,6 +203,10 @@ def download_update(base, envelope, destination, progress=lambda done, total: No
                         raise UpdateError("下载内容超出声明大小")
                     output.write(chunk)
                     progress(received, release["size"])
+                    if max_bytes_per_second:
+                        while received/max_bytes_per_second-(time.monotonic()-started)>0:
+                            if cancelled():raise Cancelled('已取消下载')
+                            time.sleep(max(0,min(.1,received/max_bytes_per_second-(time.monotonic()-started))))
         # Check the same bytes before they become the installable cached file.
         if temporary.stat().st_size != release["size"]:
             raise UpdateError("下载未完成，请重试")

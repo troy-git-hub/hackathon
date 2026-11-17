@@ -57,13 +57,13 @@ def stage(package,target):
         if folder.parent==target.parent and folder.name.startswith('.echo-stage-'):shutil.rmtree(folder)
         raise
 
-def launch(stage_dir,target,work_dir):
+def launch(stage_dir,target,work_dir,restart=True):
     if os.name!='nt':raise ValueError('快速更新目前仅支持 Windows')
     target=Path(target).resolve();stage_dir=Path(stage_dir).resolve()
     if stage_dir.parent!=target.parent or not stage_dir.name.startswith('.echo-stage-') or not (stage_dir/'Echo.exe').is_file():raise ValueError('暂存目录无效')
     work=Path(work_dir).resolve();work.mkdir(parents=True,exist_ok=True)
     config=work/('apply-'+os.urandom(8).hex()+'.json')
-    config.write_text(json.dumps({'target':str(target),'stage':str(stage_dir),'parent_id':os.getpid()}),encoding='utf-8')
+    config.write_text(json.dumps({'target':str(target),'stage':str(stage_dir),'parent_id':os.getpid(),'restart':restart}),encoding='utf-8')
     from echo.backend import paths
     helper=work/(config.stem+'.ps1')
     shutil.copyfile(paths.asset('assets','apply-update.ps1'),helper)
