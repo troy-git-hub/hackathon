@@ -59,3 +59,15 @@ mindmap.json
 /cloud-sync.json
 /exams/
 /.cloud-sync-*.tmp
+
+# Website/backend/deployment live only on the private local workspace and server.
+/Echo Website/
+/update-server/
+/scripts/web_*
+/scripts/cloud_workspace_check.py
+**/Dockerfile
+**/compose.yaml
+**/compose.yml
+**/docker-compose.yaml
+**/docker-compose.yml
+/paper-drafts/

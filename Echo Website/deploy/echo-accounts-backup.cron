@@ -1,2 +1,0 @@
-# Server timezone: Etc/UTC. Runs at 11:15 Asia/Shanghai.
-15 3 * * * root /opt/echo/backup-accounts.sh >> /var/log/echo-accounts-backup.log 2>&1
