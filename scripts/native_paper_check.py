@@ -11,7 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 os.environ.update(ECHO_THEME="dark",QT_QPA_PLATFORM="windows")
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QApplication,QLabel
+from PyQt5.QtWidgets import QApplication,QLabel,QRadioButton,QCheckBox,QTextEdit
 QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
 from echo.backend import account,paper_cache,paths
 from echo.widgets.paper_book import PaperBook,rich
@@ -57,17 +57,18 @@ def main():
         window.open_selected();wait(window);print("ATTEMPT_READY",flush=True)
         assert window.stack.currentIndex()==1
         assert not any('WebEngine' in type(w).__name__ for w in window.findChildren(QLabel))
-        window.changed('q1',1);window.choose_many('q2',0,True);window.choose_many('q2',1,True)
+        window.body.findChildren(QRadioButton)[1].click();window.body.findChildren(QCheckBox)[0].click();window.body.findChildren(QCheckBox)[1].click()
         window.sync();wait(window)
         assert paper['answers']['q1']==1 and paper['revision']==1
-        window.changed('q3','斜率表示自变量每增加一单位时，函数值的变化。')
+        window.body.findChildren(QTextEdit)[0].setPlainText('斜率表示自变量每增加一单位时，函数值的变化。')
         fail=True;window.sync();wait(window)
         assert '草稿已保留' in window.notice.text()
         assert paper_cache.load(uid,aid)['answers']['q3'].startswith('斜率')
         try:paper_cache.load('different-user',aid)
         except OSError:pass
         else:raise AssertionError('cross-account draft leaked')
-        fail=False
+        fail=False;window.sync();wait(window)
+        assert paper['answers']['q3'].startswith('斜率')
         # Screenshot a real native widget, including its QPainter coordinate chart.
         output=Path(__file__).resolve().parents[1]/'artifacts';output.mkdir(exist_ok=True)
         app.processEvents();window.grab().save(str(output/'echo-native-paper-answer.png'))
