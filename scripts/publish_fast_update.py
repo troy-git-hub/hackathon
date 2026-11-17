@@ -35,6 +35,10 @@ def publish(folder,version,data,private_key,public_key,notes):
                 if file.is_symlink():raise ValueError('构建目录不能包含符号链接')
                 if not file.is_file():continue
                 relative=file.relative_to(folder)
+                # PyInstaller carries these two tokenizer shims in PYZ already.
+                # The unpacked copies are optional; omit them so the client can
+                # keep rejecting every models/ data directory in update archives.
+                if relative.as_posix() in ('_internal/tokenizers/models/__init__.py','_internal/tokenizers/models/__init__.pyi'):continue
                 if any(p.lower() in ('.env','models','lessons.json','profile.json','review.json','account.env') for p in relative.parts):raise ValueError('构建目录中发现私密配置或用户数据')
                 if file.name.lower().startswith('unins'):continue
                 archive.write(file,relative.as_posix())

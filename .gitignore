@@ -71,3 +71,14 @@ mindmap.json
 **/docker-compose.yaml
 **/docker-compose.yml
 /paper-drafts/
+
+# Private service architecture and website documents
+/docs/Echo-PRD与技术交接说明.md
+/docs/account-api.md
+/docs/cloud-workspace.md
+/docs/更新后台.md
+/docs/清卷-上游快照.json
+/docs/清卷接入与本轮交付.md
+/docs/用户中心-个人学习摘要.md
+/docs/网页学习空间-体验与接口.md
+/docs/网页学习空间-后端接口.md
