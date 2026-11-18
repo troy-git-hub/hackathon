@@ -31,7 +31,7 @@ def main():
                 assert opened.call_args.kwargs['auth_token']=='fixture-session'
     import io,zipfile
     zipped=io.BytesIO()
-    with zipfile.ZipFile(zipped,'w') as archive:archive.writestr('Echo.exe',b'MZfixture')
+    with zipfile.ZipFile(zipped,'w') as archive:archive.writestr('Echo.exe',b'MZfixture');archive.writestr('_internal/fixture.dll',b'fixture')
     package=zipped.getvalue();fast={**item,'filename':'Echo-Beta-Update-2.5.2.zip','size':len(package),'sha256':hashlib.sha256(package).hexdigest()}
     fast={**fast,'signature':base64.b64encode(key.sign(updater.canonical(fast))).decode()}
     with patch.object(version,'CHANNEL','beta',create=True),patch.object(account,'token',return_value='fixture-session'):

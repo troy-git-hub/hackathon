@@ -23,7 +23,7 @@ class EchoTitleBar(QWidget):
         row.addWidget(self.close_button)
 
     def control(self,text,tip,slot,close=False):
-        button=QPushButton(text);button.setFixedSize(30,28);button.setToolTip(tip)
+        button=QPushButton(text);button.setFixedSize(36,30);button.setToolTip(tip)
         button.setAccessibleName(tip);button.setCursor(Qt.PointingHandCursor)
         button.setStyleSheet(f'''QPushButton{{min-width:0;min-height:0;padding:0;border:0;
             border-radius:6px;background:transparent;color:{Colors.TEXT_SECONDARY};font-size:18px;}}

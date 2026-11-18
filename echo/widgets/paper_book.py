@@ -65,7 +65,7 @@ class PaperBook(QDialog):
             QRadioButton::indicator,QCheckBox::indicator{{width:16px;height:16px;border:1px solid {Colors.BORDER_STRONG};background:{Colors.WINDOW_BG};border-radius:8px;}}
             QRadioButton::indicator:checked,QCheckBox::indicator:checked{{background:{Colors.ACCENT};border:3px solid {Colors.SURFACE};}}
             QCheckBox::indicator{{border-radius:4px;}}
-            QSplitter::handle{{background:{Colors.WINDOW_BG};width:8px;}}
+            QSplitter::handle{{background:transparent;border:0;width:0;}}
         ''')
         root=QVBoxLayout(self);root.setSpacing(10);install_chrome(self,root)
         self.stack=QStackedWidget();root.addWidget(self.stack,1)
@@ -96,7 +96,7 @@ class PaperBook(QDialog):
         row=QHBoxLayout();self.filter=EchoCombo();self.filter.addItems(['全部试卷','可开始','进行中','已交卷','本地草稿']);self.filter.currentIndexChanged.connect(self.render_list)
         self.search=QLineEdit();self.search.setPlaceholderText('搜索试卷名称');self.search.textChanged.connect(self.render_list)
         row.addWidget(self.filter);row.addWidget(self.search,1);layout.addLayout(row)
-        split=QSplitter();self.list=QListWidget();self.list.currentRowChanged.connect(self.selection);split.addWidget(self.list)
+        split=QSplitter();split.setHandleWidth(0);self.list=QListWidget();self.list.currentRowChanged.connect(self.selection);split.addWidget(self.list)
         detail=QWidget();box=QVBoxLayout(detail);box.setContentsMargins(18,10,8,10)
         self.detail_title=QLabel('让知识，成为你会做的题。');self.detail_title.setWordWrap(True);self.detail_title.setStyleSheet('font-size:20px;font-weight:600;')
         box.addWidget(self.detail_title);self.detail=QLabel('网页青卷与 Echo 共用资料和考试记录。\n选择一份试卷开始原生作答，无需打开内嵌网页。');self.detail.setWordWrap(True);box.addWidget(self.detail)
