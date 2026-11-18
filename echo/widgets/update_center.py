@@ -90,10 +90,6 @@ class UpdateController(QObject):
         if self.dialog is None:
             if self.dialog:self.dialog.close()
             self.dialog = UpdateCenter(self,parent)
-        if parent is not None and parent.windowModality()!=Qt.NonModal:
-            parent._echo_update_modality=parent.windowModality()
-            parent.setWindowModality(Qt.NonModal)
-            self.dialog._settings_window=parent
         self.dialog.render()
         self.dialog.show()
         self.dialog.raise_()
@@ -273,14 +269,6 @@ class UpdateCenter(QDialog):
         install_chrome(self,root)
         controller.changed.connect(self.render)
         self.render()
-
-    def closeEvent(self,event):
-        parent=getattr(self,'_settings_window',None)
-        if parent is not None:
-            try:
-                if parent.isVisible():parent.setWindowModality(getattr(parent,'_echo_update_modality',Qt.ApplicationModal))
-            except RuntimeError:pass
-        super().closeEvent(event)
 
     def primary_action(self):
         state = self.controller.state

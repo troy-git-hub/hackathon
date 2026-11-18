@@ -130,7 +130,8 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(tr("Echo 设置", "Echo Settings"))
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self.setWindowFlags((self.windowFlags() & ~Qt.WindowContextHelpButtonHint)|Qt.Window|Qt.WindowStaysOnTopHint)
+        self.setWindowModality(Qt.NonModal)
         apply_native_titlebar(self)
         self._kv = _read_env()
         self._build()
@@ -244,6 +245,10 @@ class SettingsDialog(QDialog):
             if c.state=='downloading':text+=f'  {c.done/1048576:.1f} / {c.total/1048576:.1f} MB'
             self.update_progress.setText(text or '自动更新开启时，每次启动检查；发现新版后台下载，可在更新中心取消。')
         controller.changed.connect(render_update_progress);render_update_progress()
+        def detach_update_progress(_):
+            try:controller.changed.disconnect(render_update_progress)
+            except (TypeError,RuntimeError):pass
+        self.finished.connect(detach_update_progress)
 
         self.btn_library = QPushButton(tr("知识库 · 教材、讲义与笔记", "Knowledge library · course references"))
         self.btn_library.clicked.connect(self._open_library)
@@ -680,6 +685,15 @@ class SettingsDialog(QDialog):
         self.accept()
 
 
+_settings_window=None
 def open_settings_dialog(parent=None):
-    dlg = SettingsDialog(parent)
-    dlg.exec_()
+    global _settings_window
+    if _settings_window is not None:
+        _settings_window.showNormal();_settings_window.raise_();_settings_window.activateWindow();return _settings_window
+    dlg=SettingsDialog(parent);_settings_window=dlg
+    def closed(_):
+        global _settings_window
+        if _settings_window is dlg:_settings_window=None
+        dlg.deleteLater()
+    dlg.finished.connect(closed)
+    dlg.show();dlg.raise_();dlg.activateWindow();return dlg
