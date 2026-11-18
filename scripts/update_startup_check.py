@@ -18,9 +18,10 @@ def main():
         info={'available':True,'release':{'version':'99.0.0','size':2,'notes':[]},'envelope':{}}
         with patch.object(paths,'is_frozen',return_value=True),patch.object(paths,'config_dir',return_value=folder),patch.object(updater,'check_update',return_value=info) as checks,patch.object(updater,'download_update',return_value=Path(folder)/'fixture.exe') as downloads:
             controller=UpdateController();controller.show(parent=parent)
-            assert controller.dialog.parentWidget() is parent
+            assert controller.dialog.parentWidget() is None
+            assert parent.windowModality()==Qt.NonModal
             assert controller.dialog.windowFlags()&Qt.WindowStaysOnTopHint
-            assert controller.dialog.windowModality()==Qt.WindowModal
+            assert controller.dialog.windowModality()==Qt.NonModal
             controller.auto_check();deadline=time.monotonic()+3
             while controller.state!='ready' and time.monotonic()<deadline:app.processEvents();time.sleep(.01)
             assert controller.state=='ready' and checks.call_count==1 and downloads.call_count==1
@@ -28,7 +29,7 @@ def main():
             controller.auto_check();assert checks.call_count==1
             with patch.object(controller,'install',Mock()) as install:
                 controller._apply_on_exit();controller._apply_on_exit();install.assert_called_once_with(quitting=True)
-            controller.dialog.close();parent.close()
+            controller.dialog.close();assert parent.windowModality()==Qt.ApplicationModal;parent.close()
     print('PASS every-launch check despite recent timestamp, automatic limited download, settings modal ownership, always-on-top and one exit apply')
 
 if __name__=='__main__':main()

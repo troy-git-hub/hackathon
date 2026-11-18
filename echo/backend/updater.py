@@ -78,11 +78,11 @@ def verify_for_client(envelope, public_key=None):
         if not isinstance(key,Ed25519PublicKey):raise ValueError()
         key.verify(base64.b64decode(signature,validate=True),canonical(item))
         version_tuple(item['version'])
-        if (item['filename']!='Echo-Beta-Setup-'+item['version']+'.exe' or type(item['size'])!=int
+        if (item['filename'] not in ('Echo-Beta-Setup-'+item['version']+'.exe','Echo-Beta-Update-'+item['version']+'.zip') or type(item['size'])!=int
             or not 1<=item['size']<=MAX_PACKAGE or not re.fullmatch('[a-f0-9]{64}',item['sha256'])
             or not isinstance(item['notes'],list) or len(item['notes'])>12
             or any(not isinstance(n,str) or len(n)>400 for n in item['notes'])):raise ValueError()
-        return {**item,'format':'echo.update/1','channel':'beta','platform':'windows-x64'}
+        return {**item,'format':'echo.update/2' if item['filename'].endswith('.zip') else 'echo.update/1','channel':'beta','platform':'windows-x64'}
     except Exception as exc:raise UpdateError('内测更新签名或安装包信息无效。') from exc
 
 
@@ -120,7 +120,7 @@ def check_update(base, current=VERSION, public_key=None):
     from echo import version
     if getattr(version,'CHANNEL','stable')=='beta':
         from echo.backend import account
-        envelope=account.request('/v1/beta/update')
+        envelope=account.request('/v1/beta/update?format=2')
         release=verify_for_client(envelope,public_key)
         return {'available':version_tuple(release['version'])>version_tuple(current),'release':release,'envelope':envelope}
     base = validate_base_url(base)
@@ -188,7 +188,7 @@ def download_update(base, envelope, destination, progress=lambda done, total: No
             if release['channel']=='beta':
                 from echo.backend import account
                 if not account.token():raise UpdateError('请先登录内测账户再下载更新。')
-                response=_open(account.API_ORIGIN+'/v1/beta/download',timeout=20,auth_token=account.token())
+                response=_open(account.API_ORIGIN+'/v1/beta/download'+('?format=2' if release['format']=='echo.update/2' else ''),timeout=20,auth_token=account.token())
             else:response=_open(base + '/artifacts/' + release['filename'],timeout=20)
             with response:
                 received = 0;started=time.monotonic()

@@ -100,6 +100,10 @@ def main():
     except Exception as e:
         print(f"[Echo] 语音模型下载询问失败（不影响使用）: {e}")
 
+    def update_notice(version):
+        # Non-modal status only; downloading continues in the background.
+        win.setWindowTitle(f'Echo · 新版本 {version} 正在后台下载')
+    win._updates.available.connect(update_notice)
     tray = EchoTray(app, win)   # 托盘 + 关闭到托盘 + 全局快捷键（Ctrl+Alt+L 掉队 / Ctrl+Alt+E 显示隐藏 / Ctrl+Alt+Q 圈一下问 AI）
 
     pet = DeskPet(win, tray)    # 桌宠：跟着课堂变表情，双击圈一下问 AI

@@ -234,6 +234,17 @@ class SettingsDialog(QDialog):
         self.btn_updates = QPushButton(tr(f"更新中心 · 当前 {VERSION}", f"Update center · {VERSION}"))
         self.btn_updates.clicked.connect(self._open_update_center)
         form.addRow("", self.btn_updates)
+        self.update_progress=QLabel('');self.update_progress.setWordWrap(True)
+        self.update_progress.setStyleSheet(f'color:{Colors.TEXT_SECONDARY};font-size:12px;')
+        form.addRow('',self.update_progress)
+        controller=self._update_controller()
+        def render_update_progress():
+            c=controller
+            text=c.message
+            if c.state=='downloading':text+=f'  {c.done/1048576:.1f} / {c.total/1048576:.1f} MB'
+            self.update_progress.setText(text or '自动更新开启时，每次启动检查；发现新版后台下载，可在更新中心取消。')
+        controller.changed.connect(render_update_progress);render_update_progress()
+
         self.btn_library = QPushButton(tr("知识库 · 教材、讲义与笔记", "Knowledge library · course references"))
         self.btn_library.clicked.connect(self._open_library)
         form.addRow("", self.btn_library)

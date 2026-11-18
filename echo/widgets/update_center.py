@@ -87,9 +87,13 @@ class UpdateController(QObject):
         self.changed.emit()
 
     def show(self, parent=None):
-        if self.dialog is None or (parent is not None and self.dialog.parentWidget() is not parent):
+        if self.dialog is None:
             if self.dialog:self.dialog.close()
             self.dialog = UpdateCenter(self,parent)
+        if parent is not None and parent.windowModality()!=Qt.NonModal:
+            parent._echo_update_modality=parent.windowModality()
+            parent.setWindowModality(Qt.NonModal)
+            self.dialog._settings_window=parent
         self.dialog.render()
         self.dialog.show()
         self.dialog.raise_()
@@ -166,7 +170,9 @@ class UpdateController(QObject):
             QSettings("Echo", "Echo").setValue("last_update_check", time.time())
             self.next_auto=time.monotonic()+86400
             if result["available"]:
-                if self._automatic:QTimer.singleShot(0,self.download)
+                if self._automatic:
+                    self.available.emit(result['release']['version'])
+                    QTimer.singleShot(0,self.download)
                 else:self.available.emit(result["release"]["version"])
         else:
             logging.getLogger('echo.updater').info('Update package verified: %s', result)
@@ -213,8 +219,8 @@ class UpdateController(QObject):
 
 class UpdateCenter(QDialog):
     def __init__(self, controller, parent=None):
-        super().__init__(parent or controller.owner,Qt.Window|Qt.WindowStaysOnTopHint)
-        self.setWindowModality(Qt.WindowModal if parent else Qt.NonModal)
+        super().__init__(None,Qt.Window|Qt.WindowStaysOnTopHint)
+        self.setWindowModality(Qt.NonModal)
         self.controller = controller
         self.setWindowTitle("Echo · 更新中心")
         self.setMinimumWidth(520)
@@ -267,6 +273,14 @@ class UpdateCenter(QDialog):
         install_chrome(self,root)
         controller.changed.connect(self.render)
         self.render()
+
+    def closeEvent(self,event):
+        parent=getattr(self,'_settings_window',None)
+        if parent is not None:
+            try:
+                if parent.isVisible():parent.setWindowModality(getattr(parent,'_echo_update_modality',Qt.ApplicationModal))
+            except RuntimeError:pass
+        super().closeEvent(event)
 
     def primary_action(self):
         state = self.controller.state
