@@ -13,7 +13,7 @@ import datetime
 from PyQt5.QtCore import Qt, QSettings, QStandardPaths
 from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
                              QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                             QVBoxLayout, QWidget, QFileDialog, QScrollArea)
+                             QVBoxLayout, QWidget, QFileDialog, QScrollArea,QListWidget,QListWidgetItem)
 
 from echo.backend import cache, paths, profile, providers
 from echo.theme import Colors, font, dialog_qss, apply_native_titlebar
@@ -269,10 +269,21 @@ class SettingsDialog(QDialog):
         self.cloud_auto=QCheckBox(tr('这台设备自动同步学习档案（登录后生效）','Automatically sync learning data when signed in'))
         self.cloud_auto.setChecked(cloud_sync.status()['enabled'])
         body.addWidget(self.cloud_auto)
+        cloud_state=cloud_sync.status()
+        self.cloud_device_name=QLineEdit(cloud_state.get('device_name','Echo Desktop'))
+        self.cloud_device_name.setMaxLength(60);self.cloud_device_name.setPlaceholderText('例如：我的 Windows 笔记本')
+        body.addWidget(QLabel('本机终端名称'));body.addWidget(self.cloud_device_name)
+        self.cloud_mode=_Combo();self.cloud_mode.addItem('默认合并 · 同步所有终端','merge');self.cloud_mode.addItem('指定来源 · 仅同步勾选终端','selected')
+        self._select(self.cloud_mode,cloud_state.get('mode','merge'));body.addWidget(self.cloud_mode)
+        self.cloud_sources=QListWidget();self.cloud_sources.setMaximumHeight(110);body.addWidget(self.cloud_sources)
+        self.cloud_mode.currentIndexChanged.connect(lambda _:self.cloud_sources.setEnabled(self.cloud_mode.currentData()=='selected'))
+        self.cloud_sources.setEnabled(self.cloud_mode.currentData()=='selected')
+        self.cloud_refresh_sources=QPushButton('刷新终端列表（不调用 AI）');self.cloud_refresh_sources.clicked.connect(self._refresh_cloud_sources);body.addWidget(self.cloud_refresh_sources)
+        self._populate_cloud_sources(cloud_state.get('devices',[]))
         self.cloud_sync_now=QPushButton(tr('立即同步到云端','Sync to cloud now'))
         self.cloud_sync_now.clicked.connect(self._sync_cloud_now);body.addWidget(self.cloud_sync_now)
         self.cloud_sync_status=QLabel('');self.cloud_sync_status.setWordWrap(True);body.addWidget(self.cloud_sync_status)
-        cloud_note=QLabel(tr('知识掌握与复习进度会同步到网页；不上传密钥、录音、截图和原始课件。','Syncs learning indicators and review progress, excluding keys, recordings, screenshots and source materials.'))
+        cloud_note=QLabel(tr('默认合并其他终端的课堂回顾与复习进度；可指定来源或暂停。本机课程保留，不上传密钥、录音、截图和原始课件。','Syncs learning indicators and review progress, excluding keys, recordings, screenshots and source materials.'))
         cloud_note.setWordWrap(True);cloud_note.setStyleSheet(f'color:{Colors.TEXT_SECONDARY};font-size:11px;');body.addWidget(cloud_note)
         self.advanced_toggle = QPushButton(tr("高级设置 · 模型 API 与更新地址", "Advanced · model APIs and update URL"))
         self.advanced_toggle.setCheckable(True)
@@ -372,16 +383,48 @@ class SettingsDialog(QDialog):
         from PyQt5.QtGui import QDesktopServices
         QDesktopServices.openUrl(QUrl(account.USER_CENTER.rsplit('/user',1)[0]+'/admin'))
 
+    def _cloud_scope_options(self):
+        return {'mode':self.cloud_mode.currentData(),'source_ids':[self.cloud_sources.item(i).data(Qt.UserRole) for i in range(self.cloud_sources.count()) if self.cloud_sources.item(i).checkState()==Qt.Checked],
+                'device_name':self.cloud_device_name.text().strip()}
+
+    def _populate_cloud_sources(self,devices):
+        from echo.backend import cloud_sync
+        selected=set(cloud_sync.status().get('source_ids',[]))
+        self.cloud_sources.clear()
+        for device in devices:
+            item=QListWidgetItem(str(device.get('name','Echo 终端'))+' · '+str(device['id'])[:8]);item.setData(Qt.UserRole,device['id']);item.setFlags(item.flags()|Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if device['id'] in selected else Qt.Unchecked);self.cloud_sources.addItem(item)
+        self.cloud_sources.setToolTip('未列出终端时先刷新。选择来源不会删除云端原件；本机原有课程保留。')
+
+    def _refresh_cloud_sources(self):
+        import threading
+        from echo.backend import cloud_sync
+        from echo.widgets.account_login import _Result
+        self.cloud_refresh_sources.setEnabled(False);self.cloud_sync_status.setText('正在获取当前账户的终端列表…')
+        self._source_bus=_Result(self);bus=self._source_bus
+        def finished(kind,value,error):
+            self.cloud_refresh_sources.setEnabled(True)
+            if error:self.cloud_sync_status.setText(error)
+            else:self._populate_cloud_sources(value);self.cloud_sync_status.setText('选择来源后保存，或立即同步。不会调用模型。')
+        bus.done.connect(finished)
+        def run():
+            try:value=cloud_sync.available_sources(refresh=True);error=''
+            except Exception as exc:value=[];error=str(exc)
+            try:bus.done.emit('sources',value,error)
+            except RuntimeError:pass
+        threading.Thread(target=run,daemon=True,name='echo-cloud-sources').start()
+
     def _sync_cloud_now(self):
         import threading
         from echo.backend import cloud_sync
         from echo.widgets.account_login import _Result
-        try:cloud_sync.configure(enabled=self.cloud_auto.isChecked())
+        try:cloud_sync.configure(enabled=self.cloud_auto.isChecked(),**self._cloud_scope_options())
         except Exception as exc:self.cloud_sync_status.setText(str(exc));return
         self.cloud_sync_now.setEnabled(False);self.cloud_sync_status.setText(tr('正在同步…','Syncing…'))
         self._cloud_bus=_Result(self)
         def finished(kind,value,error):
             self.cloud_sync_now.setEnabled(True);self.cloud_sync_status.setText(error or value.get('message',''))
+            if not error:self._populate_cloud_sources(value.get('devices',[]))
         self._cloud_bus.done.connect(finished);bus=self._cloud_bus
         def run():
             try:value=cloud_sync.sync_once();error=''
@@ -678,7 +721,7 @@ class SettingsDialog(QDialog):
             if isinstance(widget, DeskPet):
                 widget.set_skin(skin)
         from echo.backend import cloud_sync
-        try:cloud_sync.configure(enabled=self.cloud_auto.isChecked())
+        try:cloud_sync.configure(enabled=self.cloud_auto.isChecked(),**self._cloud_scope_options())
         except (OSError,ValueError,RuntimeError) as exc:
             from echo.widgets import dialogs
             dialogs.warn(self,tr('同步设置未保存','Sync settings not saved'),str(exc));return

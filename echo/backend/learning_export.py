@@ -82,10 +82,15 @@ def _state(point):
     return "unknown", ["暂无足够记录"]
 
 
-def _build_evidence_snapshot(now=None):
+def _build_evidence_snapshot(now=None,exclude_cloud=False):
     profile = _read("profile.json", dict)
     raw_lessons = _read("lessons.json", list)
+    if exclude_cloud:raw_lessons=[r for r in raw_lessons if not isinstance(r,dict) or not r.get('_cloud_imported')]
     raw_reviews = _read("review.json", list)
+    from echo.backend import account
+    owner=(account.current_user() or {}).get('id')
+    raw_lessons=[r for r in raw_lessons if not isinstance(r,dict) or not r.get('_cloud_account') or r['_cloud_account']==owner]
+    raw_reviews=[r for r in raw_reviews if not isinstance(r,dict) or not r.get('_cloud_account') or r['_cloud_account']==owner]
     warnings = []
     lessons, points, lookup = [], {}, {}
     ordered = sorted((row for row in raw_lessons if isinstance(row, dict)), key=lambda row: _number(row.get("time")) or 0)
@@ -200,12 +205,12 @@ def _build_evidence_snapshot(now=None):
             "warnings": warnings}
 
 
-def build_export(now=None, sections=None):
+def build_export(now=None, sections=None,exclude_cloud=False):
     """Export selected personal indicators, never the per-lesson history."""
     chosen = set(SECTIONS if sections is None else sections)
     if not chosen or chosen - set(SECTIONS):
         raise ValueError("请至少选择一个有效的个人数据项。")
-    snapshot = _build_evidence_snapshot(now)
+    snapshot = _build_evidence_snapshot(now,exclude_cloud=exclude_cloud)
     points = []
     for point in snapshot["knowledge_points"]:
         points.append({key: point[key] for key in ("id", "topic", "subject", "state", "reasons", "latest_mastery")}

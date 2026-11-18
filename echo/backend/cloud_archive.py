@@ -8,9 +8,11 @@ def text(value,limit):
     value=re.sub(r'(?:ghp_|cfat_|sk-)[A-Za-z0-9_-]{12,}','[已隐藏凭证]',value)
     value=re.sub(r'-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----','[已隐藏私钥]',value,flags=re.S)
     return value[:limit]
-def build():
+def build(exclude_cloud=False):
     lessons=[]
-    for item in store.list_lessons(limit=50):
+    items=store.list_lessons()
+    if exclude_cloud:items=[v for v in items if not v.get('_cloud_imported')]
+    for item in items[:50]:
         stamp=item.get('time',0)
         if type(stamp) not in (int,float) or not math.isfinite(stamp) or stamp<=0:continue
         skills=[]

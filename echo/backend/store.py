@@ -82,7 +82,10 @@ def load() -> list:
                 data = json.load(f)
         except (OSError, ValueError):
             return []
-        return data if isinstance(data, list) else []
+        if not isinstance(data,list):return []
+        from echo.backend import account
+        owner=(account.current_user() or {}).get('id')
+        return [v for v in data if not isinstance(v,dict) or not v.get('_cloud_account') or v['_cloud_account']==owner]
 
 
 def _write_json(path, items) -> bool:
@@ -351,7 +354,10 @@ def _load_lessons() -> list:
                 data = json.load(f)
         except (OSError, ValueError):
             return []
-        return data if isinstance(data, list) else []
+        if not isinstance(data,list):return []
+        from echo.backend import account
+        owner=(account.current_user() or {}).get('id')
+        return [v for v in data if not isinstance(v,dict) or not v.get('_cloud_account') or v['_cloud_account']==owner]
 
 
 def _skill_status(sk) -> str:
