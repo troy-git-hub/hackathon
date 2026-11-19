@@ -72,7 +72,7 @@ class PaperBook(QDialog):
         self.notice=QLabel('登录后读取同一账户的网页试卷；答案在本机编辑，保存时通过 API 同步。')
         self.notice.setWordWrap(True);self.notice.setStyleSheet(f'color:{Colors.TEXT_SECONDARY};font-size:11px;');root.addWidget(self.notice)
         self.build_library();self.completed.connect(self.finished_request)
-        self.saver=QTimer(self,interval=1600,singleShot=True);self.saver.timeout.connect(self.sync)
+        self.saver=QTimer(self,interval=20000,singleShot=True);self.saver.timeout.connect(self.sync)
         self.clock_timer=QTimer(self,interval=1000);self.clock_timer.timeout.connect(self.tick);self.clock_timer.start()
         QApplication.instance().applicationStateChanged.connect(self.focus_changed)
         if autoload and self.owner:QTimer.singleShot(0,self.refresh)
@@ -263,7 +263,8 @@ class PaperBook(QDialog):
         self.answers[key]=value[:6000] if isinstance(value,str) else value;self.edit+=1
         try:paper_cache.save(self.owner,self.paper,self.answers);self.notice.setText('草稿已保存在本机，等待同步…')
         except Exception as exc:self.notice.setText('本地保存失败：'+str(exc))
-        self.saver.start();self.tick()
+        if not self.saver.isActive():self.saver.start()
+        self.tick()
     def sync(self):
         if not self.paper or self.paper['status']!='active' or self.busy or self.conflict:return
         paper=copy.deepcopy(self.paper);answers=copy.deepcopy(self.answers);version=self.edit

@@ -67,6 +67,8 @@ class AccountLogin(QDialog):
         form.addRow('验证码',self.code)
         form.addRow('密码',self.password)
         form.addRow('确认密码',self.confirm_password)
+        self.totp=QLineEdit();self.totp.setMaxLength(6);self.totp.setPlaceholderText('已开启验证器时填写');form.addRow('验证器动态码',self.totp)
+        self.recovery=QLineEdit();self.recovery.setMaxLength(80);self.recovery.setPlaceholderText('恢复码可替代动态码');form.addRow('恢复码（可选）',self.recovery)
         root.addLayout(form)
         self.form=form
         self.register.toggled.connect(self._mode)
@@ -75,7 +77,7 @@ class AccountLogin(QDialog):
         self.send=QPushButton('获取验证码');self.send.clicked.connect(self._send)
         self.submit=QPushButton('登录 Echo');self.submit.clicked.connect(self._login)
         row.addWidget(self.send);row.addWidget(self.submit);root.addLayout(row)
-        self.notice=QLabel('内测免费发信模式：收件邮箱须先完成 Cloudflare 验证，请联系管理员。')
+        self.notice=QLabel('注册请到网页完成人机与邮箱开通验证；已开启验证器时，登录须填写动态码。')
         self.notice.setTextFormat(Qt.PlainText);self.notice.setWordWrap(True)
         root.addWidget(self.notice)
         self.cloud_enabled=QCheckBox('登录后自动同步学习档案和复习进度（推荐）')
@@ -128,7 +130,8 @@ class AccountLogin(QDialog):
         invite=self.invite.text().strip() if self.register.isChecked() else '';name=self.name.text().strip()
         if self.register.isChecked() and (not 12<=len(password)<=128 or password!=self.confirm_password.text()):
             self.notice.setText('注册需设置 12 至 128 位密码，并保证两次输入一致。');return
-        self._work('login',lambda:account.login(email,code,password,invite,name))
+        totp=self.totp.text().strip();recovery=self.recovery.text().strip()
+        self._work('login',lambda:account.login(email,code,password,invite,name,totp,recovery))
     def _finished(self,kind,value,error):
         self.submit.setEnabled(True);self.send.setEnabled(self.cooldown==0)
         self.skip.setEnabled(True)

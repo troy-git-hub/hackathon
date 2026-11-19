@@ -70,14 +70,14 @@ def restore():
         _token='';_user=None
         return None
 
-def login(email, code='', password='', invite='', name=''):
+def login(email, code='', password='', invite='', name='',totp='',recovery_code=''):
     global _token,_user
     data={'email':email,'client':'desktop'}
     if invite:
         data.update(code=code,invite=invite,name=name,password=password,confirm_password=password)
         endpoint='/v1/auth/register'
     else:
-        data.update(code=code,password=password)
+        data.update(code=code,password=password,totp=totp,recovery_code=recovery_code)
         endpoint='/v1/auth/login'
     result=request(endpoint,data)
     _token=result['token'];_user=result['user']

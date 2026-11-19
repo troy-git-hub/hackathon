@@ -13,6 +13,25 @@ begin
   Result := ExpandConstant('{param:ECHOQA|0}') = '1';
 end;
 
+function InitializeSetup: Boolean;
+var
+  Args: String;
+  Index, ResultCode: Integer;
+begin
+  Result := True;
+  { Older Echo clients supplied UPDATE=1 without the Inno silent flags. }
+  if (ExpandConstant('{param:UPDATE|0}') = '1') and (not WizardSilent) then
+  begin
+    Args := '';
+    for Index := 1 to ParamCount do
+      Args := Args + ' "' + ParamStr(Index) + '"';
+    Args := Args + ' /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS';
+    if not Exec(ExpandConstant('{srcexe}'), Args, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      MsgBox('静默更新未能启动，请稍后重试。', mbError, MB_OK);
+    Result := False;
+  end;
+end;
+
 function EchoAppId(Param: String): String;
 begin
   if IsQAInstall then Result := 'Echo.ReleaseVerification.2.2'

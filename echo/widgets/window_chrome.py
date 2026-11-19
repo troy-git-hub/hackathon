@@ -1,6 +1,7 @@
 """Shared Echo window controls; Windows order, theme colours, no system frame."""
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt,QEvent
 from PyQt5.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+from PyQt5.QtGui import QPainterPath,QRegion
 from echo.theme import Colors
 
 
@@ -17,20 +18,27 @@ class EchoTitleBar(QWidget):
         row.addWidget(self.title,1)
         self.minimize_button=None
         if minimize:
-            self.minimize_button=self.control('−','最小化',dialog.showMinimized)
+            self.minimize_button=self.control('–','最小化',dialog.showMinimized)
             row.addWidget(self.minimize_button)
         self.close_button=self.control('×','关闭',dialog.close,close=True)
         row.addWidget(self.close_button)
 
     def control(self,text,tip,slot,close=False):
-        button=QPushButton(text);button.setFixedSize(36,30);button.setToolTip(tip)
+        button=QPushButton(text);button.setFixedSize(26,26);button.setToolTip(tip)
         button.setAccessibleName(tip);button.setCursor(Qt.PointingHandCursor)
         button.setStyleSheet(f'''QPushButton{{min-width:0;min-height:0;padding:0;border:0;
-            border-radius:6px;background:transparent;color:{Colors.TEXT_SECONDARY};font-size:18px;}}
+            border-radius:6px;background:transparent;color:{Colors.TEXT_SECONDARY};font-size:16px;}}
             QPushButton:hover{{background:{Colors.DANGER if close else Colors.SURFACE_HOVER};
                 color:{'#ffffff' if close else Colors.TEXT_PRIMARY};}}''')
         button.clicked.connect(lambda checked=False:slot())
         return button
+
+    def eventFilter(self,watched,event):
+        if watched is self.dialog and event.type() in (QEvent.Resize,QEvent.Show):
+            if watched.isFullScreen():watched.clearMask()
+            else:
+                path=QPainterPath();path.addRoundedRect(0,0,watched.width(),watched.height(),12,12);watched.setMask(QRegion(path.toFillPolygon().toPolygon()))
+        return super().eventFilter(watched,event)
 
     def mousePressEvent(self,event):
         if event.button()==Qt.LeftButton and not self.dialog.isFullScreen():
@@ -54,6 +62,7 @@ def install_chrome(dialog,layout,title=None,minimize=True):
     layout.setContentsMargins(16,0,16,14)
     titlebar=EchoTitleBar(dialog,title,minimize)
     layout.insertWidget(0,titlebar)
+    dialog.installEventFilter(titlebar)
     dialog.title_bar=titlebar
     dialog.setSizeGripEnabled(True)
     return titlebar

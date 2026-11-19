@@ -275,7 +275,7 @@ class SettingsDialog(QDialog):
         body.addWidget(QLabel('本机终端名称'));body.addWidget(self.cloud_device_name)
         self.cloud_mode=_Combo();self.cloud_mode.addItem('默认合并 · 同步所有终端','merge');self.cloud_mode.addItem('指定来源 · 仅同步勾选终端','selected')
         self._select(self.cloud_mode,cloud_state.get('mode','merge'));body.addWidget(self.cloud_mode)
-        self.cloud_sources=QListWidget();self.cloud_sources.setMaximumHeight(110);body.addWidget(self.cloud_sources)
+        self.cloud_sources=QListWidget();self.cloud_sources.setStyleSheet(f'QListWidget{{background:{Colors.SURFACE};color:{Colors.TEXT_PRIMARY};border:1px solid {Colors.BORDER};border-radius:8px;padding:6px;}} QListWidget::item{{color:{Colors.TEXT_PRIMARY};padding:5px;}} QListWidget::item:selected{{background:{Colors.SURFACE_HOVER};}} QListWidget:disabled{{color:{Colors.TEXT_SECONDARY};background:{Colors.SURFACE};}}');self.cloud_sources.setMaximumHeight(130);body.addWidget(self.cloud_sources)
         self.cloud_mode.currentIndexChanged.connect(lambda _:self.cloud_sources.setEnabled(self.cloud_mode.currentData()=='selected'))
         self.cloud_sources.setEnabled(self.cloud_mode.currentData()=='selected')
         self.cloud_refresh_sources=QPushButton('刷新终端列表（不调用 AI）');self.cloud_refresh_sources.clicked.connect(self._refresh_cloud_sources);body.addWidget(self.cloud_refresh_sources)
