@@ -13,21 +13,30 @@ begin
   Result := ExpandConstant('{param:ECHOQA|0}') = '1';
 end;
 
+function EchoShellExecute(hwnd: HWND; Operation, FileName, Parameters, Directory: String; ShowCmd: Integer): Integer;
+  external 'ShellExecuteW@shell32.dll stdcall';
+
 function InitializeSetup: Boolean;
 var
-  Args: String;
+  Args, Argument: String;
   Index, ResultCode: Integer;
 begin
   Result := True;
-  { Older Echo clients supplied UPDATE=1 without the Inno silent flags. }
   if (ExpandConstant('{param:UPDATE|0}') = '1') and (not WizardSilent) then
   begin
     Args := '';
     for Index := 1 to ParamCount do
-      Args := Args + ' "' + ParamStr(Index) + '"';
+    begin
+      Argument := ParamStr(Index);
+      { SL5 belongs to the current loader, never pass it to a new Setup. }
+      if (CompareText(Copy(Argument, 1, 3), '/SL') <> 0) and
+         (CompareText(Copy(Argument, 1, 4), '/LOG') <> 0) then
+        Args := Args + ' "' + Argument + '"';
+    end;
     Args := Args + ' /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS';
-    if not Exec(ExpandConstant('{srcexe}'), Args, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-      MsgBox('静默更新未能启动，请稍后重试。', mbError, MB_OK);
+    { Inno's Exec helper refuses self-execution before installation starts. }
+    ResultCode := EchoShellExecute(0, 'open', ExpandConstant('{srcexe}'), Args, '', SW_HIDE);
+    if ResultCode <= 32 then Log('Unable to start silent update: ' + IntToStr(ResultCode));
     Result := False;
   end;
 end;
