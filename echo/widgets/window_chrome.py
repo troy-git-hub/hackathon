@@ -6,7 +6,7 @@ from echo.theme import Colors
 
 
 class EchoTitleBar(QWidget):
-    def __init__(self, dialog, title=None, minimize=True):
+    def __init__(self, dialog, title=None, minimize=False):
         super().__init__(dialog)
         self.dialog, self.offset = dialog, None
         self.setObjectName('EchoTitleBar')
@@ -51,9 +51,14 @@ class EchoTitleBar(QWidget):
     def mouseReleaseEvent(self,event):self.offset=None
 
 
-def install_chrome(dialog,layout,title=None,minimize=True):
+def install_chrome(dialog,layout,title=None,minimize=False):
     """Install after the window stylesheet; close uses the dialog's closeEvent."""
-    dialog.setWindowFlags(dialog.windowFlags()|Qt.FramelessWindowHint)
+    # Owned dialogs can collapse into a tiny native caption instead of the taskbar.
+    # Secondary Echo windows therefore expose close only; the main window retains
+    # its own minimize controls and owns application-level minimization.
+    flags=dialog.windowFlags()|Qt.FramelessWindowHint
+    if not minimize:flags &= ~Qt.WindowMinimizeButtonHint
+    dialog.setWindowFlags(flags)
     name=dialog.objectName() or 'EchoSurfaceWindow';dialog.setObjectName(name)
     dialog.setStyleSheet(dialog.styleSheet()+f'''
         QDialog#{name}{{background:{Colors.WINDOW_BG};color:{Colors.TEXT_PRIMARY};

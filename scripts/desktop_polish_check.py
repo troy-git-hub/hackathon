@@ -59,19 +59,23 @@ def child(theme):
         from echo.widgets.exam_window import ExamWindow
         from echo.widgets.settings import SettingsDialog
         from echo.widgets.account_center import AccountCenter
+        from echo.widgets.paper_book import PaperBook
+        from echo.widgets.update_center import UpdateCenter,UpdateController
         shelf=BookletWindow(parent=window)
         composer=BookletComposer(booklets.catalog(),shelf)
         test=ExamWindow(parent=window)
         settings=SettingsDialog(window)
         center=AccountCenter(window,autoload=False)
-        for widget in (shelf,composer,test,settings,center):
+        papers=PaperBook(window,autoload=False)
+        updates=UpdateCenter(UpdateController())
+        for widget in (shelf,composer,test,settings,center,papers,updates):
             widget.setAttribute(Qt.WA_DontShowOnScreen,native)
             assert widget.windowFlags()&Qt.FramelessWindowHint
             assert widget.title_bar.close_button.toolTip()=='关闭'
             widget.show();app.processEvents()
             assert widget.grab().toImage().pixelColor(10,50).rgb()==QColor(Colors.WINDOW_BG).rgb(),(theme,type(widget).__name__)
-            if widget.title_bar.minimize_button:
-                assert widget.title_bar.minimize_button.x()<widget.title_bar.close_button.x()
+            assert widget.title_bar.minimize_button is None
+            assert not widget.windowFlags()&Qt.WindowMinimizeButtonHint
         assert not settings.admin_button.isHidden()
         assert not any('管理员' in b.text() for b in center.findChildren(QPushButton))
         assert not center.sync_panel.isVisible()
@@ -103,7 +107,7 @@ def child(theme):
             # Re-open a fresh account view for the sample, without real APIs.
             preview=AccountCenter(window,autoload=False);preview.setAttribute(Qt.WA_DontShowOnScreen,native);preview.finished_request('summary',{'user':{'user':dict(user)},'workspace':request('/v1/me/workspace'),'requests':request('/v1/me/requests'),'summary':request('/v1/me/summary')},'')
             preview.show();app.processEvents();preview.grab().save(str(output/'echo-desktop-account.png'));preview.close()
-        for widget in (center,settings,composer,shelf):widget.close()
+        for widget in (center,settings,composer,shelf,papers,updates):widget.close()
         window.close()
         print('PASS',theme,'home',compact,'px; frameless/dialog close/account privacy/settings roles')
 
