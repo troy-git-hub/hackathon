@@ -265,6 +265,15 @@ class SettingsDialog(QDialog):
         self.admin_button.clicked.connect(self._open_admin)
         self.admin_button.setVisible((account.current_user() or {}).get('role')=='admin')
         body.addWidget(self.admin_button)
+        self.security_button=QPushButton(tr('安全设置 · 验证器与通行密钥 ↗','Security · authenticators and passkeys ↗'))
+        def open_security():
+            from PyQt5.QtCore import QUrl
+            from PyQt5.QtGui import QDesktopServices
+            role=(account.current_user() or {}).get('role')
+            QDesktopServices.openUrl(QUrl('https://echo.xhbtroy.cn/admin#security' if role=='admin' else 'https://echo.xhbtroy.cn/user#security'))
+        self.security_button.clicked.connect(open_security)
+        body.addWidget(self.security_button)
+
         from echo.backend import cloud_sync
         self.cloud_auto=QCheckBox(tr('这台设备自动同步学习档案（登录后生效）','Automatically sync learning data when signed in'))
         self.cloud_auto.setChecked(cloud_sync.status()['enabled'])

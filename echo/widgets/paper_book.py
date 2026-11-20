@@ -91,8 +91,8 @@ class PaperBook(QDialog):
         button=QPushButton(title);button.clicked.connect(lambda _:slot());return button
     def build_library(self):
         page=QWidget();layout=QVBoxLayout(page);layout.setContentsMargins(0,0,0,0)
-        row=QHBoxLayout();title=QLabel('青卷 · 我的试卷');title.setStyleSheet(f'font-size:22px;font-weight:600;color:{Colors.ACCENT};')
-        row.addWidget(title,1);row.addWidget(self.button('刷新',self.refresh));row.addWidget(self.button('导入试卷',self.import_paper));row.addWidget(self.button('新建试卷',self.compose));layout.addLayout(row)
+        row=QHBoxLayout();title=QLabel('清卷 · 试卷与练习');title.setStyleSheet(f'font-size:22px;font-weight:600;color:{Colors.ACCENT};')
+        row.addWidget(title,1);row.addWidget(self.button('刷新',self.refresh));row.addWidget(self.button('导入试卷',self.import_paper));row.addWidget(self.button('清卷出卷 ↗',self.compose));layout.addLayout(row)
         row=QHBoxLayout();self.filter=EchoCombo();self.filter.addItems(['全部试卷','可开始','进行中','已交卷','本地草稿']);self.filter.currentIndexChanged.connect(self.render_list)
         self.search=QLineEdit();self.search.setPlaceholderText('搜索试卷名称');self.search.textChanged.connect(self.render_list)
         row.addWidget(self.filter);row.addWidget(self.search,1);layout.addLayout(row)
@@ -328,17 +328,10 @@ class PaperBook(QDialog):
         except Exception as exc:self.notice.setText(str(exc));return
         self.session=account.token();self.run('import',lambda:self.api('/v1/me/qingjuan/papers',{'request_id':uuid.uuid4().hex,'paper':paper}))
     def compose(self):
-        dialog=QDialog(self);dialog.setWindowTitle('青卷 · 新建试卷');dialog.setStyleSheet(dialog_qss());dialog.resize(470,420)
-        box=QVBoxLayout(dialog);form=QFormLayout();fields={}
-        for key,title,default in [('title','试卷名称','知识巩固'),('subject','学科','数学'),('grade','年级','初中'),('knowledge','知识点','')]:
-            fields[key]=QLineEdit(default);form.addRow(title,fields[key])
-        count=EchoCombo();count.addItems(['5','10','15','20']);form.addRow('题量',count)
-        minutes=QSpinBox();minutes.setRange(5,120);minutes.setValue(30);form.addRow('限时（分钟）',minutes);box.addLayout(form)
-        note=QLabel('AI 命题按管理员设置的比例消耗学习点。生成结果请先核对；开始考试与客观判分免费。');note.setWordWrap(True);box.addWidget(note)
-        box.addWidget(self.button('确认生成',dialog.accept));install_chrome(dialog,box)
-        if dialog.exec_()!=QDialog.Accepted:return
-        data={k:w.text().strip() for k,w in fields.items()};data.update(request_id=uuid.uuid4().hex,count=int(count.currentText()),duration=minutes.value())
-        self.session=account.token();self.run('generate',lambda:self.api('/v1/me/qingjuan/generate',data))
+        from PyQt5.QtCore import QUrl
+        from PyQt5.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl('https://test.echo.xhbtroy.cn'))
+        self.notice.setText('请在清卷生成正式试卷或平时练习，保存后点刷新；本机可答题和错题重做。')
     def reject(self):self.close()
     def closeEvent(self,event):
         if self.busy:self.notice.setText('请求处理中，请完成后再关闭。');event.ignore();return

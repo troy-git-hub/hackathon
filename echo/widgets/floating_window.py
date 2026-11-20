@@ -1708,8 +1708,8 @@ class FloatingWindow(QWidget):
         self.home_notebook_entry = self._home_card(tr('我的小本','My notebook'),
             tr('收集相关知识，按大类和章节复习','Review related topics by chapter'),tr('打开','Open'),self._open_booklets)
         booklet.addWidget(self.home_notebook_entry)
-        self.home_exam_entry = self._home_card(tr('考试机 · Beta','Exam machine · Beta'),
-            tr('选择几章知识，合并组卷并独立作答','Combine selected chapters into a complete exam'),tr('进入','Enter'),self._open_exam)
+        self.home_exam_entry = self._home_card(tr('试卷与练习','Papers and practice'),
+            tr('查看云端试卷，在本机答题与错题重做','Open cloud papers, answer and retry locally'),tr('进入','Enter'),self._open_exam)
         booklet.addWidget(self.home_exam_entry)
         hero.addWidget(self.home_booklet_card,2)
 
