@@ -74,6 +74,7 @@ class BoardChat(QScrollArea):
         if item['view'] is None:
             view = item['view'] = HtmlLesson(self)
             view.setFixedHeight(260)
+            view.content_height.connect(lambda height,w=view:w.setFixedHeight(height))
             item['layout'].addWidget(view)
             view.display(item['visual'])
 

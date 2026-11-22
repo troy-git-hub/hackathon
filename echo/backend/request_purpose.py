@@ -1,6 +1,6 @@
 """Public feature labels only; never inspect or transmit prompt contents."""
 import inspect
-ALLOWED={'assistant','blackboard','quiz','grading','classroom','catchup','qa','review','summary','persona','booklet','problem_solving','vision'}
+ALLOWED={'assistant','blackboard','quiz','grading','classroom','catchup','qa','review','summary','persona','booklet','problem_solving','vision','qingjuan_generate'}
 def infer(default='assistant'):
     frame=inspect.currentframe()
     try:
@@ -10,6 +10,7 @@ def infer(default='assistant'):
             module=frame.f_globals.get('__name__','');function=frame.f_code.co_name
             if module.startswith('echo.'):
                 label=module.rsplit('.',1)[-1]
+                if label in ('qingjuan_local','qingjuan_workbench'):return 'qingjuan_generate'
                 if label in ('blackboard','quiz','persona','booklet','booklets'):return {'booklets':'booklet'}.get(label,label)
                 if label in ('assessment','recall'):return 'grading'
                 if label in ('context','awareness'):return 'classroom'

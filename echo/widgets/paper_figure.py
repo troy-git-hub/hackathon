@@ -89,7 +89,7 @@ class PaperFigure(QWidget):
                 for ix,value in enumerate(values):
                     p.setBrush(QColor.fromHsv((40+ix*45)%360,140,190));span=round(5760*value/total);p.drawPie(r,angle,span);angle+=span
             return
-        if kind=='coord':box=[f.get('xmin',-2),f.get('ymin',-2),f.get('xmax',6),f.get('ymax',6)]
+        if kind=='coord':box=f.get('box',[f.get('xmin',-2),f.get('ymin',-2),f.get('xmax',6),f.get('ymax',6)])
         else:box=f.get('box',[0,0,10,8])
         xmin,ymin,xmax,ymax=[float(v) for v in box]
         if not all(math.isfinite(v) and abs(v)<10000 for v in box) or xmax<=xmin or ymax<=ymin:raise ValueError()
@@ -97,6 +97,12 @@ class PaperFigure(QWidget):
         if kind=='coord':
             ox=max(xmin,min(0,xmax));oy=max(ymin,min(0,ymax));p.drawLine(point(xmin,oy),point(xmax,oy));p.drawLine(point(ox,ymin),point(ox,ymax))
             p.drawText(point(xmax,oy),'x');p.drawText(point(ox,ymax),'y')
+            for axis,low,high in [('x',xmin,xmax),('y',ymin,ymax)]:
+                step=max(1,math.ceil((high-low)/6))
+                for tick in range(math.ceil(low/step)*step,math.floor(high)+1,step):
+                    pt=point(tick,oy) if axis=='x' else point(ox,tick)
+                    if axis=='x':p.drawLine(pt,QPointF(pt.x(),pt.y()+4));p.drawText(QRectF(pt.x()-12,pt.y()+5,24,18),Qt.AlignCenter,str(tick))
+                    else:p.drawLine(pt,QPointF(pt.x()-4,pt.y()));p.drawText(QRectF(pt.x()-30,pt.y()-9,25,18),Qt.AlignRight,str(tick))
             for fn in f.get('functions',[])[:8]:
                 source=fn.get('expr','') if isinstance(fn,dict) else fn;path=QPainterPath();started=False
                 for ix in range(121):
@@ -108,6 +114,12 @@ class PaperFigure(QWidget):
                     if started:path.lineTo(pt)
                     else:path.moveTo(pt);started=True
                 p.setPen(QPen(QColor(Colors.ACCENT),2));p.drawPath(path)
+            for item in f.get('points',[])[:20]:
+                x,y=(item.get('x'),item.get('y')) if isinstance(item,dict) else item[:2]
+                if not all(type(v) in (int,float) and math.isfinite(v) for v in (x,y)) or not (xmin<=x<=xmax and ymin<=y<=ymax):continue
+                pt=point(x,y);p.setPen(QPen(QColor(Colors.TEXT_PRIMARY),1));p.setBrush(QColor(Colors.ACCENT));p.drawEllipse(pt,3,3)
+                title=str(item.get('label','')) if isinstance(item,dict) else str(item[2]) if len(item)>2 else ''
+                if title:p.drawText(QRectF(min(self.width()-85,pt.x()+5),max(0,pt.y()-20),80,20),title[:30])
             return
         if kind=='numberline':
             p.drawLine(QPointF(r.left(),r.center().y()),QPointF(r.right(),r.center().y()))

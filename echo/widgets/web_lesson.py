@@ -2,7 +2,7 @@
 import html
 import json
 
-from PyQt5.QtCore import Qt, QCoreApplication, QUrl, pyqtSignal
+from PyQt5.QtCore import Qt, QCoreApplication, QUrl, pyqtSignal,QTimer
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PyQt5.QtGui import QColor
 
@@ -74,6 +74,7 @@ try{Object.defineProperty(navigator,'sendBeacon',{value:undefined,writable:false
 window.addEventListener('error',e=>parent.postMessage({type:'echo-lesson',ready:false,error:String(e.message).slice(0,180)},'*'));
 window.addEventListener('unhandledrejection',()=>parent.postMessage({type:'echo-lesson',ready:false,error:'交互脚本未能完成'},'*'));
 document.addEventListener('DOMContentLoaded',()=>parent.postMessage({type:'echo-lesson',ready:true,error:''},'*'));
+document.addEventListener('DOMContentLoaded',()=>{const size=()=>parent.postMessage({type:'echo-lesson-size',height:Math.ceil(document.body.scrollHeight)},'*');size();if(window.ResizeObserver)new ResizeObserver(size).observe(document.body);});
 </script>"""
     child = (f'<!doctype html><html lang="zh"><head><meta charset="utf-8">'
              f'<meta http-equiv="Content-Security-Policy" content="{policy}">'
@@ -93,7 +94,8 @@ document.addEventListener('DOMContentLoaded',()=>parent.postMessage({type:'echo-
     return ('<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;width:100%;height:100%;'
             f'overflow:hidden;background:{Colors.WINDOW_BG}' + '}iframe{width:100%;height:100%;border:0}</style></head><body>'
             '<script>window.echoLessonState={ready:false,error:""};window.addEventListener("message",e=>{'
-            'const f=document.querySelector("iframe");if(f&&e.source===f.contentWindow&&e.data&&e.data.type==="echo-lesson")'
+            'const f=document.querySelector("iframe");if(f&&e.source===f.contentWindow&&e.data&&e.data.type==="echo-lesson-size"&&Number.isFinite(e.data.height)&&e.data.height>0)window.echoLessonHeight=Math.min(5000,e.data.height);'
+            'if(f&&e.source===f.contentWindow&&e.data&&e.data.type==="echo-lesson")'
             '{if(e.data.error)window.echoLessonState={ready:false,error:String(e.data.error)};'
             'else if(!window.echoLessonState.error)window.echoLessonState={ready:!!e.data.ready,error:""};}});</script>'
             '<iframe title="课堂交互讲解" sandbox="allow-scripts" referrerpolicy="no-referrer" srcdoc="'
@@ -124,6 +126,7 @@ if AVAILABLE:
 class HtmlLesson(QWidget):
     loaded = pyqtSignal(bool)
     failed = pyqtSignal(str)
+    content_height=pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -163,6 +166,16 @@ class HtmlLesson(QWidget):
         if ok and self.view:
             self.page.runJavaScript("window.echoLessonState", lambda state: self.failed.emit("这次讲解中的交互未能完成，请重新展开讲解。")
                                     if isinstance(state, dict) and state.get("error") else None)
+            QTimer.singleShot(200,self._measure_height)
+            QTimer.singleShot(800,self._measure_height)
+
+    def _measure_height(self):
+        if self.view and self.isVisible():
+            self.page.runJavaScript('window.echoLessonHeight||0',lambda value:self.content_height.emit(min(450,max(220,int(value)+12))) if isinstance(value,(int,float)) and 0<value<10000 else None)
+
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        if event.size().width()!=event.oldSize().width() and getattr(self,'view',None):QTimer.singleShot(200,self._measure_height)
 
     def display(self, visual):
         self.fragment = visual.get("html", "")

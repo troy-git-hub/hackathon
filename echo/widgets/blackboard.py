@@ -82,11 +82,14 @@ class BlackboardWindow(QDialog):
     completed = pyqtSignal(int, object, str)
     judged = pyqtSignal(int, object, object, object, str)
     visual_completed = pyqtSignal(int, object, str)
+    review_completed=pyqtSignal(object,str)
     board_ready = pyqtSignal(object)
 
     def __init__(self, engine=None, parent=None, archived=None):
         super().__init__(parent, Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.engine = engine
+        from echo.backend import account
+        self._visual_code_owner=str((account.current_user() or {}).get('id') or '')
         if engine is not None and not hasattr(engine, "automatic_budget"):
             from echo.backend.context import AutomaticBudget
             engine.automatic_budget = AutomaticBudget()
@@ -192,6 +195,12 @@ class BlackboardWindow(QDialog):
         self.history.setMaximumWidth(150)
         self.history.currentIndexChanged.connect(self.select_board)
         nav.addWidget(self.history)
+        self.review_visual_btn=button('检查图',self.review_visible_visual,'Chip')
+        self.review_visual_btn.setToolTip('把当前AI图解的渲染截图交给设置中的视觉模型检查，按实际用量计费。')
+        nav.addWidget(self.review_visual_btn)
+        self.visual_code_btn=button('图解代码',self.open_visual_code,'Chip')
+        self.visual_code_btn.setToolTip('查看/修改当前图解代码，手动预览，或让AI读取代码与画面。')
+        nav.addWidget(self.visual_code_btn)
         root.addWidget(self.nav)
         self.auto_bar = QWidget()
         auto = QHBoxLayout(self.auto_bar)
@@ -339,6 +348,7 @@ class BlackboardWindow(QDialog):
         self.completed.connect(self.finish)
         self.judged.connect(self.on_judged)
         self.visual_completed.connect(self.on_visual)
+        self.review_completed.connect(self.finish_visual_review)
         self._timer = QTimer(self, interval=500)
         self._timer.timeout.connect(self.sync_lesson)
         self._timer.start()
@@ -821,6 +831,7 @@ class BlackboardWindow(QDialog):
             return
         self._inline_view = HtmlLesson(self)
         self._inline_view.setFixedHeight(240)
+        self._inline_view.content_height.connect(lambda height:self._inline_view.setFixedHeight(height) if self._inline_view is not None else None)
         self._inline_view.failed.connect(lambda text: self.status.setText("板书图解暂不可用，正文仍可阅读：" + text))
         self.inline_host.addWidget(label("看图理解 · 可操作", 12, Colors.ACCENT, True))
         self.inline_host.addWidget(self._inline_view)
@@ -892,6 +903,10 @@ class BlackboardWindow(QDialog):
                 moment['board_context'] = {'title':self._board.get('title',''),'gist':self._board.get('gist',''),
                     'steps':[{'section':i+1,'heading':step.get('heading',''),'body':step.get('body','')[:450]}
                              for i,step in enumerate(self._board.get('steps',[])[:5])]}
+                if image is not None and not any(word in question for word in ('图','截图','课件','圈','画','坐标','曲线','屏幕')):
+                    image=None
+                    moment['sources'].append({'id':'B1','kind':'board','label':'已整理的板书（来自上次已识别内容）',
+                        'text':self._board.get('gist','')+'\n'+'\n'.join(s.get('body','')[:300] for s in self._board.get('steps',[])[:5])})
                 seen = {source.get('text') for source in moment['sources']}
                 for i,source in enumerate(self._board.get('sources',[])[:8]):
                     if source.get('kind')!='image' and source.get('text') not in seen:
@@ -902,6 +917,79 @@ class BlackboardWindow(QDialog):
             self.chat_page.add('user',question)
             self.show_tab(3)
         self._start_generation(moment, self.focus.text().strip(), image)
+
+    def open_visual_code(self):
+        from echo.backend import account
+        if self._visual_code_owner!=str((account.current_user() or {}).get('id') or ''):
+            self.status.setText('账户已变化，请关闭旧黑板并重新打开。');return
+        target=None;entry=None;kind='inline'
+        if self.chat_page.isVisible():
+            for item in reversed(self.chat_page.visuals):
+                if item.get('view') and item['view'].isVisible():target=item['view'];entry=item;kind='chat';break
+        elif self.visual_page.isVisible():target=self._visual_view;kind='visualization'
+        else:target=self._inline_view
+        if not self._board or not target or not target.fragment:
+            self.status.setText('先打开一个图解，再查看代码。');return
+        from echo.widgets.visual_code import VisualCode
+        identity=self._board.get('created');baseline={'fragment':target.fragment,'revision':self._board.get('revision',0)}
+        def valid():
+            return (not sip.isdeleted(self) and not sip.isdeleted(target) and self._board is not None
+                and self._board.get('created')==identity and self._board.get('revision',0)==baseline['revision']
+                and target.fragment==baseline['fragment'])
+        def adopt(fragment):
+            if not valid():return
+            visual={'title':'已编辑的图解','html':fragment,'mode':'ai','design_version':2}
+            key='reply_html' if kind=='chat' else 'visualization' if kind=='visualization' else 'inline_visual'
+            if kind=='chat':entry['visual']=visual
+            revision=baseline['revision']+1
+            self._board[key]=fragment if key=='reply_html' else visual;self._board['revision']=revision
+            for board in self._boards+list(getattr(self.engine,'blackboards',[]) if self.engine is not None else []):
+                if board.get('created')==identity:board[key]=copy.deepcopy(self._board[key]);board['revision']=revision
+            target.display(visual);baseline.update(fragment=fragment,revision=revision)
+            self.status.setText('已采用图解代码工作区的修改，请继续核对课堂依据。')
+        self._visual_code_window=VisualCode(target.fragment,self._board.get('title',''),self,valid,adopt)
+        self._visual_code_window.show();self._visual_code_window.raise_()
+
+    def review_visible_visual(self):
+        from PyQt5.QtCore import QBuffer,QIODevice
+        from PyQt5.QtWidgets import QMessageBox
+        if self._busy or getattr(self,'_review_busy',False):return
+        target=None;entry=None;kind='inline'
+        if self.chat_page.isVisible():
+            for item in reversed(self.chat_page.visuals):
+                if item.get('view') and item['view'].isVisible():target=item['view'];entry=item;kind='chat';break
+        elif self.visual_page.isVisible():target=self._visual_view;kind='visualization'
+        else:target=self._inline_view
+        if not self._board or not target or not getattr(target,'view',None) or not target.fragment:
+            self.status.setText('先打开一个AI图解，再点“检查图”。');return
+        if not providers.configured(providers.vision()):self.status.setText('请先在设置连接视觉模型。');return
+        if QMessageBox.question(self,'AI图解检查','将当前图解的渲染截图与代码交给视觉模型核对并尝试修正？会产生一次视觉请求用量。',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)!=QMessageBox.Yes:return
+        buffer=QBuffer();buffer.open(QIODevice.WriteOnly);target.view.grab().save(buffer,'PNG');png=bytes(buffer.data())
+        self._review_busy=True;self.review_visual_btn.setEnabled(False);self.status.setText('正在查看实际渲染图，核对曲线、动点与标注…')
+        board=copy.deepcopy(self._board);fragment=target.fragment
+        def work():
+            try:result,error=blackboard.review_visual(board,fragment,png),''
+            except Exception as exc:result,error=None,str(exc)
+            try:self.review_completed.emit({'result':result,'target':target,'entry':entry,'kind':kind,'board_id':board.get('created'),'revision':board.get('revision',0)},error)
+            except RuntimeError:pass
+        threading.Thread(target=work,daemon=True,name='echo-visual-review').start()
+
+    def finish_visual_review(self,context,error):
+        self._review_busy=False;self.review_visual_btn.setEnabled(True)
+        if not self.active() or not self._board or self._board.get('created')!=context['board_id']:return
+        if self._board.get('revision',0)!=context['revision'] or sip.isdeleted(context['target']):
+            self.status.setText('图解已变化，本次检查不会覆盖新内容。');return
+        if error:self.status.setText('图解检查未完成：'+error);return
+        result=context['result'];fragment=result.get('html')
+        if fragment:
+            visual={'title':'已检查的图解','html':fragment,'mode':'ai','reviewed':True}
+            key='reply_html' if context['kind']=='chat' else 'visualization' if context['kind']=='visualization' else 'inline_visual'
+            if context['kind']=='chat':context['entry']['visual']=visual
+            self._board[key]=fragment if key=='reply_html' else visual
+            for board in self._boards+list(getattr(self.engine,'blackboards',[]) if self.engine is not None else []):
+                if board.get('created')==context['board_id']:board[key]=copy.deepcopy(self._board[key])
+            if not sip.isdeleted(context['target']):context['target'].display(visual)
+        self.status.setText(('已尝试修正，仍请核对：' if fragment else '图解检查：')+result['summary'])
 
     def _start_generation(self, moment, focus, image=None, automatic=False, topic_follow=False):
         if not self.active() or moment["session"] != self.session or self._busy:

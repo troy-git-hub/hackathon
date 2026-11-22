@@ -132,6 +132,8 @@ with tempfile.TemporaryDirectory(prefix="echo-board-") as folder:
                     "ECHO_VISION_API_KEY": "fixture"}, clear=True):
         assert providers.text()["model"] == "deepseek-flash"
         assert providers.vision()["model"] == "qwen3-vl-plus"
+        assert providers.text_extra(providers.text()) == {"thinking": {"type": "enabled"}, "reasoning_effort":"low"}
+        os.environ['ECHO_REASONING_EFFORT']='none'
         assert providers.text_extra(providers.text()) == {"thinking": {"type": "disabled"}}
         os.environ["ECHO_LLM_BASE_URL"] = "https://gateway.example/v1"
         assert providers.text()["model"] == "deepseek-chat"  # custom gateways keep their own aliases

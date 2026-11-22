@@ -5,11 +5,15 @@ import urllib.request
 import urllib.error
 import uuid
 import copy
+import hashlib
+import logging
 
 API_ORIGIN = 'https://api.echo.xhbtroy.cn'
 USER_CENTER = 'https://echo.xhbtroy.cn/user'
 _token = ''
 _user = None
+_persistence_error=''
+_restore_message=''
 
 def _vault_service():
     from echo import version
@@ -26,6 +30,8 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def token(): return _token
 def current_user(): return dict(_user) if _user else None
+def persistence_error():return _persistence_error
+def restore_message():return _restore_message
 def managed_models():
     if os.getenv('ECHO_ACCOUNT_GUEST')=='1':return False
     active=bool(_token) or os.getenv('ECHO_ACCOUNT_ACTIVE')=='1'
@@ -41,7 +47,8 @@ def request(path, data=None, timeout=25, max_bytes=262144, auth_token=None):
         with urllib.request.build_opener(_NoRedirect()).open(req,timeout=timeout) as reply:
             raw=reply.read(max_bytes+1)
         if len(raw)>max_bytes: raise AccountError('账户服务响应过大。')
-        return json.loads(raw)
+        try:return json.loads(raw)
+        except (ValueError,TypeError):raise AccountError('账户服务返回内容异常，请稍后重试；登录凭据不会因此删除。') from None
     except urllib.error.HTTPError as e:
         try:detail=json.loads(e.read(65536)).get('detail')
         except (ValueError,AttributeError):detail=None
@@ -50,25 +57,70 @@ def request(path, data=None, timeout=25, max_bytes=262144, auth_token=None):
         raise AccountError('无法连接 Echo 账户服务，请检查网络后重试。') from None
 
 def _save():
+    global _persistence_error
+    if not _token or not _user:return False
+    service=_vault_service();record={'schema':'echo.account/1','service':service,'session':_token,
+        'user':{k:v for k,v in _user.items() if k in ('id','email','name','balance','role')}}
+    saved=False
     try:
         import keyring
-        keyring.set_password(_vault_service(),'session',_token)
-        return True
-    except Exception:return False
+        keyring.set_password(service,'session',_token)
+        saved=True
+        keyring.set_password(service,'identity',json.dumps({'token_hash':hashlib.sha256(_token.encode()).hexdigest(),'user':record['user']}))
+    except Exception as exc:logging.getLogger('echo.account').warning('Credential vault save failed (%s)',type(exc).__name__)
+    try:
+        from echo.backend import credential_backup
+        credential_backup.save(service,record);saved=True
+    except Exception as exc:logging.getLogger('echo.account').warning('Protected credential backup unavailable (%s)',type(exc).__name__)
+    _persistence_error='' if saved else '已登录，但系统安全存储未能保存会话；本次可以使用，关闭后可能需要重新登录。'
+    return saved
+
+
+def _clear_saved():
+    for name in ('session','identity'):
+        try:
+            import keyring
+            keyring.delete_password(_vault_service(),name)
+        except Exception:pass
+    try:
+        from echo.backend import credential_backup
+        credential_backup.clear(_vault_service())
+    except OSError:logging.getLogger('echo.account').warning('Could not clear protected credential backup')
 
 def restore():
-    global _token, _user
+    global _token, _user,_restore_message
+    _restore_message=''
+    _token='';_user=None
+    cached=None;service=_vault_service()
     try:
         import keyring
-        _token=keyring.get_password(_vault_service(),'session') or ''
-    except Exception:_token=''
+        _token=keyring.get_password(service,'session') or ''
+        raw=keyring.get_password(service,'identity')
+        if raw and _token:
+            identity=json.loads(raw)
+            if identity.get('token_hash')==hashlib.sha256(_token.encode()).hexdigest():cached=identity.get('user')
+    except Exception:pass
+    try:
+        from echo.backend import credential_backup
+        record=credential_backup.load(service)
+        if record and record.get('schema')=='echo.account/1' and record.get('service')==service:
+            if not _token:_token=record.get('session') or ''
+            if record.get('session')==_token:cached=record.get('user') or cached
+    except Exception as exc:logging.getLogger('echo.account').warning('Protected credential restore unavailable (%s)',type(exc).__name__)
     if not _token:return None
     try:
         _user=request('/v1/me')['user']
+        _save()
         return current_user()
-    except AccountError:
-        _token='';_user=None
-        return None
+    except AccountError as exc:
+        if exc.status_code in (401,403):
+            _restore_message='保存的登录已过期或被服务端撤销，请重新登录。'
+            _token='';_user=None;_clear_saved();return None
+        if isinstance(cached,dict) and cached.get('id'):
+            _user=dict(cached,_session_offline=True)
+            return current_user()
+        _user=None
+        raise AccountError('暂时无法验证登录状态，已保留登录凭据。请点“重试连接”，不需要重新输入密码。',exc.status_code) from None
 
 def login(email, code='', password='', invite='', name='',totp='',recovery_code=''):
     global _token,_user
@@ -88,6 +140,7 @@ def login(email, code='', password='', invite='', name='',totp='',recovery_code=
 def refresh():
     global _user
     _user=request('/v1/me')['user']
+    _save()
     return current_user()
 
 def send_code(email,invite=''):
@@ -99,11 +152,12 @@ def inference(task,context,request_id=None,purpose=None):
     identity=_user['id'];session_token=_token
     from echo.backend.request_purpose import infer
     body={'protocol':'echo.inference/2','account_id':identity,'request_id':request_id or uuid.uuid4().hex,'task':task,'purpose':purpose or infer('vision' if task=='vision' else 'assistant'),'context':copy.deepcopy(context)}
-    try:result=request('/v1/echo/inference',body,timeout=60,max_bytes=2*1024*1024,auth_token=session_token)
+    timeout=115 if task=='vision' else 65
+    try:result=request('/v1/echo/inference',body,timeout=timeout,max_bytes=2*1024*1024,auth_token=session_token)
     except AccountError as exc:
         if exc.status_code is not None:raise
         # A transport retry reuses its original ID; it cannot debit twice.
-        result=request('/v1/echo/inference',body,timeout=60,max_bytes=2*1024*1024,auth_token=session_token)
+        result=request('/v1/echo/inference',body,timeout=timeout,max_bytes=2*1024*1024,auth_token=session_token)
     if _token!=session_token or not _user or _user['id']!=identity:raise AccountError('当前账户已变化，请重新提问。')
     if result.get('protocol') not in ('echo.inference/1','echo.inference/2') or result.get('account',{}).get('id')!=identity:raise AccountError('Echo 账户响应不匹配。')
     _user=dict(_user,balance=result['account']['balance'])
@@ -114,10 +168,7 @@ def logout():
     try:request('/v1/auth/logout',{})
     except AccountError:pass
     _token='';_user=None
-    try:
-        import keyring
-        keyring.delete_password(_vault_service(),'session')
-    except Exception:pass
+    _clear_saved()
 
 
 def inference_stream(task,context,purpose=None):
@@ -133,7 +184,7 @@ def inference_stream(task,context,purpose=None):
              'Authorization':'Bearer '+session,'User-Agent':'Echo-Desktop/Account-2'}
     req=urllib.request.Request(API_ORIGIN+'/v1/echo/inference',data=json.dumps(body).encode(),headers=headers)
     try:
-        with urllib.request.build_opener(_NoRedirect()).open(req,timeout=100) as reply:
+        with urllib.request.build_opener(_NoRedirect()).open(req,timeout=130 if task=='vision' else 100) as reply:
             if 'text/event-stream' not in reply.headers.get('Content-Type',''):
                 raise AccountError('账户服务暂未支持流式回答，请稍后重试。')
             event='';size=0;completed=False

@@ -24,7 +24,10 @@ def suite(with_tray, with_ai, with_web=False):
     steps = [
         ("紧凑主页与统一窗口", ["desktop_polish_check.py"], "隔离数据与六套主题"),
         ("原生青卷试卷本", ["native_paper_check.py"], "隔离账户、草稿与模拟 API，不访问网络"),
-        ("考试机 Beta（整卷 / 事务存档 / 退出恢复 / 账户隔离）", ["exam_check.py"], "隔离数据，不调用真实模型"),
+        ("原生清卷（蓝图 / 本机作答 / 账户隔离 / 导出）", ["qingjuan_workbench_check.py"], "隔离数据，模拟模型与API"),
+        ("清卷真实窗口与图形", ["qingjuan_ui_check.py"], "真实离线渲染，模拟模型"),
+        ("学习目标与规划 Beta", ["learning_path_desktop_check.py"], "隔离账户/规划动作/模拟API"),
+        ("图解代码与实际画面", ["visual_code_check.py"], "隔离渲染/手改/模拟模型"),
         ("内测更新渠道（认证 / 签名 / 正式隔离）", ["beta_update_check.py"], "测试密钥与模拟网络"),
         ("主页与复习小册（双列 / 设置 / 聊天 / 主AI板书决策）", ["workspace_revision_check.py"], "隔离数据，不调用真实模型"),
         ("低延迟字幕（短切片 / 首段即显 / 不重复入库）", ["caption_latency_check.py"], "合成音频，不采集麦克风"),

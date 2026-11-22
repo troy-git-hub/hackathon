@@ -92,7 +92,7 @@ class PaperBook(QDialog):
     def build_library(self):
         page=QWidget();layout=QVBoxLayout(page);layout.setContentsMargins(0,0,0,0)
         row=QHBoxLayout();title=QLabel('清卷 · 试卷与练习');title.setStyleSheet(f'font-size:22px;font-weight:600;color:{Colors.ACCENT};')
-        row.addWidget(title,1);row.addWidget(self.button('刷新',self.refresh));row.addWidget(self.button('导入试卷',self.import_paper));row.addWidget(self.button('清卷出卷 ↗',self.compose));layout.addLayout(row)
+        row.addWidget(title,1);row.addWidget(self.button('刷新',self.refresh));row.addWidget(self.button('导入试卷',self.import_paper));row.addWidget(self.button('清卷 · 本地出卷',self.compose));layout.addLayout(row)
         row=QHBoxLayout();self.filter=EchoCombo();self.filter.addItems(['全部试卷','可开始','进行中','已交卷','本地草稿']);self.filter.currentIndexChanged.connect(self.render_list)
         self.search=QLineEdit();self.search.setPlaceholderText('搜索试卷名称');self.search.textChanged.connect(self.render_list)
         row.addWidget(self.filter);row.addWidget(self.search,1);layout.addLayout(row)
@@ -326,12 +326,14 @@ class PaperBook(QDialog):
             if path.stat().st_size>512*1024:raise ValueError('试卷 JSON 不能超过512 KiB。')
             paper=json.loads(path.read_text(encoding='utf-8-sig'))
         except Exception as exc:self.notice.setText(str(exc));return
+        if QMessageBox.question(self,'上传到账户云端',
+            '这会把选中的试卷上传到账户并供其他终端读取。若只想本机编辑，请在“清卷 · 本地出卷”内导入。确认上传？',
+            QMessageBox.Yes|QMessageBox.No,QMessageBox.No)!=QMessageBox.Yes:return
         self.session=account.token();self.run('import',lambda:self.api('/v1/me/qingjuan/papers',{'request_id':uuid.uuid4().hex,'paper':paper}))
     def compose(self):
-        from PyQt5.QtCore import QUrl
-        from PyQt5.QtGui import QDesktopServices
-        QDesktopServices.openUrl(QUrl('https://test.echo.xhbtroy.cn'))
-        self.notice.setText('请在清卷生成正式试卷或平时练习，保存后点刷新；本机可答题和错题重做。')
+        from echo.widgets.qingjuan_workbench import open_qingjuan_workbench
+        self._composer=open_qingjuan_workbench(parent=self)
+        self.notice.setText('已打开本地清卷工作台。蓝图与卷稿保存在本机，AI操作按清卷用途计费。')
     def reject(self):self.close()
     def closeEvent(self,event):
         if self.busy:self.notice.setText('请求处理中，请完成后再关闭。');event.ignore();return

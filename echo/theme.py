@@ -146,6 +146,12 @@ def font(size=12, weight=QFont.Normal):
 
 
 # ---------- 全局 QSS ----------
+from echo.backend.paths import asset as _theme_asset
+
+_spin_ink = "light" if QColor(Colors.SURFACE_HOVER).lightness() < 128 else "dark"
+_spin_up = _theme_asset("assets", "ui", f"chevron-up-{_spin_ink}.svg").replace("\\", "/")
+_spin_down = _theme_asset("assets", "ui", f"chevron-down-{_spin_ink}.svg").replace("\\", "/")
+
 GLOBAL_QSS = f"""
 * {{
     font-family: "Segoe UI Variable Text", "Microsoft YaHei UI", "Segoe UI", sans-serif;
@@ -416,6 +422,27 @@ QPushButton#IconBtn {{
 QPushButton#IconBtn:hover {{ background: {Colors.HOVER_OVERLAY}; color: {Colors.TEXT_PRIMARY}; }}
 
 /* 滚动条。给 QScrollArea 设了样式却不写滚动条时，Qt 会画一条很宽的白槽，深色界面上就是一条白带。 */
+QAbstractSpinBox {{
+    background:{Colors.SURFACE};color:{Colors.TEXT_PRIMARY};
+    border:1px solid {Colors.BORDER};border-radius:6px;padding:6px 24px 6px 8px;
+    selection-background-color:{Colors.ACCENT_SOFT};selection-color:{Colors.TEXT_PRIMARY};
+}}
+QAbstractSpinBox QLineEdit {{background:transparent;color:{Colors.TEXT_PRIMARY};border:0;padding:0;}}
+QSpinBox::up-button,QDoubleSpinBox::up-button {{
+    background:{Colors.SURFACE_HOVER};border:0;border-left:1px solid {Colors.BORDER};
+    width:18px;subcontrol-origin:border;subcontrol-position:top right;border-top-right-radius:5px;
+}}
+QSpinBox::down-button,QDoubleSpinBox::down-button {{
+    background:{Colors.SURFACE_HOVER};border:0;border-left:1px solid {Colors.BORDER};
+    width:18px;subcontrol-origin:border;subcontrol-position:bottom right;border-bottom-right-radius:5px;
+}}
+QSpinBox::up-arrow,QDoubleSpinBox::up-arrow {{image:url("{_spin_up}");width:10px;height:7px;}}
+QSpinBox::down-arrow,QDoubleSpinBox::down-arrow {{image:url("{_spin_down}");width:10px;height:7px;}}
+QTableView {{background:{Colors.SURFACE};color:{Colors.TEXT_PRIMARY};alternate-background-color:{Colors.SURFACE};selection-background-color:{Colors.ACCENT_SOFT};selection-color:{Colors.TEXT_PRIMARY};gridline-color:{Colors.BORDER};}}
+QHeaderView {{background:{Colors.WINDOW_BG};color:{Colors.TEXT_SECONDARY};}}
+QTableView::item:selected {{background:{Colors.ACCENT_SOFT};color:{Colors.ACCENT};}}
+QHeaderView::section {{background:{Colors.WINDOW_BG};color:{Colors.TEXT_SECONDARY};border:0;padding:6px;}}
+QTableCornerButton::section,QAbstractScrollArea::corner {{background:{Colors.WINDOW_BG};border:0;}}
 QScrollBar:vertical {{
     background: transparent;
     width: 8px;
@@ -546,11 +573,12 @@ def dialog_qss() -> str:
         QMessageBox QLabel {{ color:{Colors.TEXT_PRIMARY}; font-size:13px; min-width: 260px; }}
         QDialog QLabel {{ color:{Colors.TEXT_PRIMARY}; font-size:13px; background: transparent; }}
         QCheckBox {{ color:{Colors.TEXT_PRIMARY}; spacing: 6px; }}
-        QLineEdit, QComboBox, QSpinBox {{
+        QLineEdit, QComboBox, QSpinBox,QDoubleSpinBox {{
             background:{Colors.SURFACE}; color:{Colors.TEXT_PRIMARY};
             border:1px solid {Colors.BORDER}; border-radius:6px; padding:6px 8px;
         }}
-        QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color:{Colors.ACCENT}; }}
+        QSpinBox,QDoubleSpinBox {{padding-right:24px;}}
+        QLineEdit:focus, QComboBox:focus, QSpinBox:focus,QDoubleSpinBox:focus {{ border-color:{Colors.ACCENT}; }}
         QComboBox::drop-down {{ border:none; width:22px; }}
         QComboBox QAbstractItemView {{
             background:{Colors.SURFACE};

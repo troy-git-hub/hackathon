@@ -84,8 +84,14 @@ def main():
             assert fake_exam.open_exam_window.call_args.kwargs['parent'] is window
         fake_native=ModuleType('echo.widgets.paper_book')
         fake_native.open_paper_book=Mock(return_value=SimpleNamespace())
-        with patch.dict(sys.modules,{'echo.widgets.paper_book':fake_native}):
+        fake_composer=ModuleType('echo.widgets.qingjuan_workbench')
+        fake_composer.open_qingjuan_workbench=Mock(return_value=SimpleNamespace())
+        with patch.dict(sys.modules,{'echo.widgets.qingjuan_workbench':fake_composer}):
             window.home_cloud_paper_card.btn.click()
+            fake_composer.open_qingjuan_workbench.assert_called_once_with(parent=window)
+            assert window._qingjuan_workbench is fake_composer.open_qingjuan_workbench.return_value
+        with patch.dict(sys.modules,{'echo.widgets.paper_book':fake_native}):
+            window._open_cloud_workspace()
             fake_native.open_paper_book.assert_called_once_with(parent=window,view='qingjuan')
             assert window._cloud_workspace is fake_native.open_paper_book.return_value
             from echo.widgets.exam_window import open_exam_window

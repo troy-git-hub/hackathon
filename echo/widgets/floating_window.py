@@ -282,6 +282,9 @@ class FloatingWindow(QWidget):
         self._prac_err.connect(self._on_prac_err)
         self._show_home()
 
+        from echo.widgets.learning_path import GoalOnboarding
+        self._goal_onboarding = GoalOnboarding(self, ready=lambda:self._page == HOME)
+
         # 后端：transcript → concept timeline → break point → 回响
         self.echo = EchoBridge(parent=self)
         self.echo.transcript.connect(self._on_transcript)
@@ -372,13 +375,18 @@ class FloatingWindow(QWidget):
         # 会自己消失的提示条：默认藏着，用的时候显示几秒。
         # 放在 header 正下方而不是借 status_lbl —— 那里显示「正在听课/已下课」，
         # 借来显示别的会让状态栏短暂说谎。
-        self.toast_lbl = _label("", wrap=True)
-        self.toast_lbl.setStyleSheet(
-            f"color: {Colors.TEXT_PRIMARY}; font-size: 12px;"
-            f"background: {Colors.ACCENT_SOFT}; border: 1px solid {Colors.ACCENT_BORDER};"
-            f"border-radius: {Radius.MD}px; padding: 8px 12px;")
-        self.toast_lbl.setVisible(False)
-        root.insertWidget(1, self.toast_lbl)
+        self.toast_strip=QFrame();self.toast_strip.setObjectName('EchoToast')
+        self.toast_strip.setStyleSheet(f'QFrame#EchoToast {{background:{Colors.ACCENT_SOFT};border:1px solid {Colors.ACCENT_BORDER};border-radius:{Radius.MD}px;}}')
+        toast_row=QHBoxLayout(self.toast_strip);toast_row.setContentsMargins(10,7,6,7);toast_row.setSpacing(6)
+        self.toast_lbl=_label('',wrap=True)
+        self.toast_lbl.setStyleSheet(f'color:{Colors.TEXT_PRIMARY};font-size:12px;background:transparent;border:0;padding:0;')
+        toast_row.addWidget(self.toast_lbl,1)
+        self.toast_close=QPushButton('×');self.toast_close.setFixedSize(24,24)
+        self.toast_close.setAccessibleName(tr('关闭提示','Dismiss notification'));self.toast_close.setToolTip(tr('关闭提示','Dismiss notification'))
+        self.toast_close.setCursor(Qt.PointingHandCursor)
+        self.toast_close.setStyleSheet(f'QPushButton{{min-width:0;min-height:0;padding:0;border:0;border-radius:5px;background:transparent;color:{Colors.TEXT_SECONDARY};font-size:18px;}}QPushButton:hover{{background:{Colors.SURFACE_HOVER};color:{Colors.TEXT_PRIMARY};}}')
+        self.toast_close.clicked.connect(self._hide_toast);toast_row.addWidget(self.toast_close,0,Qt.AlignTop)
+        self.toast_strip.hide();root.insertWidget(1,self.toast_strip)
         self._toast_timer = QTimer(self)
         self._toast_timer.setSingleShot(True)
         self._toast_timer.timeout.connect(self._hide_toast)
@@ -565,6 +573,7 @@ class FloatingWindow(QWidget):
 
         # 课堂抽查浮层：默认隐藏，抽问触发时出现在听课页顶部
         self.checkin_card = CheckinCard(page)
+        self.checkin_card.geometry_changed.connect(self._fit)
         lay.addWidget(self.checkin_card)
 
         self.topic_lbl = _label(tr("等待老师开讲…", "Waiting for the teacher to start…"), f"color: {Colors.TEXT_PRIMARY}; font-size: 21px;"
@@ -1411,13 +1420,15 @@ class FloatingWindow(QWidget):
     def _toast(self, text: str, ms: int = 5000):
         """一条会自己消失的提示。不打断当前操作，所以不用弹窗。"""
         self.toast_lbl.setText(text)
-        self.toast_lbl.setVisible(True)
+        self.toast_lbl.show()
+        self.toast_strip.show()
         self._fit()
         self._toast_timer.start(ms)      # start 会顶掉上一条还没到点的隐藏
 
     def _hide_toast(self):
-        if self.toast_lbl.isVisible():
-            self.toast_lbl.setVisible(False)
+        self._toast_timer.stop()
+        if not self.toast_strip.isHidden():
+            self.toast_strip.hide()
             self._fit()
 
     def offer_model_download(self):
@@ -1736,14 +1747,16 @@ class FloatingWindow(QWidget):
             tr("查看", "View"), self._show_weekly)
         self.home_features_grid.addWidget(self.home_weekly_card,1,1)
         self.home_cloud_paper_card = self._home_card(
-            tr('清卷 · 云端','Qingjuan · Cloud'),
-            tr('通过账户 API 获取试卷，在 Echo 原生界面答题','Get account papers and answer in native Echo'),
-            tr('打开','Open'),self._open_cloud_workspace)
+            tr('清卷 · 本地出卷','Qingjuan · Compose'),
+            tr('本机配置蓝图、编辑卷稿与导出，AI由Echo云端命题','Local authoring and export with Echo cloud AI'),
+            tr('打开','Open'),self._open_local_qingjuan)
         self.home_features_grid.addWidget(self.home_cloud_paper_card,1,2)
         self.home_account_card = self._home_card(
             tr("用户中心", "Account center"), tr("自动同步、网页复习与学习点余额", "Cloud sync, web review and learning credits"),
             tr("打开", "Open"), self._show_account_center)
         booklet.addWidget(self.home_account_card)
+        booklet.addWidget(_btn(tr('学习目标与今日安排','Learning goal and today'),'Link',self._open_learning_path))
+        booklet.addWidget(_btn(tr('学习规划 · Beta','Learning planner · Beta'),'Link',self._open_learning_planner))
         self.home_tools_toggle = _btn(tr('更多 ▾','More ▾'),'Link',self._toggle_home_tools)
         self.home_tools_toggle.setCheckable(True)
         lay.addLayout(hero)
@@ -1770,6 +1783,10 @@ class FloatingWindow(QWidget):
             dialogs.info(self,tr('清卷 · 云端','Qingjuan · Cloud'),
                 tr('当前版本尚未包含云端学习窗口，请使用完成集成后的版本。','This version does not include the cloud workspace yet.'))
 
+    def _open_local_qingjuan(self):
+        from echo.widgets.qingjuan_workbench import open_qingjuan_workbench
+        self._qingjuan_workbench=open_qingjuan_workbench(parent=self)
+
     def _open_booklets(self, current=False):
         from echo.widgets.booklet_window import BookletWindow
         if not getattr(self,'_booklets',None):
@@ -1784,6 +1801,14 @@ class FloatingWindow(QWidget):
     def _show_account_center(self):
         from echo.widgets.account_login import show_account_center
         show_account_center(self)
+
+    def _open_learning_path(self):
+        from echo.widgets.learning_path import open_learning_path
+        open_learning_path(self)
+
+    def _open_learning_planner(self):
+        from echo.widgets.learning_path import open_learning_planner
+        open_learning_planner(self)
 
     def _recall_card(self):
         """主页顶部的「今天该回响」卡：几个知识点要确认 + 当时在哪掉的队 + 预计几分钟。
@@ -2381,6 +2406,9 @@ class FloatingWindow(QWidget):
         v.addWidget(_label(str(q.get("question", "")),
                            f"color: {Colors.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;"
                            "line-height: 150%;", wrap=True))
+        if isinstance(q.get('figure'),dict):
+            from echo.widgets.paper_figure import PaperFigure
+            visual=PaperFigure(q['figure']);visual.setFixedHeight(160);v.addWidget(visual)
 
         opts = [str(o).strip() for o in (q.get("options") or []) if str(o).strip()]
         group = QButtonGroup(card)
@@ -3415,9 +3443,9 @@ class FloatingWindow(QWidget):
                 header_h = content_height + spacing
             # 进度条和提示条在页面外面，不量进来窗口就会把它们裁掉
             extra = 0
-            for wdg in (getattr(self, "model_strip", None), getattr(self, "toast_lbl", None)):
+            for wdg in (getattr(self, "model_strip", None), getattr(self, "toast_strip", None)):
                 if wdg is not None and wdg.isVisible():
-                    extra += wdg.sizeHint().height() + spacing
+                    extra += (wdg.heightForWidth(w) if wdg.hasHeightForWidth() else wdg.sizeHint().height()) + spacing
             # 钉死成当前页的高度：QStackedWidget 的 heightForWidth 取的是所有页里最高的那页，
             # 放进 QScrollArea 后会把短页撑高，底部的「我掉队了」就被挤出可视区
             self.stack.setFixedHeight(h)

@@ -27,6 +27,11 @@ def clean_question(raw):
     if not isinstance(raw, dict):
         return None
     q = dict(raw)
+    figure=q.get('figure')
+    if figure is not None:
+        try:
+            if not isinstance(figure,dict) or figure.get('kind') not in ('geometry','rays','coord','numberline','bar','pie','svg') or len(json.dumps(figure,allow_nan=False))>60000:raise ValueError()
+        except (ValueError,TypeError):q.pop('figure',None)
     q["question"] = str(q.get("question") or "").strip()
     q["explain"] = str(q.get("explain") or "").strip()
     if not q["question"] or not q["explain"] or product_help(str(raw)):

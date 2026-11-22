@@ -258,6 +258,12 @@ class SettingsDialog(QDialog):
         self.account_button = QPushButton(tr("用户中心 · 账户与学习点", "Account center · learning credits"))
         self.account_button.clicked.connect(self._open_account_center)
         body.addWidget(self.account_button)
+        self.learning_goal_button = QPushButton(tr('学习目标 · 兴趣与每日安排','Learning goal · interests and daily plan'))
+        self.learning_goal_button.clicked.connect(self._open_learning_goal)
+        body.addWidget(self.learning_goal_button)
+        self.ai_usage_button=QPushButton('AI 调用与用量 · 清卷 / 课堂 / 批改')
+        self.ai_usage_button.clicked.connect(self._open_ai_usage)
+        body.addWidget(self.ai_usage_button)
         from echo.backend import account
         self.admin_button=QPushButton(tr('管理员后台 ↗','Administrator ↗'))
         self.admin_button.setObjectName('Link')
@@ -384,6 +390,14 @@ class SettingsDialog(QDialog):
     def _open_account_center(self):
         from echo.widgets.account_login import show_account_center
         show_account_center(self)
+
+    def _open_learning_goal(self):
+        from echo.widgets.learning_path import open_learning_path
+        open_learning_path(self)
+
+    def _open_ai_usage(self):
+        from echo.widgets.ai_usage import AIUsageDialog
+        self._ai_usage=AIUsageDialog(self);self._ai_usage.exec_()
 
     def _open_admin(self):
         from echo.backend import account

@@ -12,7 +12,7 @@ Echo - 课堂抽查卡片
     card.answered(int)            # 学生选了第几个选项 → bridge.answer_checkin(i)
     card.skipped()                # 学生点了关闭 → bridge.skip_checkin()
 """
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal,QTimer
 from PyQt5.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton,
                              QSizePolicy, QVBoxLayout, QWidget, QLineEdit)
 
@@ -21,6 +21,7 @@ from echo.theme import Colors, Radius, Spacing, font
 from echo.components.wrapped_choice import WrappedOption
 from echo.widgets.matching import MatchingAnswer
 from echo.backend import assessment
+from echo.widgets.echo_line_edit import EchoLineEdit as QLineEdit
 
 # 自评题（AI 没出成题时的兜底）三个选项是后端 quiz.SELF_OPTIONS 给的固定文案，
 # 在这里按当前语言换个说法。不让 backend 直接引 i18n —— 那会把 PyQt5 拖进
@@ -42,6 +43,7 @@ class CheckinCard(QFrame):
     # 卡片收起来了（叉掉、或答完再叉掉）。宿主据此重排窗口 ——
     # 卡片一藏，听课页就矮回去，窗口不跟着缩会留一大块空白。
     closed = pyqtSignal()
+    geometry_changed=pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -62,6 +64,7 @@ class CheckinCard(QFrame):
         root = QVBoxLayout(self)
         root.setContentsMargins(Spacing.MD + 2, Spacing.SM + 4, Spacing.MD + 2, Spacing.MD)
         root.setSpacing(Spacing.SM)
+        root.setAlignment(Qt.AlignTop)
 
         head = QHBoxLayout()
         head.setSpacing(Spacing.SM)
@@ -132,6 +135,8 @@ class CheckinCard(QFrame):
             QFrame#CheckinCard QLabel {{ color: {Colors.TEXT_PRIMARY}; background: transparent; }}
             QLabel#CheckinTag {{ color: {Colors.ACCENT}; }}
             QLabel#CheckinHint {{ color: {Colors.TEXT_SECONDARY}; }}
+            QLineEdit{{background:{Colors.SURFACE};color:{Colors.TEXT_PRIMARY};border:1px solid {Colors.BORDER_STRONG};border-radius:7px;padding:5px 8px;min-height:0;font-size:12px;}}
+            QLineEdit:focus{{border-color:{Colors.ACCENT};}}
             QPushButton#CheckinClose {{
                 background: transparent; border: none;
                 color: {Colors.TEXT_SECONDARY}; font-size: 12px;
@@ -192,6 +197,7 @@ class CheckinCard(QFrame):
         self.options_box.addWidget(hint)
         self.show()
         self.raise_()
+        self.reflow()
 
     def ask(self, question: dict):
         """弹出一道抽问题。question 来自 bridge.checkin 信号。"""
@@ -202,6 +208,10 @@ class CheckinCard(QFrame):
         self.question_lbl.setText(self._question.get("question") or "")
         self.result_box.hide()
         self._clear_options()
+
+        if isinstance(self._question.get('figure'),dict):
+            from echo.widgets.paper_figure import PaperFigure
+            visual=PaperFigure(self._question['figure']);visual.setFixedHeight(130);self.options_box.addWidget(visual)
 
         options = self._question.get("options") or []
         kind = self._question.get("type")
@@ -215,14 +225,17 @@ class CheckinCard(QFrame):
                 self.options_box.addWidget(hint)
             else:
                 self._input = QLineEdit()
+                self._input.setFixedHeight(32)
                 self._input.setMaxLength(1500)
                 self._input.setPlaceholderText(tr("输入答案，AI 按意思批改", "Answer here for AI grading"))
                 self._input.returnPressed.connect(self._submit_written)
                 self.options_box.addWidget(self._input)
             self._submit = QPushButton(tr("提交答案", "Submit answer"))
+            self._submit.setFixedHeight(30);self._submit.setStyleSheet('min-height:0;padding:3px 8px;font-size:12px;')
             self._submit.clicked.connect(self._submit_written)
             self.options_box.addWidget(self._submit)
             self.show()
+            self.reflow()
             return
         for i, text in enumerate(options):
             # 认识的自评选项翻成英文，其它（AI 出的题）原样放过
@@ -241,6 +254,7 @@ class CheckinCard(QFrame):
 
         self.show()
         self.raise_()
+        self.reflow()
 
     def show_result(self, record: dict):
         """显示判分：标出对错选项，答错时给一句话讲解。"""
@@ -300,6 +314,22 @@ class CheckinCard(QFrame):
                                      "Saved to your mistakes — it'll come up in review."))
         self.note_lbl.setVisible(bool(self.note_lbl.text()))
         self.result_box.show()
+        self.reflow()
+
+    def reflow(self):
+        self.layout().invalidate()
+        QTimer.singleShot(0,self._fit_content)
+
+    def _fit_content(self):
+        if self.isHidden():return
+        width=max(200,self.width());layout=self.layout();layout.activate()
+        height=layout.totalHeightForWidth(width) if layout.hasHeightForWidth() else layout.totalSizeHint().height()
+        height=max(40,height)
+        if self.height()!=height:self.setFixedHeight(height);self.updateGeometry();self.geometry_changed.emit()
+
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        if event.size().width()!=event.oldSize().width():self.reflow()
 
     def dismiss(self):
         self._locked = False

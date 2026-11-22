@@ -85,7 +85,11 @@ class AccountCenter(QDialog):
         self.refresh_button=self.button('刷新摘要',self.refresh);links.addWidget(self.refresh_button)
         web=self.button('打开网页学习空间 ↗',lambda:QDesktopServices.openUrl(QUrl(account.USER_CENTER)))
         links.addWidget(web);links.addStretch();content.addLayout(links)
-        tools=QHBoxLayout();tools.addWidget(self.button('云端试卷与错题',lambda:self.open_cloud('exams')));tools.addWidget(self.button('清卷 · 拍卷与命题',lambda:self.open_cloud('qingjuan')));tools.addStretch();content.addLayout(tools)
+        tools=QHBoxLayout();tools.addWidget(self.button('云端试卷与错题',lambda:self.open_cloud('exams')));tools.addWidget(self.button('清卷 · 本地出卷',lambda:self.open_cloud('qingjuan')));tools.addStretch();content.addLayout(tools)
+        from echo.widgets.learning_path import open_learning_path
+        content.addWidget(self.button('学习目标与今日安排',lambda:open_learning_path(self)))
+        from echo.widgets.learning_path import open_learning_planner
+        content.addWidget(self.button('学习规划 · Beta',lambda:open_learning_planner(self)))
         self.sync_toggle=self.button('同步与账户 ▸',self.toggle_sync);self.sync_toggle.setCheckable(True)
         self.sync_toggle.setObjectName('AccountLink');content.addWidget(self.sync_toggle)
         self.sync_panel=QWidget();sync=QVBoxLayout(self.sync_panel);sync.setContentsMargins(0,2,0,0);sync.setSpacing(8)
@@ -119,8 +123,9 @@ class AccountCenter(QDialog):
 
     def render_identity(self,user):
         self.name.setText(user.get('name') or '继续你的学习')
-        self.email.setText(user.get('email') or '')
-        self.balance.setText(str(user.get('balance',0))+' 学习点')
+        offline=user.get('_session_offline',False)
+        self.email.setText((user.get('email') or '')+(' · 离线，待验证' if offline else ''))
+        self.balance.setText(str(user.get('balance',0))+' 学习点'+('（上次记录）' if offline else ''))
 
     @staticmethod
     def clear(layout):
@@ -198,7 +203,7 @@ class AccountCenter(QDialog):
             states={'succeeded':'已完成','failed':'未完成 · 额度已返还','pending':'处理中'}
             for item in items:
                 row=QHBoxLayout();row.setContentsMargins(0,0,0,0)
-                row.addWidget(label((item.get('purpose_label') or '学习辅助')+' · '+states.get(item.get('state'),'状态待更新'),12),1)
+                row.addWidget(label(('清卷' if item.get('purpose')=='qingjuan_generate' else item.get('purpose_label') or '学习辅助')+' · '+states.get(item.get('state'),'状态待更新'),12),1)
                 row.addWidget(label(('已返还' if item.get('state')=='failed' else str(item.get('cost',0))+' 点'),11,True))
                 widget=QWidget();widget.setLayout(row);self.requests.addWidget(widget)
             if not items:self.requests.addWidget(label('还没有账户 AI 请求。听课时需要帮助，再让 Echo 出手。',12,True))
@@ -206,8 +211,12 @@ class AccountCenter(QDialog):
 
     def open_cloud(self,view):
         if not self.same_owner():return
-        from echo.widgets.paper_book import open_paper_book
-        self._cloud=open_paper_book(self,view)
+        if view=='qingjuan':
+            from echo.widgets.qingjuan_workbench import open_qingjuan_workbench
+            self._cloud=open_qingjuan_workbench(parent=self)
+        else:
+            from echo.widgets.paper_book import open_paper_book
+            self._cloud=open_paper_book(self,view)
         if self._cloud:self._cloud.finished.connect(lambda _:self.refresh() if self.same_owner() else None)
 
     def render_summary(self,data):

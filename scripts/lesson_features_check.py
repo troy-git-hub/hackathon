@@ -45,12 +45,15 @@ def main():
         assert len(retained) <= 8 and sum(len(m['content']) for m in retained) <= 6000
         assert 'SECRET_IMAGE' not in str(retained) and retained[-2]['content'] == '问题11'
         from echo.backend.vision import VisionChat
-        chat = VisionChat(b'image', context='当前知识点：函数')
+        import io
+        from PIL import Image
+        image=io.BytesIO();Image.new('RGB',(2,2),'white').save(image,'PNG')
+        chat = VisionChat(image.getvalue(), context='当前知识点：函数')
         first = chat._messages('为什么？')
         assert '当前知识点' in first[0]['content']
         chat.history = recent_turns(first[1:] + [{'role': 'assistant', 'content': '解释'}])
         follow = chat._messages('换个例子')
-        assert str(follow).count('data:image/png;base64,') == 1
+        assert str(follow).count('data:image/') == 1
         assert '当前知识点' in follow[0]['content']
 
         from echo.backend.engine import EchoEngine
