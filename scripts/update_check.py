@@ -26,6 +26,7 @@ def wait(app, predicate, timeout=8):
     raise AssertionError('operation timed out')
 
 
+@patch('echo.version.CHANNEL', 'stable')
 def main():
     with tempfile.TemporaryDirectory(prefix='echo-update-test-') as directory:
         base = Path(directory)
