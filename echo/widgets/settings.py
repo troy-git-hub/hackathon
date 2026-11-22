@@ -156,8 +156,18 @@ class SettingsDialog(QDialog):
         title = QLabel(tr("Echo 设置", "Echo Settings"))
         title.setFont(font(16, 600))
         body.addWidget(title)
-        sub = QLabel(tr("默认使用 Echo 账户服务。自己的模型 API 与更新地址可在高级设置中调整。",
-                        "Echo account services are the default. Custom model APIs and the update URL are in Advanced settings."))
+        # 默认隐藏「用自己的 AI」：普通用户都走 Echo 账户服务，不该看到这排开关。
+        # 配置文件（.env）写 ECHO_SHOW_CUSTOM_API=1 可重新显示；
+        # 已经在用自定义 API（ECHO_ACCOUNT_CUSTOM_API=1）或访客模式的保留开关。
+        show_custom_api = (self._kv.get("ECHO_SHOW_CUSTOM_API", "0") == "1"
+                           or self._kv.get("ECHO_ACCOUNT_CUSTOM_API", "0") == "1"
+                           or os.getenv("ECHO_ACCOUNT_GUEST") == "1")
+        if show_custom_api:
+            sub = QLabel(tr("默认使用 Echo 账户服务。自己的模型 API 与更新地址可在高级设置中调整。",
+                            "Echo account services are the default. Custom model APIs and the update URL are in Advanced settings."))
+        else:
+            sub = QLabel(tr("模型由 Echo 账户服务提供，登录即用；更新地址在高级设置。",
+                            "Models come with your Echo account. The update URL is in Advanced settings."))
         sub.setStyleSheet(f"color:{Colors.TEXT_SECONDARY}; font-size:12px;")
         sub.setWordWrap(True)
         body.addWidget(sub)
@@ -166,6 +176,14 @@ class SettingsDialog(QDialog):
         form.setSpacing(10)
         form.setLabelAlignment(Qt.AlignRight)
 
+        def _section(title):
+            """分节小标题：把一长条设置分成几段，不用大改布局。"""
+            lbl = QLabel(title)
+            lbl.setStyleSheet(f'color:{Colors.TEXT_SECONDARY};font-size:11px;font-weight:600;'
+                              'letter-spacing:1px;padding-top:6px;')
+            return lbl
+
+        form.addRow("", _section(tr("通用", "General")))
         # 用户名：开机问候「你好 + 用户名」用的就是它，存在 profile.json
         self._profile = profile.load()
         self.user_edit = QLineEdit(profile.display_name(self._profile))
@@ -184,9 +202,11 @@ class SettingsDialog(QDialog):
         advanced_form = QFormLayout(self.advanced_widget)
         self.custom_api = QCheckBox(tr("使用自己的模型 API（高级）", "Use my own model API (advanced)"))
         self.custom_api.setChecked(os.getenv('ECHO_ACCOUNT_GUEST')=='1' or self._kv.get('ECHO_ACCOUNT_CUSTOM_API','0') == '1')
-        advanced_form.addRow('', self.custom_api)
+        if show_custom_api:
+            advanced_form.addRow('', self.custom_api)
         self._build_providers(advanced_form)
 
+        form.addRow("", _section(tr("课堂与语音", "Lesson and voice")))
         self.combos = {}
         for key, label, values, labels in COMBOS:
             cb = _Combo()
@@ -220,6 +240,22 @@ class SettingsDialog(QDialog):
             self.theme_combo.addItem(title, ident)
         self._select(self.theme_combo, THEME_MODE)
         form.addRow(tr("界面主题（重启生效）：", "Theme (restart required):"), self.theme_combo)
+        # 界面动画：默认跟随系统（Windows 的「在 Windows 中显示动画」）。改完立即生效。
+        from echo.widgets import motion
+        self.motion_combo = _Combo()
+        for _motion_label, _motion_value in ((tr("跟随系统", "Follow system"), "system"),
+                                             (tr("开启", "On"), "on"),
+                                             (tr("关闭", "Off"), "off")):
+            self.motion_combo.addItem(_motion_label, _motion_value)
+        self._select(self.motion_combo, motion.mode())
+        form.addRow(tr("界面动画：", "UI animation:"), self.motion_combo)
+        # 新手引导：跳过/完成后想再看，随时从这里重来一遍
+        self.btn_onboarding = QPushButton(tr("重看新手引导", "Show getting-started guide"))
+        def _show_guide():
+            from echo.widgets.onboarding import open_onboarding
+            open_onboarding(self)
+        self.btn_onboarding.clicked.connect(_show_guide)
+        form.addRow("", self.btn_onboarding)
         from echo.widgets.update_center import DEFAULT_URL
         update_settings = QSettings("Echo", "Echo")
         configured_url = update_settings.value("update_url", DEFAULT_URL, type=str)
@@ -230,6 +266,7 @@ class SettingsDialog(QDialog):
         advanced_form.addRow(tr("更新服务地址：", "Update service:"), self.update_url)
         self.auto_update = QCheckBox(tr("每次启动检查并后台下载更新", "Check and download on startup"))
         self.auto_update.setChecked(QSettings("Echo", "Echo").value("auto_update_check", True, type=bool))
+        form.addRow("", _section(tr("更新", "Updates")))
         form.addRow("", self.auto_update)
         from echo.version import VERSION
         self.btn_updates = QPushButton(tr(f"更新中心 · 当前 {VERSION}", f"Update center · {VERSION}"))
@@ -252,9 +289,11 @@ class SettingsDialog(QDialog):
 
         self.btn_library = QPushButton(tr("知识库 · 教材、讲义与笔记", "Knowledge library · course references"))
         self.btn_library.clicked.connect(self._open_library)
+        form.addRow("", _section(tr("工具", "Tools")))
         form.addRow("", self.btn_library)
 
         body.addLayout(form)
+        body.addWidget(_section(tr("账户与同步", "Account and sync")))
         self.account_button = QPushButton(tr("用户中心 · 账户与学习点", "Account center · learning credits"))
         self.account_button.clicked.connect(self._open_account_center)
         body.addWidget(self.account_button)
@@ -738,6 +777,8 @@ class SettingsDialog(QDialog):
         backend_config.set_ui_lang(self.lang_combo.currentData())
         skin = self.pet_skin.currentData()
         QSettings("Echo", "Echo").setValue("interface_theme", self.theme_combo.currentData())
+        from echo.widgets import motion
+        motion.set_mode(self.motion_combo.currentData())
         QSettings("Echo", "Echo").setValue("desktop_pet_skin", skin)
         from echo.widgets.desk_pet import DeskPet
         for widget in QApplication.topLevelWidgets():

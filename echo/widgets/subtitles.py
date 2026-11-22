@@ -22,10 +22,12 @@ class SubtitleWindow(QWidget):
         self.state = QLabel("Echo 字幕 · 本地转写，可能存在延迟或识别误差")
         self.state.setStyleSheet(f"font-size:11px;color:{Colors.TEXT_SECONDARY}")
         row.addWidget(self.state, 1)
-        for title, callback in (("A−", lambda: self.change_size(-2)), ("A＋", lambda: self.change_size(2)), ("×", self.close)):
+        for title, callback in (("A−", lambda: self.change_size(-2)), ("A＋", lambda: self.change_size(2))):
             button = QPushButton(title)
             button.clicked.connect(callback)
             row.addWidget(button)
+        from echo.widgets.window_chrome import icon_button
+        row.addWidget(icon_button("×", self.tr("关闭", "Close"), self.close))
         root.addLayout(row)
         self.caption = QLabel("等待老师开讲…")
         self.caption.setTextFormat(Qt.PlainText)

@@ -6,7 +6,8 @@ import os
 import sys
 
 from PyQt5.QtGui import QColor, QFont, QPalette
-from PyQt5.QtCore import Qt, QSettings
+from PyQt5.QtCore import QObject, QEvent, Qt, QSettings
+from PyQt5.QtWidgets import QComboBox, QApplication, QWidget
 
 THEMES = {"auto": "跟随系统", "light": "纸白", "dark": "石墨夜读",
           "forest": "森林书屋", "ocean": "海盐蓝", "sakura": "樱花手记", "parchment": "羊皮纸"}
@@ -479,9 +480,37 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
 """
 
 
+class _ComboWheelGuard(QObject):
+    """鼠标滚轮落在下拉框上时不再改选项（用户要求：所有「点一下弹出列表」的
+    控件都要这样）。拦掉 Wheel 事件即可。
+
+    实现只碰安全的两样东西：isinstance 判断 + QApplication.activePopupWidget()。
+    弹层打开时 activePopupWidget() 非 None，直接放行让列表正常滚——不调
+    combo.view()（在销毁中的组合框上取 view 会访问违规，整个进程崩）。
+    """
+    def eventFilter(self, obj, event):
+        if event.type() != QEvent.Wheel or not isinstance(obj, QWidget):
+            return False
+        if QApplication.activePopupWidget() is not None:
+            return False            # 弹层开着：滚轮给弹层列表滚
+        widget = obj
+        while widget is not None:
+            if isinstance(widget, QComboBox):
+                return True         # 合上时：滚轮不改选项
+            widget = widget.parentWidget()
+        return False
+
+
+_wheel_guard = None
+
+
 def apply_theme(app):
+    global _wheel_guard
     app.setStyleSheet(GLOBAL_QSS)
     app.setFont(font(12))
+    if _wheel_guard is None:
+        _wheel_guard = _ComboWheelGuard()
+    app.installEventFilter(_wheel_guard)
 
 
 def menu_qss() -> str:

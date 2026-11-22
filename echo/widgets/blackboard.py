@@ -140,8 +140,8 @@ class BlackboardWindow(QDialog):
             QPushButton#Citation {{background:transparent;border:none;color:{Colors.ACCENT};padding:2px 0;text-align:left;font-size:11px;}}
             QPushButton#Chip {{background:{Colors.SURFACE_HOVER};border:1px solid {Colors.BORDER};font-size:11px;padding:5px 9px;}}
             QPushButton#Chip:checked {{background:{Colors.ACCENT_SOFT};color:{Colors.ACCENT};border-color:{Colors.ACCENT_BORDER};}}
-            QPushButton#BoardWindowButton {{background:transparent;border:none;color:{Colors.TEXT_SECONDARY};padding:0;font-size:16px;}}
-            QPushButton#BoardWindowButton:hover {{background:{Colors.SURFACE_HOVER};color:{Colors.TEXT_PRIMARY};}}
+            QPushButton#BoardWindowButton {{background:transparent;border:none;color:{Colors.TEXT_SECONDARY};padding:0;font-size:15px;border-radius:4px;}}
+            QPushButton#BoardWindowButton:hover {{background:{Colors.HOVER_OVERLAY};color:{Colors.TEXT_PRIMARY};}}
             QCheckBox {{color:{Colors.TEXT_SECONDARY};font-size:11px;spacing:5px;}}
             QCheckBox::indicator {{width:13px;height:13px;background:{Colors.SURFACE};border:1px solid {Colors.BORDER_STRONG};border-radius:3px;}}
             QCheckBox::indicator:checked {{background:{Colors.ACCENT};border-color:{Colors.ACCENT};}}
@@ -382,7 +382,13 @@ class BlackboardWindow(QDialog):
             self.fold_btn.setText("+")
             self.fold_btn.setToolTip("展开")
             self.setMinimumSize(270, 44)
-            self.resize(300, 44)
+            try:
+                from echo.widgets import motion
+                if not motion.glide_window(self, (self.x(), self.y(), 300, 44),
+                                           restore_min=(270, 44)):
+                    self.resize(300, 44)
+            except Exception:
+                self.resize(300, 44)
         else:
             for widget in (self.course, self.nav, self.splitter, self.footer):
                 widget.show()
@@ -391,13 +397,36 @@ class BlackboardWindow(QDialog):
             self.fold_btn.setText("–")
             self.fold_btn.setToolTip("收起")
             self.setMinimumSize(360, 380)
-            self.resize(self._expanded_size)
+            try:
+                from echo.widgets import motion
+                target = self._expanded_size
+                if not motion.glide_window(self, (self.x(), self.y(), target.width(), target.height()),
+                                           restore_min=(360, 380)):
+                    self.resize(self._expanded_size)
+                else:
+                    # 动画期间放宽最小尺寸，否则起点就被钳住直接跳到位
+                    self.setMinimumSize(min(360, self.width()), min(380, self.height()))
+            except Exception:
+                self.resize(self._expanded_size)
+            # 展开时内容淡入+上浮一下；动效关闭时直通。
+            try:
+                from echo.widgets import motion
+                motion.reveal(self.splitter)
+            except Exception:
+                pass
 
     def show_tab(self, index):
         self.paper.setVisible(index == 0)
         self.visual_page.setVisible(index == 1)
         self.sources_scroll.setVisible(index == 2)
         self.chat_page.setVisible(index == 3)
+        try:
+            from echo.widgets import motion
+            # 图解页里嵌着 WebEngine，透明度效果罩不住它反而会闪，跳过；
+            if index != 1:
+                motion.reveal((self.paper, None, self.sources_scroll, self.chat_page)[index], slide=4)
+        except Exception:
+            pass
         for i, tab in enumerate(self.tabs):
             tab.setChecked(i == index)
         if index == 1:
@@ -839,6 +868,8 @@ class BlackboardWindow(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
+        from echo.widgets import motion
+        motion.fade_window(self)
         if self._board:
             self.show_inline()
 

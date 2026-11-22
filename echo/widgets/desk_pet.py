@@ -430,6 +430,10 @@ class DeskPet(QWidget):
     def _idle_tip(self):
         if time.time() - self._last_interact < 60 or self.status != "listening" or time.time() < self._bubble_until:
             return
+        # 主页待机（没在真上课）不要念叨：用户反馈很烦。只有引擎真的在听课才说。
+        engine = self.win.echo if (self.win is not None and hasattr(self.win, "echo")) else None
+        if engine is not None and not getattr(engine, "active", False):
+            return
         tips = IDLE_TIPS + ([tr("老师在讲：", "Now teaching: ") + self.topic] if self.topic else [])
         self.say(random.choice(tips), 4500)
 

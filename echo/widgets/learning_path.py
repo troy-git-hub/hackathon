@@ -53,7 +53,7 @@ class LearningPath(QDialog):
         self.client = api.Client(); self.snapshot = {}; self.busy = False; self.closed = False
         self.dirty = False; self.conflict = False; self.reflection_id = uuid.uuid4().hex
         root = QVBoxLayout(self)
-        heading=label('今天，想学会什么？'); heading.setStyleSheet('font-size:21px;font-weight:600;'); root.addWidget(heading)
+        self.heading=label('学习目标'); self.heading.setStyleSheet('font-size:21px;font-weight:600;'); root.addWidget(self.heading)
         root.addWidget(label('目标与兴趣跟随账户同步。打开、保存和切换今日模式不消耗学习点。'))
         self.tabs = QTabWidget(); root.addWidget(self.tabs, 1)
         goal = self.page('学习目标'); form = QFormLayout(); form.setRowWrapPolicy(QFormLayout.WrapLongRows); goal.addLayout(form)
@@ -93,7 +93,7 @@ class LearningPath(QDialog):
         from echo.widgets.learning_planner import LearningPlanner
         planning=self.page('学习规划 Beta');self.planner=LearningPlanner(self);self.planner.action.connect(self.plan_action);planning.addWidget(self.planner)
         root.addWidget(self.save)
-        self.tabs.currentChanged.connect(lambda index:self.save.setVisible(index==0))
+        self.tabs.currentChanged.connect(self.select_page)
         self.notice = label(); root.addWidget(self.notice)
         self.refresh_button = self.button('刷新云端方案', self.reload); root.addWidget(self.refresh_button)
         self.bus = _Bus(self); self.bus.done.connect(self.finished)
@@ -106,6 +106,11 @@ class LearningPath(QDialog):
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
         body = QWidget(); body.setObjectName('LearningPathContent'); box = QVBoxLayout(body); box.setSpacing(12)
         scroll.setWidget(body); self.tabs.addTab(scroll,title); return box
+
+    def select_page(self,index):
+        title=('学习目标','今天的学习','学习规划 · Beta')[index]
+        self.heading.setText(title);self.setWindowTitle('Echo · '+title)
+        self.save.setVisible(index==0)
 
     def button(self,text,slot):
         w = QPushButton(text); w.clicked.connect(lambda checked=False:slot()); return w
@@ -243,21 +248,21 @@ class LearningPath(QDialog):
         self.closed = True; self.owner_timer.stop(); super().closeEvent(event)
 
 
-def open_learning_path(parent=None,snapshot=None):
+def open_learning_path(parent=None,snapshot=None,view=0):
     from echo.widgets.account_login import ensure_account
     if not ensure_account(parent): return
     previous = getattr(parent,'_learning_path_window',None) if parent else None
     if previous and not previous.closed:
+        previous.tabs.setCurrentIndex(view);previous.select_page(view)
         previous.show(); previous.raise_(); previous.activateWindow(); return previous
     window = LearningPath(parent,snapshot)
     if parent: parent._learning_path_window = window
+    window.tabs.setCurrentIndex(view);window.select_page(view)
     window.show(); window.raise_(); return window
 
 
 def open_learning_planner(parent=None):
-    window=open_learning_path(parent)
-    if window:window.tabs.setCurrentIndex(2)
-    return window
+    return open_learning_path(parent,view=2)
 
 
 class GoalOnboarding(QObject):

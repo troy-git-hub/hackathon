@@ -235,6 +235,12 @@ class AccountCenter(QDialog):
 
     def toggle_sync(self):
         expanded=self.sync_toggle.isChecked();self.sync_panel.setVisible(expanded)
+        if expanded:
+            try:
+                from echo.widgets import motion
+                motion.reveal(self.sync_panel)
+            except Exception:
+                pass
         self.sync_toggle.setText('同步与账户 ▾' if expanded else '同步与账户 ▸')
 
     def update_sync(self):

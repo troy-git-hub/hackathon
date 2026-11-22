@@ -381,11 +381,8 @@ class FloatingWindow(QWidget):
         self.toast_lbl=_label('',wrap=True)
         self.toast_lbl.setStyleSheet(f'color:{Colors.TEXT_PRIMARY};font-size:12px;background:transparent;border:0;padding:0;')
         toast_row.addWidget(self.toast_lbl,1)
-        self.toast_close=QPushButton('×');self.toast_close.setFixedSize(24,24)
-        self.toast_close.setAccessibleName(tr('关闭提示','Dismiss notification'));self.toast_close.setToolTip(tr('关闭提示','Dismiss notification'))
-        self.toast_close.setCursor(Qt.PointingHandCursor)
-        self.toast_close.setStyleSheet(f'QPushButton{{min-width:0;min-height:0;padding:0;border:0;border-radius:5px;background:transparent;color:{Colors.TEXT_SECONDARY};font-size:18px;}}QPushButton:hover{{background:{Colors.SURFACE_HOVER};color:{Colors.TEXT_PRIMARY};}}')
-        self.toast_close.clicked.connect(self._hide_toast);toast_row.addWidget(self.toast_close,0,Qt.AlignTop)
+        from echo.widgets.window_chrome import icon_button
+        self.toast_close=icon_button('×',tr('关闭提示','Dismiss notification'),self._hide_toast);toast_row.addWidget(self.toast_close,0,Qt.AlignTop)
         self.toast_strip.hide();root.insertWidget(1,self.toast_strip)
         self._toast_timer = QTimer(self)
         self._toast_timer.setSingleShot(True)
@@ -1377,6 +1374,12 @@ class FloatingWindow(QWidget):
         folded = not bool(self._review_folded.get(topic))
         self._review_folded[topic] = folded
         body.setVisible(not folded)
+        if not folded:
+            try:
+                from echo.widgets import motion
+                motion.reveal(body, slide=6)
+            except Exception:
+                pass
         btn.setText("▸" if folded else "▾")
         btn.setToolTip(tr("展开", "Expand") if folded else tr("收起", "Collapse"))
         self._fit()          # 卡片高度变了，窗口要跟着重算，否则留白
@@ -1616,9 +1619,10 @@ class FloatingWindow(QWidget):
         self.home_start_panel.setObjectName('HomeStart')
         self.home_start_panel.setStyleSheet(f'QFrame#HomeStart{{background:{Colors.SURFACE};border:1px solid {Colors.BORDER};border-radius:14px;}}')
         start = QVBoxLayout(self.home_start_panel)
-        start.setContentsMargins(12,10,12,10)
-        start.setSpacing(6)
-        hero.addWidget(self.home_start_panel,3)
+        start.setContentsMargins(10,9,10,9)
+        start.setSpacing(5)
+        start.setAlignment(Qt.AlignTop)
+        hero.addWidget(self.home_start_panel,2)
         attention = QHBoxLayout()
         attention.setSpacing(Spacing.MD)
         self.home_tools_panel = QWidget()
@@ -1688,6 +1692,18 @@ class FloatingWindow(QWidget):
         # 开课前先给这节课起个名，下课后在历史里一眼能认出来
         start.addWidget(_label(tr("新的一节课", "Your next lesson"),
             f'color:{Colors.TEXT_PRIMARY};font-size:14px;font-weight:600;'))
+        lesson_modes=QHBoxLayout();lesson_modes.setSpacing(10)
+        self.home_online_mode=QRadioButton(tr('网课','Online class'))
+        self.home_ai_mode=QRadioButton(tr('AI课堂 · Studio','AI class · Studio'))
+        self.home_lesson_modes=QButtonGroup(self)
+        self.home_lesson_modes.addButton(self.home_online_mode);self.home_lesson_modes.addButton(self.home_ai_mode)
+        self.home_online_mode.setChecked(True)
+        for choice in (self.home_online_mode,self.home_ai_mode):
+            choice.setStyleSheet(f'QRadioButton{{font-size:11px;color:{Colors.TEXT_PRIMARY};spacing:4px;}}'
+                f'QRadioButton::indicator{{width:13px;height:13px;border-radius:7px;border:1px solid {Colors.BORDER_STRONG};background:{Colors.SURFACE};}}'
+                f'QRadioButton::indicator:checked{{background:{Colors.ACCENT};border:3px solid {Colors.ACCENT_BORDER};}}')
+            lesson_modes.addWidget(choice)
+        start.addLayout(lesson_modes)
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText(
             tr("课程名称（可选），例如：正比例函数",
@@ -1706,10 +1722,14 @@ class FloatingWindow(QWidget):
                               tr("开一节新课，Echo 开始听你的网课", "Start a new lesson and Echo will begin listening"))
         self.btn_today.setFixedHeight(34)
         start_actions=QHBoxLayout()
-        start_actions.addWidget(_label(tr('播放网课后，Echo 会开始听','Echo listens when your course plays'),
-            f'color:{Colors.TEXT_SECONDARY};font-size:11px;'),1)
+        self.home_lesson_hint=_label(tr('播放网课后，Echo 会开始听','Echo listens when your course plays'),
+            f'color:{Colors.TEXT_SECONDARY};font-size:11px;',wrap=True)
+        start.addWidget(self.home_lesson_hint)
+        start_actions.addStretch()
         start_actions.addWidget(self.btn_today)
         start.addLayout(start_actions)
+        self.home_ai_mode.toggled.connect(lambda checked:self._home_lesson_mode_changed(True) if checked else None)
+        self.home_online_mode.toggled.connect(lambda checked:self._home_lesson_mode_changed(False) if checked else None)
         self.home_booklet_card = QFrame()
         self.home_booklet_card.setObjectName('BookletHero')
         self.home_booklet_card.setStyleSheet('QFrame#BookletHero{background:transparent;border:0;}')
@@ -1722,7 +1742,7 @@ class FloatingWindow(QWidget):
         self.home_exam_entry = self._home_card(tr('试卷与练习','Papers and practice'),
             tr('查看云端试卷，在本机答题与错题重做','Open cloud papers, answer and retry locally'),tr('进入','Enter'),self._open_exam)
         booklet.addWidget(self.home_exam_entry)
-        hero.addWidget(self.home_booklet_card,2)
+        hero.addWidget(self.home_booklet_card,3)
 
         self.home_review_card = self._home_card(
             tr("错题复习", "Review mistakes"), tr("把掉队过的知识点再过一遍", "Go over the points you missed"),
@@ -1750,13 +1770,18 @@ class FloatingWindow(QWidget):
             tr('清卷 · 本地出卷','Qingjuan · Compose'),
             tr('本机配置蓝图、编辑卷稿与导出，AI由Echo云端命题','Local authoring and export with Echo cloud AI'),
             tr('打开','Open'),self._open_local_qingjuan)
-        self.home_features_grid.addWidget(self.home_cloud_paper_card,1,2)
         self.home_account_card = self._home_card(
             tr("用户中心", "Account center"), tr("自动同步、网页复习与学习点余额", "Cloud sync, web review and learning credits"),
             tr("打开", "Open"), self._show_account_center)
         booklet.addWidget(self.home_account_card)
-        booklet.addWidget(_btn(tr('学习目标与今日安排','Learning goal and today'),'Link',self._open_learning_path))
-        booklet.addWidget(_btn(tr('学习规划 · Beta','Learning planner · Beta'),'Link',self._open_learning_planner))
+        # 学习计划：原来的「学习目标 / 今日安排·Beta」两条 Link 文字按钮换成和
+        # 上面一致的入口卡片，合并成一个入口；清卷本地出卷也挪到这排下面。
+        self.home_plan_card = self._home_card(
+            tr('学习计划', 'Study plan'),
+            tr('学习目标与今日安排，按计划推进 · Beta', 'Goals and today\'s plan, at your pace · Beta'),
+            tr('打开', 'Open'), self._open_learning_path)
+        booklet.addWidget(self.home_plan_card)
+        booklet.addWidget(self.home_cloud_paper_card)
         self.home_tools_toggle = _btn(tr('更多 ▾','More ▾'),'Link',self._toggle_home_tools)
         self.home_tools_toggle.setCheckable(True)
         lay.addLayout(hero)
@@ -1768,6 +1793,12 @@ class FloatingWindow(QWidget):
     def _toggle_home_tools(self):
         expanded = self.home_tools_toggle.isChecked()
         self.home_tools_panel.setVisible(expanded)
+        if expanded:
+            try:
+                from echo.widgets import motion
+                motion.reveal(self.home_tools_panel)
+            except Exception:
+                pass
         self.home_tools_toggle.setText(tr('收起 ▴','Less ▴') if expanded else tr('更多 ▾','More ▾'))
         self._fit()
 
@@ -2196,8 +2227,21 @@ class FloatingWindow(QWidget):
     def _start_today(self):
         """主页上「开始今天的学习」：名字取自输入框。"""
         name = self.title_edit.text().strip()
+        if self.home_ai_mode.isChecked():
+            self._open_ai_class(name)
+            return
         self.title_edit.clear()
         self._begin_lesson(name)
+
+    def _home_lesson_mode_changed(self,ai):
+        self.btn_today.setText(tr('打开 AI 课堂 →','Open AI class →') if ai else tr('开始听课 →','Start lesson →'))
+        self.home_lesson_hint.setText(tr('Studio 独立实验室 · 先规划，再确认制作','Studio lab · Plan, then approve production') if ai else tr('播放网课后，Echo 会开始听','Echo listens when your course plays'))
+        self.title_edit.setPlaceholderText(tr('想学什么？例如：一次函数的斜率','What would you like to learn?') if ai else tr('课程名称（可选）','Lesson title (optional)'))
+        self._fit()
+
+    def _open_ai_class(self,topic=''):
+        from echo.widgets.studio_launch import open_studio
+        open_studio(self,topic)
 
     def _start_lesson_named(self):
         """折叠条上点「开始听课」：先问一句这节课叫什么，留空就用开课时间命名。
@@ -3350,6 +3394,14 @@ class FloatingWindow(QWidget):
             pol = QSizePolicy.Preferred if i == idx else QSizePolicy.Ignored
             self.stack.widget(i).setSizePolicy(pol, pol)
         self.stack.setCurrentIndex(idx)
+        # 切页淡入一下新页面，让页面之间不是硬切。原地「切页」（idx==prev，只是
+        # 刷新按钮状态那种调用）不重播，频繁切页时也不至于卡。动效关闭时直通。
+        if idx != prev:
+            try:
+                from echo.widgets import motion
+                motion.fade_widget(self.stack.widget(idx), motion.DURATION_PAGE)
+            except Exception:
+                pass
 
         mini = idx == MINI
         self.header.setVisible(not mini)
@@ -3386,6 +3438,8 @@ class FloatingWindow(QWidget):
         self.layout().setContentsMargins(SHADOW + m, SHADOW + (Spacing.SM if mini else Spacing.MD),
                                          SHADOW + m, SHADOW + (Spacing.SM if mini else Spacing.LG))
         self._sync_status()
+        # 只有「折叠成条 / 从条展开」这一趟才让窗口大小带动画
+        self._animate_window_fit = (prev == MINI) != (idx == MINI)
         self._fit()
 
     def _in_class(self) -> bool:
@@ -3475,9 +3529,23 @@ class FloatingWindow(QWidget):
                 x = max(scr.left() - SHADOW, min(old.x(), scr.right() + SHADOW - W))
                 # 往下放不下才整体上移，刚好放下为止；顶到屏幕上边就不再动
                 y = max(scr.top() - SHADOW, min(old.y(), scr.bottom() + SHADOW - H))
-                # 用 setGeometry 原子地设置位置+大小，避免 resize 先向右下长再 move 的闪烁/边界问题
-                self.setMinimumSize(W, H)
-                self.setGeometry(x, y, W, H)
+                # 折叠成条 / 从条展开时窗口平滑过渡（SwiftUI 手感）；其余改尺寸
+                # 仍然硬切，别让内容高度微调也拖着动画。动效关闭时直通。
+                glided = False
+                if getattr(self, "_animate_window_fit", False):
+                    try:
+                        from echo.widgets import motion
+                        glided = motion.glide_window(
+                            self, (x, y, W, H), restore_min=(W, H))
+                    except Exception:
+                        glided = False
+                if glided:
+                    # 动画期间最小尺寸要放宽到比当前还小，否则起点就被钳住直接跳到位
+                    self.setMinimumSize(min(W, old.width()), min(H, old.height()))
+                else:
+                    # 用 setGeometry 原子地设置位置+大小，避免 resize 先向右下长再 move 的闪烁/边界问题
+                    self.setMinimumSize(W, H)
+                    self.setGeometry(x, y, W, H)
             else:
                 self.setMinimumSize(W, H)
                 self.resize(W, H)
@@ -4115,6 +4183,12 @@ class FloatingWindow(QWidget):
             if at_bottom:
                 return True, HTBOTTOM
         return super().nativeEvent(eventType, message)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        # 主窗口淡入；动效关掉时 motion 是零操作直通。
+        from echo.widgets import motion
+        motion.fade_window(self)
 
     def closeEvent(self, e):
         if getattr(self, "_subtitles", None):

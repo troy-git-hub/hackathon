@@ -378,13 +378,26 @@
 .q-fig .fig-svg {
   width: min(100%, var(--fig-max, 92mm));
   height: auto;
-  display: inline-block;
-  vertical-align: middle;
+  max-height: var(--fig-height, 48mm);
+  display: block;
+  margin: 0 auto;
 }
 .q-fig .fig-img {
-  max-width: min(100%, 92mm);
-  max-height: 70mm;
+  display: block;
+  margin: 0 auto;
+  width: min(100%, var(--fig-max, 92mm));
+  height: var(--fig-height, 48mm);
   object-fit: contain;
+}
+.a4-page.density-compact { --fig-height: 40mm; }
+.a4-page.density-loose { --fig-height: 55mm; }
+.q-block[data-type="choice"], .q-block[data-type="multi"], .q-block[data-type="fill"] {
+  --fig-height: 40mm;
+}
+.q-space-continued, .q-fig-notice {
+  color: var(--muted);
+  font-size: 9pt;
+  margin: 0 0 0.5mm 1.8em;
 }
 .fig-cap {
   font-size: 10pt;

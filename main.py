@@ -84,6 +84,12 @@ def main():
     win.move(screen.center().x() - win.width() // 2,
              screen.center().y() - win.height() // 2)
     win.show()
+    # 首次启动的新手引导：可跳过，跳过/完成都记下来不再弹；设置页可重看。
+    try:
+        from echo.widgets.onboarding import maybe_show_onboarding
+        maybe_show_onboarding(win)
+    except Exception as e:
+        print(f"[Echo] 新手引导显示失败（不影响使用）: {e}")
     from echo.widgets.cloud_sync import CloudSyncController
     win._cloud=CloudSyncController(win)
     win._cloud.start()

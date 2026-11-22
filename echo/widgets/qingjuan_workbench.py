@@ -9,7 +9,7 @@ from PyQt5.QtGui import QPageSize,QPageLayout,QIcon,QDesktopServices,QKeySequenc
 from PyQt5.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QFormLayout,QLabel,QPushButton,
     QTextEdit,QCheckBox,QSpinBox,QDoubleSpinBox,QTabWidget,QWidget,QSplitter,QScrollArea,QTableWidget,
     QTreeWidget,QTreeWidgetItem,QFileDialog,QMessageBox,QInputDialog,QApplication,
-    QGroupBox,QGridLayout,QMenu,QShortcut,QSizePolicy)
+    QGroupBox,QGridLayout,QMenu,QShortcut,QSizePolicy,QProgressBar)
 from echo.backend import qingjuan_local as local
 from echo.theme import Colors,dialog_qss,style_menu
 from echo.widgets.echo_combo import EchoCombo
@@ -58,6 +58,7 @@ def spin(value,low,high,decimals=False):
 
 class QingjuanWorkbench(QDialog):
     completed=pyqtSignal(str,object,str)
+    generation_progress=pyqtSignal(str,object)
 
     def __init__(self,parent=None):
         # A real top-level window, not an owned dialog collapsing to a caption.
@@ -100,18 +101,27 @@ class QingjuanWorkbench(QDialog):
         actions.addWidget(self.button('网上作答 ↗',self.open_exam))
         actions.addWidget(self.export_kind);self.export_button=self.button('导出 ▾',self.show_exports);actions.addWidget(self.export_button)
         root.addLayout(actions)
-        split=QSplitter(Qt.Horizontal);self.tabs=QTabWidget();self.tabs.setMinimumWidth(350)
+        self.generation_panel=QWidget();progress_layout=QVBoxLayout(self.generation_panel);progress_layout.setContentsMargins(0,0,0,0);progress_layout.setSpacing(3)
+        self.generation_label=QLabel();self.generation_label.setWordWrap(True)
+        self.generation_bar=QProgressBar();self.generation_bar.setRange(0,5);self.generation_bar.setFormat('%v / 5 阶段');self.generation_bar.setFixedHeight(18)
+        self.generation_bar.setStyleSheet(f'QProgressBar{{border:1px solid {Colors.BORDER};border-radius:5px;background:{Colors.SURFACE};color:{Colors.TEXT_PRIMARY};text-align:center;}}QProgressBar::chunk{{background:{Colors.ACCENT};border-radius:4px;}}')
+        progress_layout.addWidget(self.generation_label);progress_layout.addWidget(self.generation_bar);root.addWidget(self.generation_panel);self.generation_panel.hide()
+        self.generation_started=0;self.generation_text='';self.generation_clock=QTimer(self);self.generation_clock.setInterval(500);self.generation_clock.timeout.connect(self.refresh_generation_progress)
+        self.generation_progress.connect(self.receive_generation_progress)
+        split=QSplitter(Qt.Horizontal);self.main_splitter=split;split.setChildrenCollapsible(False)
+        self.tabs=QTabWidget();self.tabs.setMinimumWidth(310)
+        self.tabs.currentChanged.connect(self._fade_tab)
         self.build_blueprint();self.build_layout();self.build_editor();self.build_grading()
         split.addWidget(self.tabs)
         from echo.widgets.qingjuan_preview import PaperPreview
         self.preview=PaperPreview();self.preview.selected.connect(self.select_preview)
         self.preview.page().pdfPrintingFinished.connect(self.pdf_done)
         self.preview.loadFinished.connect(self.preview_loaded)
-        split.addWidget(self.preview);split.setSizes([430,780]);split.setStretchFactor(1,1);root.addWidget(split,1)
+        split.addWidget(self.preview);split.setSizes([340,870]);split.setStretchFactor(1,1);root.addWidget(split,1)
         self.notice=QLabel('蓝图和卷稿保存在本机；AI 操作走 Echo 云端并按清卷用途计费。');self.notice.setWordWrap(True)
         self.notice.setTextFormat(Qt.PlainText);root.addWidget(self.notice)
         chrome=install_chrome(self,root,minimize=True)
-        self.pin_button=chrome.control('◇','置顶此工作台',self.toggle_pin);self.pin_button.setCheckable(True)
+        self.pin_button=chrome.pin_control('置顶此工作台',self.toggle_pin)
         chrome.layout().insertWidget(chrome.layout().count()-2,self.pin_button)
         self.completed.connect(self.finish)
         self.save_timer=QTimer(self);self.save_timer.setSingleShot(True);self.save_timer.setInterval(800);self.save_timer.timeout.connect(self.autosave)
@@ -148,10 +158,17 @@ class QingjuanWorkbench(QDialog):
                 import logging
                 logging.getLogger('echo.qingjuan').warning('Could not set Qingjuan taskbar identity')
 
+    def _fade_tab(self,index):
+        try:
+            from echo.widgets import motion
+            motion.fade_widget(self.tabs.widget(index),motion.DURATION_PAGE,slide=6)
+        except Exception:
+            pass
+
     def toggle_pin(self):
         pinned=not bool(self.windowFlags()&Qt.WindowStaysOnTopHint)
         self.setWindowFlag(Qt.WindowStaysOnTopHint,pinned);self.pin_button.setChecked(pinned)
-        self.pin_button.setText('◆' if pinned else '◇');self.pin_button.setToolTip('取消置顶' if pinned else '置顶此工作台');self.show()
+        self.pin_button.setToolTip('取消置顶' if pinned else '置顶此工作台');self.show()
 
     def popup(self,button,items):
         menu=style_menu(QMenu(self))
@@ -352,6 +369,10 @@ class QingjuanWorkbench(QDialog):
         widgets={'type':combo([(v,k) for k,v in local.TYPES.items()]),'count':spin(spec['count'],1,20),'score_each':spin(spec['score_each'],.01,150,True),
           'difficulty':combo([('混合难度','mixed'),('基础','easy'),('中等','medium'),('困难','hard')]),'with_figures':combo([('按需配图',None),('必须配图',True),('不配图',False)])}
         self.set_value(widgets['type'],spec['type']);self.set_value(widgets['difficulty'],spec.get('difficulty','mixed'));self.set_value(widgets['with_figures'],spec.get('with_figures'))
+        # 侧栏只有约 340px：EchoCombo 的圆角内边距让组合框最小宽动辄 100+，
+        # 三列一排就把卡片撑到 335，整页出横向滚动条。这里压住下限，窄栏里允许省略。
+        for key,limit in (('type',92),('count',56),('score_each',80),('difficulty',88),('with_figures',88)):
+            widgets[key].setMinimumWidth(limit)
         for col,(key,label) in enumerate([('type','题型'),('count','题量'),('score_each','每题分')]):
             grid.addWidget(QLabel(label),0,col);grid.addWidget(widgets[key],1,col)
         grid.setColumnStretch(0,2);grid.setColumnStretch(1,1);grid.setColumnStretch(2,1);box.addLayout(grid)
@@ -584,14 +605,23 @@ class QingjuanWorkbench(QDialog):
         if local.owner()=='local-guest':raise ValueError('请先在设置登录Echo账户，再重新打开清卷工作台。')
         if not QMessageBox.question(self,'清卷 · 云端 AI','本次'+{'generate':'命题','regenerate':'重出','figure':'配图','grade':'批改','review':'审校'}[operation]+'将发送相关内容到Echo云端并按实际token计费。继续？',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)==QMessageBox.Yes:return
         self.busy=True;self.tabs.setEnabled(False);self.update_state();self.notice.setText('清卷AI正在处理，请等待；不会自动重复发起新请求。')
+        self.generation_started=time.monotonic();self.generation_text='准备请求';self.generation_bar.setValue(0);self.generation_panel.show();self.generation_clock.start();self.refresh_generation_progress()
         document=copy.deepcopy(self.doc);who=self.owner
         def work():
-            try:value={'result':local.ai(document,operation,payload,fresh),'document':document,'payload':payload};error=''
+            try:value={'result':local.ai(document,operation,payload,fresh,on_progress=lambda value:self.generation_progress.emit(who,value)),'document':document,'payload':payload};error=''
             except Exception as exc:value={'document':document};error=str(exc)
             if local.owner()!=who:error='账户已变化，旧账户回复未在此窗口显示。'
             try:self.completed.emit(operation,value,error)
             except RuntimeError:pass
         threading.Thread(target=work,daemon=True,name='echo-qingjuan-'+operation).start()
+
+    def receive_generation_progress(self,who,value):
+        if self.closed or not self.busy or who!=self.owner or local.owner()!=who:return
+        self.generation_bar.setValue(max(0,min(3,int(value['step']))));self.generation_text=value['text'];self.refresh_generation_progress()
+
+    def refresh_generation_progress(self):
+        elapsed=max(0,int(time.monotonic()-self.generation_started))
+        self.generation_label.setText(self.generation_text+f' · 已等待 {elapsed} 秒')
 
     def generate(self,retry=False):
         if self.doc['state']=='final':raise ValueError('请先另存草稿。')
@@ -683,11 +713,14 @@ class QingjuanWorkbench(QDialog):
         self.launch('review',{'config':self.doc['config'],'paper':self.doc['paper']},fresh=True)
 
     def finish(self,operation,value,error):
-        self.busy=False;self.tabs.setEnabled(True)
+        self.busy=False;self.tabs.setEnabled(True);self.generation_clock.stop()
         if not self.check_owner():return
         self.doc=value['document'];self.update_state()
-        if error:self.notice.setText('请求未完成：'+error+'。可重试原请求，不要重复付费命题。');return
+        if error:
+            self.generation_text='未完成，原卷保留';self.refresh_generation_progress()
+            self.notice.setText('请求未完成：'+error+'。可重试原请求，不要重复付费命题。');return
         try:
+            self.generation_bar.setValue(4);self.generation_text='校验题量、题型与分值';self.refresh_generation_progress()
             result=value['result']
             if operation=='generate':
                 paper=local.normalize(result.get('paper',result));cfg=value['payload']['config']
@@ -723,7 +756,10 @@ class QingjuanWorkbench(QDialog):
                 self.doc['review']={**result,'approved':result['approved'] and not any(i['severity']=='error' for i in issues),'paper_hash':local.fingerprint(self.doc['paper']),'at':time.time()}
                 local.save(self.doc);self.show_review_results()
             self.refresh_files();self.render_tree();self.render_preview();self.update_state();self.notice.setText('清卷'+{'generate':'命题','regenerate':'重出','figure':'配图','grade':'批改','review':'审校'}[operation]+'已完成并保存本机，请人工核对。用量可在设置“AI调用与用量”查看。')
-        except Exception as exc:self.notice.setText(str(exc)+' AI调用可能已产生实际用量，请先核对请求记录。')
+            self.generation_bar.setValue(5);self.generation_text='已完成并保存';self.refresh_generation_progress()
+        except Exception as exc:
+            self.generation_text='校验未通过，原卷保留';self.refresh_generation_progress()
+            self.notice.setText(str(exc)+' AI调用可能已产生实际用量，请先核对请求记录。')
 
     def finalize(self):
         self.require_applied()
@@ -796,6 +832,7 @@ class QingjuanWorkbench(QDialog):
     def check_owner(self):
         if self.closed:return False
         if local.owner()==self.owner:return True
+        self.generation_clock.stop();self.generation_panel.hide()
         self.save_timer.stop();self.preview_timer.stop();self.owner_timer.stop();self.tabs.setEnabled(False);self.tabs.hide();self.file_list.clear();self.state_label.setText('账户已变化')
         self.generate_button.setEnabled(False);self.retry_button.setEnabled(False);self.final_button.setEnabled(False)
         self.preview.clear_content();self.preview.setHtml('<html><body>账户已变化，请重新打开清卷工作台。</body></html>')

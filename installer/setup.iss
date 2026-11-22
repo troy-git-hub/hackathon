@@ -5,7 +5,7 @@
   #define MyAppName "Echo"
 #endif
 #ifndef MyAppVersion
-  #define MyAppVersion "2.6.7"
+  #define MyAppVersion "2.6.8"
 #endif
 #define MyAppPublisher "Echo"
 #define MyAppExeName "Echo.exe"

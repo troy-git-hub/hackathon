@@ -145,6 +145,9 @@ def main():
     ap.add_argument("--with-model", action="store_true",
                     help="把语音模型打进包里（约 565MB 的胖包，给下不动模型的场景；"
                          "默认不带，模型是启动时按需下载的）")
+    ap.add_argument("--beta", action="store_true",
+                    help="内测渠道：产物名 Echo-Beta-Setup-<版本>.exe（ISCC /DECHO_BETA），"
+                         "配合 echo/version.py 的 CHANNEL=beta")
     args = ap.parse_args()
     suffix = "-with-model" if args.with_model else ""
 
@@ -205,9 +208,11 @@ def main():
         raise SystemExit("找不到 ISCC.exe，用 --iscc 指定，例如 "
                          r'--iscc "D:\Program Files (x86)\Inno Setup 6\ISCC.exe"')
     say(f"Inno Setup：{iscc.name} 正在压缩安装文件…")
-    rc, log = run([str(iscc), f"/DMyAppSuffix={suffix}",
-                   str(build_dir / "installer" / "setup.iss")],
-                  build_dir, tmp / "build_release_iscc.log")
+    iscc_argv = [str(iscc), f"/DMyAppSuffix={suffix}"]
+    if args.beta:
+        iscc_argv.append("/DECHO_BETA")
+    iscc_argv.append(str(build_dir / "installer" / "setup.iss"))
+    rc, log = run(iscc_argv, build_dir, tmp / "build_release_iscc.log")
     text = log.read_text(encoding="utf-8", errors="replace")
     if rc or "Successful compile" not in text:
         say("ISCC 没打印 Successful compile —— 产物不可信，别上传。日志尾部：")
@@ -215,7 +220,8 @@ def main():
             say("   " + line)
         raise SystemExit(1)
 
-    exe = build_dir / "dist" / f"Echo-Setup-{version}{suffix}.exe"
+    name = f"Echo-Beta-Setup-{version}.exe" if args.beta else f"Echo-Setup-{version}{suffix}.exe"
+    exe = build_dir / "dist" / name
     ok, detail = verify_installer(exe)
     say(f"结构自检：{'通过' if ok else '不通过'} —— {detail}")
     if not ok:

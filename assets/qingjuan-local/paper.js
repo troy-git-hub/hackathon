@@ -14,16 +14,8 @@
     return esc(text).replace(/_{2,}/g, '<span class="blank"></span>');
   }
 
-  function figCaption(fig) {
-    if (!fig) return "";
-    const c = String(fig.caption || "").trim();
-    if (!c || /^如\s*图/.test(c) || /^图\s*\d*$/.test(c)) return "";
-    return `<div class="fig-cap">${esc(c)}</div>`;
-  }
-
-  function figureHTML(fig, style) {
-    if (!fig || !global.QJFigures) return "";
-    return global.QJFigures.renderFigure(fig, style);
+  function figureHTML(question, style) {
+    return global.QJFigures?.renderQuestionFigure?.(question, style) ?? global.QJFigures?.renderFigure(question.figure, style) ?? "";
   }
 
   function isWen(subject) {
@@ -114,7 +106,7 @@
     } else if (view !== "answers" && type !== "choice" && type !== "multi" && type !== "tf" && type !== "essay" && type !== "fill") {
       extra += spaceHTML(q.answer_space, layout, isWen(layout.subject) && (type === "short" || type === "reading"));
     }
-    const fig = figureHTML(q.figure, layout.figureStyle) + figCaption(q.figure);
+    const fig = figureHTML(q, layout.figureStyle);
     const choiceParen = (type === "choice" || type === "multi") && view === "paper" && !/[（(]\s*[）)]/.test(q.stem || "") ? '<span class="choice-paren">（　　）</span>' : "";
     const split = type === "reading" || type === "cloze" || type === "essay" ? " split-ok" : "";
     return `<div class="q-block${split}" data-path="${esc(path)}" data-type="${esc(type)}">
@@ -129,7 +121,7 @@
     let html = `<div class="ans-item" data-path="${esc(path)}"><div class="ans-head"><span class="q-no">${no}．</span>${withQ ? `<span class="ans-stem">${blanks(q.stem || "")}</span>` : ""}</div>`;
     if (withQ && q.passage) html += passageHTML(q, layout);
     if (withQ && (type === "choice" || type === "multi") && q.options?.length) html += optionsHTML(q.options, layout);
-    if (withQ && q.figure) html += figureHTML(q.figure, layout.figureStyle) + figCaption(q.figure);
+    if (withQ) html += figureHTML(q, layout.figureStyle);
     if (withQ && q.questions && q.questions.length) {
       html += q.questions.map((sq, i) => {
         let s = `<div class="sub-q"><div class="q-hd"><span class="q-no">（${i + 1}）</span><div class="q-stem">${blanks(sq.stem || "")}</div></div>`;
@@ -145,9 +137,8 @@
   function answerBlocks(q,no,layout,path){
     const blocks=[];
     const parts=text=>String(text || '').split(/\n/).filter(Boolean).flatMap(p=>p.match(/.{1,300}(?:[。！？；]|$)|.{1,300}/g) || []);
-    blocks.push(`<div class="ans-item" data-path="${esc(path)}"><div class="ans-head"><span class="q-no">${no}．</span>${layout.answerQuestion!==false?`<span class="ans-stem">${blanks(q.stem || '')}</span>`:''}</div>${layout.answerQuestion!==false && q.options?.length ? optionsHTML(q.options,layout):''}</div>`);
+    blocks.push(`<div class="ans-item" data-path="${esc(path)}"><div class="ans-head"><span class="q-no">${no}．</span>${layout.answerQuestion!==false?`<span class="ans-stem">${blanks(q.stem || '')}</span>`:''}</div>${layout.answerQuestion!==false && q.options?.length ? optionsHTML(q.options,layout):''}${layout.answerQuestion!==false ? figureHTML(q,layout.figureStyle):""}</div>`);
     if(layout.answerQuestion!==false && q.passage) for(const p of parts(q.passage)) blocks.push(`<div class="passage"><p>${esc(p)}</p></div>`);
-    if(layout.answerQuestion!==false && q.figure) blocks.push(figureHTML(q.figure,layout.figureStyle));
     const children=q.questions || [];
     const answers=children.length ? children : [q];
     answers.forEach((item,i)=>{
@@ -237,7 +228,7 @@
       ${layout.watermark ? `<div class="watermark">${esc(layout.watermark)}</div>` : ""}
       <div class="a4-inner">
         <div class="running-h"><span>${esc(m.school || "")} ${esc(m.subtitle || m.subject || "")}</span><span>第 ${i} 页</span></div>
-        <div class="a4-body ${layout.columns === 2 ? "cols-2" : ""}"></div>
+        <div class="a4-body ${Number(layout.columns) === 2 ? "cols-2" : ""}"></div>
         <footer class="a4-foot">
           <span>${esc(layout.footerLeft || "")}</span>
           <span class="pg-num">${i} / ${total || "?"}</span>
@@ -305,14 +296,40 @@
     return htmls.filter(Boolean);
   }
 
+
+  function passageParts(value, limit) {
+    const parts = [];
+    String(value || "").split(/\n\s*\n/).map(p => p.trim()).filter(Boolean).forEach(paragraph => {
+      const tokens = paragraph.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]*\$|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]|\{\{\d+\}\})/g);
+      let chunk = "";
+      tokens.forEach((token, i) => {
+        if (i % 2 === 1) {
+          if (chunk && chunk.length + token.length > limit) { parts.push(chunk); chunk = ""; }
+          chunk += token;
+          return;
+        }
+        for (const character of token) {
+          if (chunk.length >= limit || (chunk.length >= limit * .65 && /[。！？.!?；;]/.test(chunk.slice(-1)))) {
+            parts.push(chunk);
+            chunk = "";
+          }
+          chunk += character;
+        }
+      });
+      if (chunk) parts.push(chunk);
+    });
+    return parts;
+  }
+
   function readingBlocks(q, no, layout, view, path) {
     const blocks = [];
-    const paras = String(q.passage || "").split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+    const columns = Number(layout.columns) === 2;
+    const paras = passageParts(q.passage, columns ? (layout.sealLine ? 260 : 330) : 540);
     const head = `<div class="q-block split-ok" data-path="${esc(path)}"><div class="q-hd"><span class="q-no">${no}．</span><div class="q-stem">${blanks(q.stem || "")}</div></div>`;
     const meta = q.passage_author || q.passage_source
       ? `<div class="passage-meta">${q.passage_author ? `<span>${esc(q.passage_author)}</span>` : ""}${q.passage_source ? `<span class="passage-source">${esc(q.passage_source)}</span>` : ""}</div>`
       : "";
-    const fig = figureHTML(q.figure, layout.figureStyle) + figCaption(q.figure);
+    const fig = figureHTML(q, layout.figureStyle);
     const chunks = [];
     const renderPara = (p) => (q.type === "cloze" ? clozePassage(p) : esc(p));
     const chunksCount = paras.length > 1 ? paras.length : 1;
@@ -320,7 +337,7 @@
       let html = "";
       if (i === 0) html += head + meta + `<div class="passage">`;
       else html += `<div class="q-block split-ok" data-path="${esc(path)}"><div class="passage">`;
-      html += paras.length > 1 ? `<p>${renderPara(paras[i])}</p>` : renderPara(q.passage || "");
+      html += "<p>" + renderPara(paras[i] || "") + "</p>";
       html += `</div>`;
       if (i === chunksCount - 1) html += fig;
       html += `</div>`;
@@ -402,62 +419,93 @@
 
   function paginate(container, paper, layout, view) {
     container.innerHTML = "";
-    const htmls = collectBlocks(paper, layout, view);
-    const probe = pageShell(layout, paper, 1, 1, true);
-    probe.style.position = "absolute";
-    probe.style.left = "-9999px";
-    probe.style.visibility = "hidden";
-    document.body.appendChild(probe);
-    const body = probe.querySelector(".a4-body");
-    const maxH = body.clientHeight;
-    const width = body.clientWidth;
-    probe.classList.remove("is-first");
-    const runningH = Math.max(0, maxH - body.clientHeight);
-    probe.classList.add("is-first");
-    const cols = Number(layout.columns) === 2 ? 2 : 1;
-    const measureW = cols === 2 ? Math.max(120, Math.floor((width - 24) / 2)) : width;
-    const measure = document.createElement("div");
-    measure.style.cssText = `position:absolute;left:-9999px;visibility:hidden;width:${measureW}px;height:auto;overflow:visible;display:flow-root;`;
-    measure.className = probe.className;
-    document.body.appendChild(measure);
-
-    const heights = htmls.map((html) => {
-      measure.innerHTML = html;
-      typeset(measure);
-      return Math.ceil(measure.getBoundingClientRect().height);
-    });
-    measure.remove();
-    probe.remove();
-
+    const blocks = collectBlocks(paper, layout, view);
     const pages = [];
-    let used = 0;
-    let page = pageShell(layout, paper, 1, 1, true);
-    let dest = page.querySelector(".a4-body");
+    const template = document.createElement("template");
+    let dest;
 
-    function push() {
+    function newPage() {
+      const page = pageShell(layout, paper, pages.length + 1, 1, !pages.length);
+      container.appendChild(page);
       pages.push(page);
-      page = pageShell(layout, paper, pages.length + 1, 1, false);
       dest = page.querySelector(".a4-body");
-      used = runningH;
     }
 
-    htmls.forEach((html, i) => {
-      const h = heights[i] || 24;
-      const limit = maxH * (cols === 2 ? 1.82 : 1);
-      const nextH=/class="sec-h"/.test(html) ? (heights[i+1] || 0) : 0;
-      if (used > 8 && used + h + nextH > limit) push();
-      dest.insertAdjacentHTML("beforeend", html);
-      used += h + 2;
-    });
-    pages.push(page);
+    function fits() {
+      if (dest.clientHeight === 0) return true;
+      if (Number(layout.columns) === 2) {
+        // Fixed-height CSS columns make extra columns overflow horizontally.
+        return dest.scrollWidth <= dest.clientWidth + 1 && dest.scrollHeight <= dest.clientHeight + 1;
+      }
+      return dest.scrollHeight <= dest.clientHeight + 1;
+    }
 
-    pages.forEach((p, i) => {
-      p.querySelector(".pg-num").textContent = `${i + 1} / ${pages.length}`;
-      const rh = p.querySelector(".running-h span:last-child");
-      if (rh) rh.textContent = `第 ${i + 1} 页`;
-    });
-    container.append(...pages);
-    typeset(container);
+    function appendIfFits(node) {
+      dest.appendChild(node);
+      if (fits()) return true;
+      node.remove();
+      return false;
+    }
+
+    function moveHeaders() {
+      const pending = [];
+      let last = dest.lastElementChild;
+      while (last && last.matches(".sec-h, .vol-banner, .sheet-sec")) {
+        pending.unshift(last);
+        last = last.previousElementSibling;
+      }
+      if (!last) return;
+      pending.forEach(node => node.remove());
+      newPage();
+      pending.forEach(node => dest.appendChild(node));
+    }
+
+    function splitWritingRoom(node) {
+      const room = Array.from(node.children).find(child => child.classList.contains("q-space"));
+      if (!room || room.children.length < 4) return false;
+      const lines = Array.from(room.children);
+      // Keep the question, figure, and at least three writing lines together.
+      lines.slice(3).forEach(line => line.remove());
+      if (!appendIfFits(node)) {
+        lines.slice(3).forEach(line => room.appendChild(line));
+        return false;
+      }
+      let target = room;
+      for (const line of lines.slice(3)) {
+        target.appendChild(line);
+        if (fits()) continue;
+        line.remove();
+        newPage();
+        const continued = document.createElement("div");
+        continued.className = "q-block";
+        continued.dataset.path = node.dataset.path;
+        const heading = document.createElement("div");
+        heading.className = "q-space-continued";
+        heading.textContent = node.querySelector(".q-no").textContent + " 作答区（续）";
+        target = room.cloneNode(false);
+        target.appendChild(line);
+        continued.append(heading, target);
+        dest.appendChild(continued);
+      }
+      return true;
+    }
+
+    newPage();
+    for (const html of blocks) {
+      template.innerHTML = html;
+      const node = template.content.firstElementChild;
+      if (!node) continue;
+      typeset(node);
+      if (appendIfFits(node) || splitWritingRoom(node)) continue;
+      if (dest.lastElementChild) {
+        if (dest.lastElementChild.matches(".sec-h, .vol-banner, .sheet-sec")) moveHeaders();
+        else newPage();
+      }
+      if (!appendIfFits(node) && !splitWritingRoom(node)) dest.appendChild(node);
+    }
+    for (const [i, page] of pages.entries()) {
+      page.querySelector(".pg-num").textContent = (i + 1) + " / " + pages.length;
+    }
     return pages.length;
   }
 

@@ -35,6 +35,10 @@ class EchoCombo(QComboBox):
             QComboBox QAbstractItemView {{background:{Colors.SURFACE};color:{Colors.TEXT_PRIMARY};border:1px solid {Colors.BORDER_STRONG};border-radius:8px;padding:4px;outline:0;}}
             QComboBox QAbstractItemView::item {{min-height:24px;padding:4px 10px;border-radius:5px;}}
             QComboBox QAbstractItemView::item:selected {{background:{Colors.ACCENT_SOFT};color:{Colors.ACCENT};}}
+            QComboBox QAbstractItemView QScrollBar:vertical {{background:transparent;width:6px;margin:2px;}}
+            QComboBox QAbstractItemView QScrollBar::handle:vertical {{background:{Colors.BORDER_STRONG};border-radius:3px;min-height:24px;}}
+            QComboBox QAbstractItemView QScrollBar::add-line:vertical,QComboBox QAbstractItemView QScrollBar::sub-line:vertical,
+            QComboBox QAbstractItemView QScrollBar::add-page:vertical,QComboBox QAbstractItemView QScrollBar::sub-page:vertical {{background:transparent;height:0;border:none;}}
         ''')
 
     def setEditable(self,editable):
@@ -55,6 +59,12 @@ class EchoCombo(QComboBox):
         super().showPopup()
         view=self.view();popup=view.window()
         if not popup.isVisible():return
+        # 弹层容器（QComboBoxPrivateContainer）不吃全局主题，深色主题下圆角外
+        # 会露出系统默认的白底/白滚动条槽——把它也按主题压成 SURFACE。
+        try:
+            popup.setStyleSheet(f'QComboBoxPrivateContainer{{background:{Colors.SURFACE};border:1px solid {Colors.BORDER_STRONG};border-radius:8px;}}')
+        except Exception:
+            pass
         view.ensurePolished();view.doItemsLayout()
         rows=min(self.count(),self.maxVisibleItems());margins=view.contentsMargins()
         height=sum(max(1,view.sizeHintForRow(i)) for i in range(rows))+margins.top()+margins.bottom()

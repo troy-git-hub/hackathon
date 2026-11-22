@@ -41,15 +41,18 @@
     }
   }
 
-  function mapper(box, w, h, pad) {
+  function mapper(box, w, h, pad, uniform = false) {
     const x0 = box[0], y0 = box[1], x1 = box[2], y1 = box[3];
     const iw = w - pad * 2;
     const ih = h - pad * 2;
-    const sx = iw / Math.max(1e-6, x1 - x0);
-    const sy = ih / Math.max(1e-6, y1 - y0);
+    let sx = iw / Math.max(1e-6, x1 - x0);
+    let sy = ih / Math.max(1e-6, y1 - y0);
+    if (uniform) sx = sy = Math.min(sx, sy);
+    const px = (w - (x1 - x0) * sx) / 2;
+    const py = (h - (y1 - y0) * sy) / 2;
     return {
-      x: (x) => pad + (x - x0) * sx,
-      y: (y) => pad + (y1 - y) * sy,
+      x: (x) => px + (x - x0) * sx,
+      y: (y) => py + (y1 - y) * sy,
       s: (r) => r * Math.min(sx, sy),
       sx, sy,
     };
@@ -92,7 +95,7 @@
     const auto = geomBounds(fig);
     const box = auto || fig.box || [0, 0, 10, 8];
     const pad = 26;
-    const m = mapper(box, w, h, pad);
+    const m = mapper(box, w, h, pad, true);
     const cartoon = style === "cartoon";
     const sketch = style === "sketch";
     const sw = cartoon ? 2.4 : sketch ? 1.7 : 1.5;
@@ -479,9 +482,133 @@
     else if (fig.svg) inner = sanitizeSvg(fig.svg);
     else return "";
     if(kind!=="image")inner=sanitizeSvg(inner);
+    if (!inner) return "";
     const cap = niceCaption(fig.caption) ? `<div class="fig-cap">${esc(niceCaption(fig.caption))}</div>` : "";
     return `<figure class="q-fig kind-${kind}">${inner}${cap}</figure>`;
   }
 
-  global.QJFigures = { renderFigure, sanitizeSvg, resolveRays };
+  function trianglePair(stem) {
+    const pair = stem.match(/^(?:如图[，,：:]?)?[△▲]([A-Z]{3})(?:≌|≅|\\cong)[△▲]([A-Z]{3})[，,]?(?:若|已知|且)/);
+    if (!pair || new Set(pair[1] + pair[2]).size !== 6) return null;
+    const names = pair[1] + pair[2];
+    const tail = stem.slice(pair[0].length);
+    const marks = [...tail.matchAll(/∠([A-Z])=(\d+(?:\.\d+)?)°/g)];
+    const sides = [...tail.matchAll(/([A-Z]{2})=(\d+(?:\.\d+)?)(?:cm|mm|m|厘米|毫米|米)?(?=[，,；;。]|$)/g)];
+    let points;
+    if (marks.length === 2 && /^∠[A-Z]=[\d.]+°[，,]∠[A-Z]=[\d.]+°[，,](?:则|求)∠[A-Z]/.test(tail)) {
+      const angles = [null, null, null];
+      for (const [, name, value] of marks) {
+        const i = names.indexOf(name) % 3;
+        if (i < 0 || angles[i] !== null) return null;
+        angles[i] = Number(value);
+      }
+      const missing = angles.indexOf(null);
+      angles[missing] = 180 - angles.reduce((sum, value) => sum + value, 0);
+      if (angles.some(value => value <= 0 || value >= 180)) return null;
+      const [a, , c] = angles.map(value => value * Math.PI / 180);
+      const ac = 6;
+      const ab = ac * Math.sin(c) / Math.sin(angles[1] * Math.PI / 180);
+      points = [[0, 0], [ab * Math.cos(a), ab * Math.sin(a)], [ac, 0]];
+    } else if (sides.length === 3 && /[，,](?:则|求)[A-Z]{2}/.test(tail)) {
+      const given = new Map(sides.map(([, side, value]) => [[...side].sort().join(""), Number(value)]));
+      const length = (i, j) => given.get([names[i], names[j]].sort().join(""));
+      const [ab, bc, ac] = [length(0, 1), length(1, 2), length(0, 2)];
+      if (![ab, bc, ac].every(Number.isFinite) || 2 * Math.max(ab, bc, ac) >= ab + bc + ac) return null;
+      const bx = (ab ** 2 + ac ** 2 - bc ** 2) / (2 * ac);
+      points = [[0, 0], [bx, Math.sqrt(ab ** 2 - bx ** 2)], [ac, 0]];
+    } else return null;
+
+    const xs = points.map(point => point[0]);
+    const shift = Math.max(...xs) - Math.min(...xs) + points[2][0] * .46;
+    const elements = [];
+    for (let triangle = 0; triangle < 2; triangle++) {
+      const vertices = points.map(([x, y]) => [x + triangle * shift, y]);
+      elements.push({type: "polygon", points: vertices, fill: "none"});
+      vertices.forEach((at, i) => elements.push({
+        type: "point", at, label: names[triangle * 3 + i], dir: ["sw", "n", "se"][i],
+      }));
+      for (const [, name, value] of marks) {
+        const i = names.slice(triangle * 3, triangle * 3 + 3).indexOf(name);
+        if (i >= 0) elements.push({type:"angle", at:vertices[i], from:vertices[(i+1)%3],
+          to:vertices[(i+2)%3], r:points[2][0] * .16, label:value + "°"});
+      }
+    }
+    return {kind:"geometry", width:370, height:155, elements};
+  }
+
+  function angleAt(vertex, from, to) {
+    const a = [from[0] - vertex[0], from[1] - vertex[1]];
+    const b = [to[0] - vertex[0], to[1] - vertex[1]];
+    return Math.atan2(Math.abs(a[0] * b[1] - a[1] * b[0]), a[0] * b[0] + a[1] * b[1]) * 180 / Math.PI;
+  }
+
+  function figureMatchesStem(fig, stem) {
+    if (fig.kind !== "geometry" && fig.kind !== "rays") return true;
+    const names = new Set();
+    const vertices = new Map();
+    if (fig.kind === "geometry") {
+      for (const e of fig.elements || []) {
+        if (e.type === "point" && e.label) {
+          const label = String(e.label).trim();
+          names.add(label);
+          if (Array.isArray(e.at)) vertices.set(label, e.at);
+        }
+        if (e.type === "label" && /^[A-Z]$/.test(e.text)) names.add(e.text);
+      }
+    } else {
+      if (fig.center) names.add(fig.center);
+      for (const name of fig.baseline || []) names.add(name);
+      for (const ray of fig.rays || []) names.add(ray.name || ray.to || ray.label);
+    }
+    const references = stem.matchAll(/(?:[△▲][A-Z]{3}|[∠⊙][A-Z]{1,3}|点[A-Z]|[A-Z]{2}(?=[=⊥∥]|平分|是|在)|[=⊥∥][A-Z]{2})/g);
+    for (const [reference] of references) {
+      if ([...(reference.match(/[A-Z]/g) || [])].some(name => !names.has(name))) return false;
+    }
+    if (fig.kind !== "geometry") return true;
+    const triangles = [...new Set([...stem.matchAll(/[△▲]([A-Z]{3})/g)].map(match => match[1]))];
+    const pair = stem.match(/[△▲]([A-Z]{3})(?:≌|≅|\\cong)[△▲]([A-Z]{3})/);
+    if (pair) {
+      const edges = new Set();
+      const key = (a, b) => [a.join(","), b.join(",")].sort().join("|");
+      for (const item of fig.elements || []) {
+        if (item.type === "polygon") {
+          item.points?.forEach((point, i, points) => edges.add(key(point, points[(i+1)%points.length])));
+        }
+        if (item.type === "line" && item.from && item.to) edges.add(key(item.from, item.to));
+      }
+      for (const triangle of pair.slice(1)) {
+        const points = [...triangle].map(name => vertices.get(name));
+        if (points.some(point => !point) || points.some((at, i) => !edges.has(key(at, points[(i+1)%3])))) return false;
+      }
+    }
+    for (const [, name, degrees] of stem.matchAll(/∠([A-Z]{3}|[A-Z])=(\d+(?:\.\d+)?)°/g)) {
+      let labels = [...name];
+      if (labels.length === 1) {
+        const [other] = triangles.filter(triangle => triangle.includes(name));
+        if (!other || triangles.filter(triangle => triangle.includes(name)).length !== 1) continue;
+        const ends = [...other].filter(label => label !== name);
+        labels = [ends[0], name, ends[1]];
+      }
+      const [a, vertex, b] = labels.map(label => vertices.get(label));
+      if (a && vertex && b && Math.abs(angleAt(vertex, a, b) - Number(degrees)) > 2) return false;
+    }
+    return true;
+  }
+
+  function renderQuestionFigure(question, style) {
+    const original = String(question.stem || "");
+    const stem = original.replace(/\\triangle\b/g, "△").replace(/\\angle\b/g, "∠")
+      .replace(/\\circ\b/g, "°").replace(/[\s{}$^]/g, "").replace(/＝/g, "=");
+    const needsFigure = /如图|下图|图中|见图|图所示|根据图|观察图/.test(original);
+    if (!question.figure && !needsFigure) return "";
+    const figure = trianglePair(stem) || question.figure;
+    if (figure && (figure !== question.figure || figureMatchesStem(figure, stem))) {
+      const rendered = renderFigure(figure, style);
+      if (rendered) return rendered;
+    }
+    return needsFigure || question.figure
+      ? '<div class="q-fig-notice">此题缺少与题干相符的配图，请核对卷稿。</div>' : "";
+  }
+
+  global.QJFigures = { renderFigure, renderQuestionFigure, sanitizeSvg, resolveRays };
 })(typeof window !== "undefined" ? window : globalThis);

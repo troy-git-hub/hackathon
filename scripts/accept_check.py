@@ -106,6 +106,8 @@ def main():
     env = dict(os.environ)
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    # 自检是断言像素/文字的确定性脚本：关掉 UI 动效，避免截图停在半透明那一帧。
+    env["ECHO_DISABLE_MOTION"] = "1"
 
     steps = suite(args.with_tray or args.full, args.with_ai or args.full, args.with_web or args.full)
     print(f"Echo 验收 — {len(steps)} 项\n" + "=" * 64, flush=True)

@@ -32,6 +32,8 @@ models/
 
 # secrets
 .env
+*.dpapi
+cloud-terminal-cache.json
 
 # 错题本 / 复习记录 / 课程历史（用户数据，不进仓库）
 review.json

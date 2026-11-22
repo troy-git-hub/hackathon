@@ -109,11 +109,8 @@ class DockChat(QWidget):
         head.addWidget(self.cat)
         head.addWidget(QLabel("Echo"))
         head.addStretch(1)
-        close = QPushButton("×")
-        close.setObjectName("IconBtn")
-        close.setCursor(Qt.PointingHandCursor)
-        close.setToolTip(tr("收起", "Collapse"))
-        close.clicked.connect(self.hide)
+        from echo.widgets.window_chrome import icon_button
+        close = icon_button("×", tr("收起", "Collapse"), self.hide)
         head.addWidget(close)
         lay.addLayout(head)
 
@@ -174,6 +171,8 @@ class DockChat(QWidget):
         y = max(g.top(), min(pet.y(), g.bottom() - self.height()))
         self.move(x, y)
         self.show()
+        from echo.widgets import motion
+        motion.fade_window(self)
         self.raise_()
         self.input.setFocus()
 

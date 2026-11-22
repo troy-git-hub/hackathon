@@ -1,8 +1,43 @@
 """Shared Echo window controls; Windows order, theme colours, no system frame."""
 from PyQt5.QtCore import Qt,QEvent
 from PyQt5.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
-from PyQt5.QtGui import QPainterPath,QRegion
-from echo.theme import Colors
+from PyQt5.QtGui import QColor,QIcon,QPainter,QPainterPath,QPen,QPixmap,QRegion,QBrush
+from echo.theme import Colors,Radius
+
+# 按钮样式与主页右上角的 IconBtn 完全一致：26×26、透明底、悬停浅色蒙层。
+# 以前这里关窗悬停会变红、字号也不同，和主页（以及互相之间）不一致，已统一。
+_CONTROL_QSS=f'''QPushButton{{min-width:0;min-height:0;padding:0;border:0;
+    border-radius:{Radius.SM}px;background:transparent;color:{Colors.TEXT_SECONDARY};font-size:15px;}}
+    QPushButton:hover{{background:{Colors.HOVER_OVERLAY};color:{Colors.TEXT_PRIMARY};}}'''
+
+# 微信「置顶」那种钉子图标的位图缓存，按 (颜色, 是否按下) 取。
+_pin_cache={}
+
+def icon_button(text,tip,slot,size=26):
+    """和 EchoTitleBar / 主页右上角完全一致的窗口按钮。别的窗口的折叠、
+    关闭都要从这里拿样式，别再各写一套 QSS。"""
+    button=QPushButton(text);button.setFixedSize(size,size);button.setToolTip(tip)
+    button.setAccessibleName(tip);button.setCursor(Qt.PointingHandCursor)
+    button.setStyleSheet(_CONTROL_QSS)
+    button.clicked.connect(lambda checked=False:slot())
+    return button
+
+def _pin_pixmap(color,filled=False):
+    key=(str(color),bool(filled))
+    if key in _pin_cache:return _pin_cache[key]
+    pm=QPixmap(48,48);pm.fill(Qt.transparent)
+    p=QPainter(pm);p.setRenderHint(QPainter.Antialiasing)
+    p.translate(24,24);p.rotate(-35)
+    p.setPen(QPen(color,3.4,Qt.SolidLine,Qt.RoundCap,Qt.RoundJoin))
+    if filled:p.setBrush(QBrush(color))
+    p.drawRoundedRect(-8,-16,16,7,3.2,3.2)          # 钉帽
+    path=QPainterPath();path.moveTo(-8,-9);path.lineTo(8,-9);path.lineTo(0,2);path.closeSubpath()
+    p.drawPath(path)                                 # 钉身
+    p.drawLine(0,2,0,14)                             # 针
+    p.end()
+    pm.setDevicePixelRatio(3.0)                      # 48px 位图按 16×16 逻辑尺寸用
+    _pin_cache[key]=pm
+    return pm
 
 
 class EchoTitleBar(QWidget):
@@ -11,7 +46,9 @@ class EchoTitleBar(QWidget):
         self.dialog, self.offset = dialog, None
         self.setObjectName('EchoTitleBar')
         self.setFixedHeight(42)
-        row=QHBoxLayout(self);row.setContentsMargins(4,4,0,4);row.setSpacing(4)
+        # 右边距必须留出圆角蒙版的宽度：蒙版在右上角切 12px 圆角，按钮贴死右缘
+        # 时 × 的悬停底色会被削掉一条，看起来比主页的窄（用户对比过）。
+        row=QHBoxLayout(self);row.setContentsMargins(4,4,8,4);row.setSpacing(4)
         self.title=QLabel(title or dialog.windowTitle());self.title.setTextFormat(Qt.PlainText)
         self.title.setStyleSheet(f'color:{Colors.TEXT_SECONDARY};font-size:12px;font-weight:600;background:transparent;')
         self.title.setAttribute(Qt.WA_TransparentForMouseEvents)
@@ -20,16 +57,25 @@ class EchoTitleBar(QWidget):
         if minimize:
             self.minimize_button=self.control('–','最小化',dialog.showMinimized)
             row.addWidget(self.minimize_button)
-        self.close_button=self.control('×','关闭',dialog.close,close=True)
+        self.close_button=self.control('×','关闭',dialog.close)
         row.addWidget(self.close_button)
 
-    def control(self,text,tip,slot,close=False):
-        button=QPushButton(text);button.setFixedSize(26,26);button.setToolTip(tip)
+    def control(self,text,tip,slot):
+        button=icon_button(text,tip,slot)
+        button.setParent(self)
+        return button
+
+    def pin_control(self,tip,slot):
+        """微信钉子样式的「置顶」按钮：未按下是描边钉子，按下变主题色实心钉。"""
+        button=QPushButton();button.setFixedSize(26,26);button.setToolTip(tip)
         button.setAccessibleName(tip);button.setCursor(Qt.PointingHandCursor)
-        button.setStyleSheet(f'''QPushButton{{min-width:0;min-height:0;padding:0;border:0;
-            border-radius:6px;background:transparent;color:{Colors.TEXT_SECONDARY};font-size:16px;}}
-            QPushButton:hover{{background:{Colors.DANGER if close else Colors.SURFACE_HOVER};
-                color:{'#ffffff' if close else Colors.TEXT_PRIMARY};}}''')
+        button.setCheckable(True)
+        button.setStyleSheet(_CONTROL_QSS)
+        button.setIcon(QIcon(_pin_pixmap(QColor(Colors.TEXT_SECONDARY),False)))
+        def _sync(checked):
+            button.setIcon(QIcon(_pin_pixmap(
+                QColor(Colors.ACCENT if checked else Colors.TEXT_SECONDARY),bool(checked))))
+        button.toggled.connect(_sync)
         button.clicked.connect(lambda checked=False:slot())
         return button
 
@@ -38,7 +84,18 @@ class EchoTitleBar(QWidget):
             if watched.isFullScreen():watched.clearMask()
             else:
                 path=QPainterPath();path.addRoundedRect(0,0,watched.width(),watched.height(),12,12);watched.setMask(QRegion(path.toFillPolygon().toPolygon()))
+            if event.type()==QEvent.Show:
+                # 每次显示淡入。必须在这里**同步**把透明度压到 0：Show 事件先于
+                # 第一帧绘制，等 singleShot 再压的话窗口会先完整闪一帧再淡入。
+                self._fade_show()
         return super().eventFilter(watched,event)
+
+    def _fade_show(self):
+        try:
+            from echo.widgets import motion
+            motion.fade_window(self.dialog)
+        except Exception:
+            pass
 
     def mousePressEvent(self,event):
         if event.button()==Qt.LeftButton and not self.dialog.isFullScreen():

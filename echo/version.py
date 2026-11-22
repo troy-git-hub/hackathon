@@ -1,2 +1,2 @@
-VERSION = "2.6.7"
-CHANNEL = "stable"
+VERSION = "2.6.8"
+CHANNEL = "beta"
