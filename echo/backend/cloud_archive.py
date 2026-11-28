@@ -21,11 +21,30 @@ def build(exclude_cloud=False):
             mastery=skill.get('mastery')
             skills.append({'name':text(skill.get('name'),100),'status':text(skill.get('status'),20),'mastery':mastery if type(mastery) in (int,float) and math.isfinite(mastery) and 0<=mastery<=1 else None})
         notes=[]
-        for board in (item.get('blackboards') or [])[-8:]:
-            if isinstance(board,dict):
-                for key in ('title','summary','content','text'):
-                    if isinstance(board.get(key),str):notes.append(text(board[key],500))
-        record={'id':'lesson_'+hashlib.sha256(str(stamp).encode()).hexdigest()[:24],'title':text(item.get('title'),200),'ended_at':datetime.fromtimestamp(stamp,timezone.utc).isoformat(),'duration_seconds':min(86400,max(0,float(item.get('duration') or 0))),'summary':text(item.get('summary'),1600),'suggestion':text(item.get('suggestion'),400),'highlights':[text(v,160) for v in (item.get('highlights') or [])[:5]],'skills':skills,'blackboard_notes':'\n'.join(notes)[:1600],'truncated':False}
+        for index,board in enumerate((item.get('blackboards') or [])[-8:],1):
+            if isinstance(board, dict):
+                parts=[]
+                # 结构化标记：网页黑板卡按 ▸ 分板、⚠ 识别易混点，渲染成本地同款 UI（单板+切换）。
+                title=''
+                for key in ('title','summary'):
+                    if isinstance(board.get(key),str) and board[key].strip():
+                        title=text(board[key],200).strip();break
+                parts.append(f'▸ {title or f"黑板 {index}"}')
+                gist=''
+                for key in ('gist','summary','content','text'):
+                    if key=='title':continue
+                    if isinstance(board.get(key),str) and board[key].strip():
+                        gist=text(board[key],400);break
+                if gist:parts.append(gist)
+                for step in (board.get('steps') or [])[:10]:
+                    if isinstance(step,dict):
+                        heading=text(step.get('heading'),100).strip()
+                        body=text(step.get('body'),300).strip()
+                        if heading or body:parts.append(f"{heading}：{body}" if heading and body else (heading or body))
+                pitfall=text(board.get('pitfall'),200).strip() if isinstance(board.get('pitfall'),str) else ''
+                if pitfall:parts.append(f'⚠ {pitfall}')
+                if len(parts)>1 or title:notes.append('\n'.join(parts)[:800])
+        record={'id':'lesson_'+hashlib.sha256(str(stamp).encode()).hexdigest()[:24],'title':text(item.get('title'),200),'ended_at':datetime.fromtimestamp(stamp,timezone.utc).isoformat(),'duration_seconds':min(86400,max(0,float(item.get('duration') or 0))),'summary':text(item.get('summary'),1600),'suggestion':text(item.get('suggestion'),400),'highlights':[text(v,160) for v in (item.get('highlights') or [])[:5]],'skills':skills,'blackboard_notes':'\n'.join(notes)[:3600],'truncated':False}
         # Keep every retained lesson's index; shorten prose instead of losing old titles.
         while len(json.dumps(record,ensure_ascii=False).encode())>8192:
             record['truncated']=True

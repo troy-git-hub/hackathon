@@ -61,6 +61,16 @@ def main():
             Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
 
     app = QApplication(sys.argv)
+    from echo.widgets.deep_links import ClassroomLinkReceiver
+    uri = next((arg for arg in sys.argv[1:] if arg.startswith('echo:')), '')
+    links = ClassroomLinkReceiver(app, uri)
+    if links.forwarded:
+        return
+    try:
+        from echo.backend.deep_links import register_windows_protocol
+        register_windows_protocol()
+    except OSError:
+        pass
     apply_theme(app)
 
     # 把界面语言告诉后端：AI 的回答跟着界面语言走。
@@ -84,6 +94,7 @@ def main():
     win.move(screen.center().x() - win.width() // 2,
              screen.center().y() - win.height() // 2)
     win.show()
+    links.attach(win)
     # 首次启动的新手引导：可跳过，跳过/完成都记下来不再弹；设置页可重看。
     try:
         from echo.widgets.onboarding import maybe_show_onboarding

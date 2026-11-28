@@ -76,6 +76,9 @@ class LearningPath(QDialog):
         for w in (self.minutes,self.style): w.currentIndexChanged.connect(self.mark_dirty)
         daily = self.page('今天的学习')
         self.summary = label('先读取账户中的学习方案。'); daily.addWidget(self.summary)
+        self.assistant_plan = label(''); self.assistant_plan.setStyleSheet(f'color:{Colors.TEXT_SECONDARY};')
+        daily.addWidget(self.assistant_plan)
+        self._load_assistant_plan()
         self.day_label = label(); daily.addWidget(self.day_label)
         self.mode_group = QButtonGroup(self)
         self.review = QRadioButton('复习已学 · 先回想，再验证'); self.learn = QRadioButton('学习新知识 · 先选知识或资料')
@@ -106,6 +109,18 @@ class LearningPath(QDialog):
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
         body = QWidget(); body.setObjectName('LearningPathContent'); box = QVBoxLayout(body); box.setSpacing(12)
         scroll.setWidget(body); self.tabs.addTab(scroll,title); return box
+
+    def _load_assistant_plan(self):
+        try:
+            from echo.backend.study_plans import latest
+            plan = latest()
+        except Exception:
+            plan = None
+        if not plan:
+            self.assistant_plan.hide()
+            return
+        self.assistant_plan.setText('助手计划 · ' + str(plan.get('goal') or '') + '\n' + str(plan.get('text') or '')[:600])
+        self.assistant_plan.show()
 
     def select_page(self,index):
         title=('学习目标','今天的学习','学习规划 · Beta')[index]

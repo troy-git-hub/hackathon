@@ -48,6 +48,16 @@ STEPS = [
         ],
     },
     {
+        "title": tr("AI 互动课", "AI live class"),
+        "body": tr(
+            "主页默认是互动课。写下想学的主题，点开始，Echo 会打开课堂网页，并直接开始备课、生成这一课。",
+            "The home page opens an AI class. Type a topic and Echo opens the classroom site and starts the lesson."),
+        "points": [
+            tr("网页上可以改讲义，再点开课", "You can edit the notes on the site, then start"),
+            tr("公告可以点 × 关掉，这次运行不再出现", "Dismiss a notice with × for this session"),
+        ],
+    },
+    {
         "title": tr("下课后", "After class"),
         "body": tr(
             "错题本自动收下你的掉队点，错题练习照着出题；「我的小本」按章节整理知识，学习计划帮你安排每天该做什么。",
@@ -85,10 +95,20 @@ class OnboardingDialog(QDialog):
         page.setSpacing(14)
         root.addWidget(self.card, 1)
 
-        self.dots = QLabel('')
-        self.dots.setAlignment(Qt.AlignCenter)
-        self.dots.setStyleSheet(f'color:{Colors.TEXT_SECONDARY};font-size:12px;letter-spacing:2px;')
-        root.addWidget(self.dots)
+        self.dots_lay = QHBoxLayout()
+        self.dots_lay.setSpacing(6)
+        self.dots_lay.addStretch(1)
+        self._dot_buttons = []
+        for i in range(len(STEPS)):
+            dot = QPushButton(f'{i + 1}')
+            dot.setFixedSize(26, 26)
+            dot.setCursor(Qt.PointingHandCursor)
+            dot.setToolTip(tr(f'第 {i + 1} 步', f'Step {i + 1}'))
+            dot.clicked.connect(lambda checked=False, idx=i: self._jump(idx))
+            self.dots_lay.addWidget(dot)
+            self._dot_buttons.append(dot)
+        self.dots_lay.addStretch(1)
+        root.addLayout(self.dots_lay)
 
         self.title_lbl = QLabel('')
         self.title_lbl.setObjectName('OnboardTitle')
@@ -109,6 +129,11 @@ class OnboardingDialog(QDialog):
         self.skip_btn.clicked.connect(self._finish)
         buttons.addWidget(self.skip_btn)
         buttons.addStretch()
+        self.settings_btn = QPushButton(tr('打开设置', 'Open settings'))
+        self.settings_btn.setObjectName('Quiet')
+        self.settings_btn.setToolTip(tr('配置账户与模型、界面偏好', 'Account, models and preferences'))
+        self.settings_btn.clicked.connect(self._open_settings)
+        buttons.addWidget(self.settings_btn)
         self.back_btn = QPushButton(tr('上一步', 'Back'))
         self.back_btn.setObjectName('Quiet')
         self.back_btn.clicked.connect(self._back)
@@ -136,10 +161,31 @@ class OnboardingDialog(QDialog):
             lbl.setObjectName('OnboardPoint')
             lbl.setWordWrap(True)
             self.points_box.addWidget(lbl)
-        self.dots.setText(' · '.join('●' if i == self._step else '○' for i in range(len(STEPS))))
+        for i, dot in enumerate(self._dot_buttons):
+            current = i == self._step
+            dot.setStyleSheet(
+                f'QPushButton{{min-width:0;min-height:0;padding:0;border:0;border-radius:6px;'
+                f'background:{"transparent" if not current else Colors.ACCENT};'
+                f'color:{Colors.TEXT_PRIMARY if current else Colors.TEXT_SECONDARY};font-size:12px;}}'
+                f'QPushButton:hover{{background:{Colors.SURFACE_HOVER};}}')
         self.back_btn.setVisible(self._step > 0)
         self.next_btn.setText(tr('开始使用', 'Get started') if last else tr('下一步', 'Next'))
         self.skip_btn.setVisible(not last)
+        self.settings_btn.setVisible(last)
+
+    def _jump(self, idx):
+        if idx != self._step:
+            self._step = idx
+            self._render()
+
+    def _open_settings(self):
+        QSettings('Echo', 'Echo').setValue('onboarding_done', True)
+        try:
+            from echo.widgets.settings import open_settings_dialog
+            open_settings_dialog(self)
+        except Exception:
+            pass
+        self.accept()
 
     def _back(self):
         if self._step > 0:

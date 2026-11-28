@@ -6,6 +6,8 @@ import os
 import re
 import shutil
 import tempfile
+import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
@@ -165,6 +167,96 @@ def _verify_header(path, release):
             if stream.read(2)!=b'MZ':raise UpdateError('下载的文件不是 Windows 安装程序')
 
 
+def _open_range(url, start, end, timeout=20, auth_token=None):
+    """带 Range 头打开一个下载流；返回 (response, supports_ranges)。"""
+    import urllib.error
+    headers = {"User-Agent": "Echo-Updater/1", "Accept-Encoding": "identity",
+               "Range": f"bytes={start}-{end}"}
+    if auth_token:
+        headers["Authorization"] = "Bearer " + auth_token
+    try:
+        response = urllib.request.build_opener(_NoRedirect()).open(
+            urllib.request.Request(url, headers=headers), timeout=timeout)
+    except urllib.error.HTTPError:
+        raise
+    except (urllib.error.URLError, OSError, TimeoutError):
+        raise UpdateError("无法连接更新服务，请检查网络或代理后重试。") from None
+    code = getattr(response, "status", None) or response.getcode()
+    if code == 206:
+        return response, True
+    with response:
+        pass
+    return None, False
+
+
+def _download_threads(url, target, release, progress, cancelled, threads=12,
+                      auth_token=None, max_bytes_per_second=0):
+    """多线程分段下载：先探测 Range 支持，支持就 12 路并发拉，最后按序拼回。
+
+    慢的主因是单连接吞吐（到美西的劣质路由单连接只有几 KB/s）；
+    实测多连接近似线性放大（12 路 ≈ 单路 ×10）。服务器不支持 Range
+    （没回 206）就返回 False，调用方退回单流。"""
+    import concurrent.futures
+    total = release["size"]
+    probe, ok = _open_range(url, 0, 0, auth_token=auth_token)
+    if not ok:
+        return False
+    with probe:
+        probe.read(2)
+    chunk = (total + threads - 1) // threads
+    ranges = [(i, i * chunk, min((i + 1) * chunk - 1, total - 1))
+              for i in range(threads) if i * chunk < total]
+    parts = {i: target.with_name(target.name + f".part{i}") for i, _s, _e in ranges}
+    received = {"bytes": 0}
+    lock = threading.Lock()
+    started = [time.monotonic()]
+
+    def pull(item):
+        index, start, end = item
+        response, ok = _open_range(url, start, end, auth_token=auth_token)
+        if not ok:
+            raise UpdateError("下载服务器不支持分段续传")
+        expected = end - start + 1
+        got = 0
+        with response, open(parts[index], "wb") as out:
+            while True:
+                if cancelled():
+                    raise Cancelled("已取消下载")
+                piece = response.read(128 * 1024)
+                if not piece:
+                    break
+                got += len(piece)
+                if got > expected:
+                    raise UpdateError("分段下载超出声明范围")
+                out.write(piece)
+                with lock:
+                    received["bytes"] += len(piece)
+                    progress(received["bytes"], total)
+                    if max_bytes_per_second:
+                        while received["bytes"] / max_bytes_per_second - (time.monotonic() - started[0]) > 0:
+                            if cancelled():
+                                raise Cancelled("已取消下载")
+                            time.sleep(max(0, min(.1, received["bytes"] / max_bytes_per_second - (time.monotonic() - started[0]))))
+        return got == expected
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as pool:
+            for ok in list(pool.map(pull, ranges)):
+                if not ok:
+                    raise UpdateError("分段下载未完成，请重试")
+        with open(target, "wb") as out:
+            for index, _s, _e in ranges:
+                with open(parts[index], "rb") as piece:
+                    shutil.copyfileobj(piece, out, 1024 * 1024)
+        return True
+    finally:
+        for path in parts.values():
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+
 def download_update(base, envelope, destination, progress=lambda done, total: None, cancelled=lambda: False, public_key=None,max_bytes_per_second=0):
     base = validate_base_url(base)
     release = verify_for_client(envelope, public_key)
@@ -185,12 +277,28 @@ def download_update(base, envelope, destination, progress=lambda done, total: No
     try:
         with tempfile.NamedTemporaryFile(dir=folder, prefix=".echo-update-", suffix=".part", delete=False) as output:
             temporary = Path(output.name)
-            if release['channel']=='beta':
-                from echo.backend import account
-                if not account.token():raise UpdateError('请先登录内测账户再下载更新。')
-                response=_open(account.API_ORIGIN+'/v1/beta/download'+('?format=2' if release['format']=='echo.update/2' else ''),timeout=20,auth_token=account.token())
-            else:response=_open(base + '/artifacts/' + release['filename'],timeout=20)
-            with response:
+        url = None
+        auth = None
+        if release['channel']=='beta':
+            from echo.backend import account
+            if not account.token():raise UpdateError('请先登录内测账户再下载更新。')
+            url=account.API_ORIGIN+'/v1/beta/download'+('?format=2' if release['format']=='echo.update/2' else '')
+            auth=account.token()
+        else:
+            url=base + '/artifacts/' + release['filename']
+        threaded = False
+        if release["size"] > 4 * 1024 * 1024:
+            # 大包走多线程分段下载（服务器支持 Range 时）；异常一律退回单流。
+            try:
+                threaded = _download_threads(url, temporary, release, progress, cancelled,
+                                             auth_token=auth, max_bytes_per_second=max_bytes_per_second)
+            except Cancelled:
+                raise
+            except (UpdateError, OSError, urllib.error.URLError, ValueError, RuntimeError):
+                threaded = False
+        if not threaded:
+            response = _open(url, timeout=20, auth_token=auth)
+            with response, open(temporary, "wb") as output:
                 received = 0;started=time.monotonic()
                 while True:
                     if cancelled():

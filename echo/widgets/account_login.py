@@ -185,10 +185,34 @@ class AccountLogin(QDialog):
         self.send.setText(f'{self.cooldown} 秒后重试' if self.cooldown else '获取验证码')
         if not self.cooldown:self.timer.stop();self.send.setEnabled(True)
 
+def _startup_splash(parent, text):
+    from PyQt5.QtWidgets import QDialog, QLabel, QVBoxLayout
+    box = QDialog(parent)
+    box.setWindowTitle('Echo')
+    box.setModal(True)
+    box.setFixedSize(320, 140)
+    lay = QVBoxLayout(box)
+    label = QLabel(text)
+    label.setWordWrap(True)
+    lay.addWidget(label)
+    box.show()
+    from PyQt5.QtWidgets import QApplication
+    QApplication.processEvents()
+    return box
+
 def ensure_account(parent=None,allow_skip=False):
     os.environ['ECHO_ACCOUNT_ACTIVE']='1'
     if account.current_user():return True
-    return AccountLogin(parent,restore=True,allow_skip=allow_skip).exec_()==QDialog.Accepted
+    splash = _startup_splash(parent, '启动中' + chr(10) + '正在登录已有的 Echo 账户…')
+    restored = None
+    try:
+        restored = account.restore()
+    except Exception:
+        restored = None
+    splash.close()
+    if restored:
+        return True
+    return AccountLogin(parent,restore=False,allow_skip=allow_skip).exec_()==QDialog.Accepted
 
 def show_account_center(parent=None):
     if not ensure_account(parent):return

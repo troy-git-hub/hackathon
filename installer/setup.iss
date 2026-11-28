@@ -1,16 +1,16 @@
-; Echo 安装包脚本（Inno Setup 6）
-; 先运行 build.bat 生成 dist\Echo\Echo.exe，再用本脚本编译。
+﻿; Echo 瀹夎鍖呰剼鏈紙Inno Setup 6锛?
+; 鍏堣繍琛?build.bat 鐢熸垚 dist\Echo\Echo.exe锛屽啀鐢ㄦ湰鑴氭湰缂栬瘧銆?
 
 #ifndef MyAppName
   #define MyAppName "Echo"
 #endif
 #ifndef MyAppVersion
-  #define MyAppVersion "2.6.8"
+  #define MyAppVersion "2.7.0"
 #endif
 #define MyAppPublisher "Echo"
 #define MyAppExeName "Echo.exe"
-; 产物名后缀。build_release.py --with-model 会传 /DMyAppSuffix=-with-model，
-; 让「带语音模型的胖包」和默认的瘦包并存，不互相覆盖。
+; 浜х墿鍚嶅悗缂€銆俠uild_release.py --with-model 浼氫紶 /DMyAppSuffix=-with-model锛?
+; 璁┿€屽甫璇煶妯″瀷鐨勮儢鍖呫€嶅拰榛樿鐨勭槮鍖呭苟瀛橈紝涓嶄簰鐩歌鐩栥€?
 #ifndef MyAppSuffix
   #define MyAppSuffix ""
 #endif
@@ -52,13 +52,16 @@ SetupLogging=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog
+UsePreviousPrivileges=no
+LicenseFile=license.txt
 
 [Languages]
 Name: "chinesesimp"; MessagesFile: "ChineseSimplified.isl"
 
 [Files]
 Source: "assets\setup-brand.bmp"; Flags: dontcopy
-; 语音识别模型不再随包分发（483MB 的大头）—— 第一次开课时后台下载到 %APPDATA%\Echo\models
+; 璇煶璇嗗埆妯″瀷涓嶅啀闅忓寘鍒嗗彂锛?83MB 鐨勫ぇ澶达級鈥斺€?绗竴娆″紑璇炬椂鍚庡彴涓嬭浇鍒?%APPDATA%\Echo\models
 #ifndef ECHO_PREVIEW
 Source: "..\dist\Echo\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 #endif
@@ -68,6 +71,21 @@ Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Check: not IsQA
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Check: WantDesktopIcon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "鍚姩 {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
 #include "echo_wizard.iss"
+
+[Registry]
+Root: HKCU; Subkey: "Software\Classes\echo"; ValueType: string; ValueData: "URL:Echo classroom"; Flags: uninsdeletekey; Check: not IsQAInstall
+Root: HKCU; Subkey: "Software\Classes\echo"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""; Check: not IsQAInstall
+Root: HKCU; Subkey: "Software\Classes\echo\shell\open\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Check: not IsQAInstall
+
+[Messages]
+chinesesimp.LicenseLabel=下面几句就够了。
+chinesesimp.LicenseLabel3=同意之后才能继续。
+chinesesimp.LicenseAcceptedRadio=&我同意，继续安装
+chinesesimp.LicenseNotAcceptedRadio=&先不装
+chinesesimp.PrivilegesRequiredOverrideTitle=安装给谁
+chinesesimp.PrivilegesRequiredOverrideInstruction=Echo 可以只装给你，也可以装给这台电脑上的每个人。
+chinesesimp.PrivilegesRequiredOverrideAllUsers=装给这台电脑的所有用户
+chinesesimp.PrivilegesRequiredOverrideCurrentUser=只装给我

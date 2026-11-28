@@ -63,7 +63,7 @@ LISTEN, MINI, BREAK, LESSON, ECHO, REVIEW, HOME, PRACTICE, DETAIL, MINDMAP, COUR
     PROFILE, ASK, LEARNED, WEEKLY = range(16)
 # 各页内容区宽度（不含阴影与内边距）
 PAGE_WIDTH = {LISTEN: 340, MINI: 300, BREAK: 380, LESSON: 400, ECHO: 380,
-              REVIEW: 380, HOME: 780, PRACTICE: 400, DETAIL: 380, MINDMAP: 480,
+              REVIEW: 380, HOME: 620, PRACTICE: 400, DETAIL: 380, MINDMAP: 480,
               COURSES: 420, RECALL: 400, PROFILE: 380, ASK: 400, LEARNED: 480,
               WEEKLY: 400}
 
@@ -188,6 +188,7 @@ def rich(text: str) -> str:
 class FloatingWindow(QWidget):
     _ask_delta = pyqtSignal(str)
     _ask_done = pyqtSignal(str)
+    _announcement_ready = pyqtSignal(dict)   # 管理员公告：后台线程拉取，信号回主线程上卡
     _ask_err = pyqtSignal(str)
     _prac_graded = pyqtSignal(object)
     _prac_done = pyqtSignal(object)
@@ -417,6 +418,75 @@ class FloatingWindow(QWidget):
         self._model_timer = QTimer(self)
         self._model_timer.timeout.connect(self._poll_model_download)
         self._model_timer.start(500)
+        # 管理员公告：每次启动拉一次（后台线程，失败静默）；界面已就绪后再拉。
+        self._announcement_ready.connect(self._show_announcement)
+        QTimer.singleShot(4000, self._fetch_announcement)
+
+    def _fetch_announcement(self):
+        """拉取管理员公告。每次启动一次请求；失败/关闭时静默。"""
+        import threading
+        def work():
+            import json as _json
+            import urllib.request as _url
+            data = {}
+            for url in ('https://pay.echo.xhbtroy.cn/api/pay/announcement', 'https://pay.echo.xhbtroy.cn/api/pay/announcement'):
+                try:
+                    with _url.urlopen(url, timeout=8) as resp:
+                        got = _json.load(resp)
+                    if isinstance(got, dict) and str(got.get('text') or '').strip():
+                        data = got
+                        break
+                except Exception:
+                    data = {}
+            if not str(data.get('text') or '').strip():
+                try:
+                    from echo.backend import account
+                    got = account.request('/v1/announcements/current', timeout=8, max_bytes=65536)
+                    if isinstance(got, dict):
+                        data = got
+                except Exception:
+                    data = {}
+            if str(data.get('text') or '').strip():
+                try:
+                    req = _url.Request('https://pay.echo.xhbtroy.cn/api/pay/announcement/view',
+                                       data=_json.dumps({'client':'desktop'}).encode(),
+                                       headers={'Content-Type':'application/json'})
+                    _url.urlopen(req, timeout=5).read()
+                except Exception:
+                    pass
+            self._announcement_ready.emit(data if isinstance(data, dict) else {})
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show_announcement(self, data):
+        text = str((data or {}).get('text') or '').strip()
+        if not text or getattr(self, '_announcement_dismissed', False):
+            return
+        if not hasattr(self, 'announcement_text_lbl'):
+            self._pending_announcement = data
+            QTimer.singleShot(1000, lambda: self._show_announcement(self._pending_announcement))
+            return
+        self.announcement_text_lbl.setText(text)
+        self._announcement_url = str(data.get('url') or '').strip()
+        self.announcement_link_btn.setVisible(bool(self._announcement_url))
+        urgent = data.get('level') == 'urgent'
+        self.announcement_card.setStyleSheet(
+            f'QFrame#AnnouncementCard {{ background: {Colors.DANGER_BG if urgent else Colors.ACCENT_SOFT};'
+            f' border: 1px solid {Colors.DANGER_BORDER if urgent else Colors.ACCENT_BORDER}; border-radius: 10px; }}')
+        self.announcement_card.setVisible(True)
+        if self._page == HOME:
+            self._fit()
+
+    def _dismiss_announcement(self):
+        self.announcement_card.hide()
+        self._announcement_dismissed = True
+        self._fit()
+
+    def _open_announcement_link(self):
+        from PyQt5.QtGui import QDesktopServices
+        from PyQt5.QtCore import QUrl
+        url = getattr(self, '_announcement_url', '')
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
 
     def _build_header(self) -> QWidget:
         bar = _DraggableHeader()
@@ -1619,8 +1689,8 @@ class FloatingWindow(QWidget):
         self.home_start_panel.setObjectName('HomeStart')
         self.home_start_panel.setStyleSheet(f'QFrame#HomeStart{{background:{Colors.SURFACE};border:1px solid {Colors.BORDER};border-radius:14px;}}')
         start = QVBoxLayout(self.home_start_panel)
-        start.setContentsMargins(10,9,10,9)
-        start.setSpacing(5)
+        start.setContentsMargins(16,14,16,14)
+        start.setSpacing(10)
         start.setAlignment(Qt.AlignTop)
         hero.addWidget(self.home_start_panel,2)
         attention = QHBoxLayout()
@@ -1631,7 +1701,6 @@ class FloatingWindow(QWidget):
         self.home_features_grid.setSpacing(8)
         self.home_features_grid.setColumnStretch(0,1)
         self.home_features_grid.setColumnStretch(1,1)
-        self.home_features_grid.setColumnStretch(2,1)
         self.home_tools_panel.hide()
 
         # 选了「以后再说」才出现。进度条在顶上，这里只负责把下载入口留在主页。
@@ -1689,21 +1758,35 @@ class FloatingWindow(QWidget):
         self.home_gap_card.setVisible(False)      # 有结论才亮出来
         attention.addWidget(self.home_gap_card,1)
 
-        # 开课前先给这节课起个名，下课后在历史里一眼能认出来
-        start.addWidget(_label(tr("新的一节课", "Your next lesson"),
-            f'color:{Colors.TEXT_PRIMARY};font-size:14px;font-weight:600;'))
-        lesson_modes=QHBoxLayout();lesson_modes.setSpacing(10)
-        self.home_online_mode=QRadioButton(tr('网课','Online class'))
-        self.home_ai_mode=QRadioButton(tr('AI课堂 · Studio','AI class · Studio'))
-        self.home_lesson_modes=QButtonGroup(self)
-        self.home_lesson_modes.addButton(self.home_online_mode);self.home_lesson_modes.addButton(self.home_ai_mode)
-        self.home_online_mode.setChecked(True)
-        for choice in (self.home_online_mode,self.home_ai_mode):
-            choice.setStyleSheet(f'QRadioButton{{font-size:11px;color:{Colors.TEXT_PRIMARY};spacing:4px;}}'
-                f'QRadioButton::indicator{{width:13px;height:13px;border-radius:7px;border:1px solid {Colors.BORDER_STRONG};background:{Colors.SURFACE};}}'
-                f'QRadioButton::indicator:checked{{background:{Colors.ACCENT};border:3px solid {Colors.ACCENT_BORDER};}}')
-            lesson_modes.addWidget(choice)
-        start.addLayout(lesson_modes)
+        start.addWidget(_label(tr("今天学什么", "What are you learning today"),
+            f'color:{Colors.TEXT_PRIMARY};font-size:16px;font-weight:600;'))
+        self._home_ai = True
+        modes = QHBoxLayout()
+        modes.setSpacing(10)
+        self.home_online_tile = self._home_mode_tile(
+            tr('听网课', 'Listen along'),
+            tr('腾讯会议、B 站、录播都行。Echo 在旁边听，掉队时帮你补那一步。',
+               'Meetings, Bilibili or recordings. Echo listens and catches you up.'),
+            False)
+        self.home_ai_tile = self._home_mode_tile(
+            tr('AI 互动课堂', 'AI classroom'),
+            tr('给一个主题，生成会回应你的课：板书、提问、随堂测，不是视频。',
+               'Give a topic. Echo builds a live board with questions — not a video.'),
+            True)
+        modes.addWidget(self.home_online_tile, 1)
+        modes.addWidget(self.home_ai_tile, 1)
+        start.addLayout(modes)
+        class _Mode:
+            def __init__(self, window, ai):
+                self._window, self._ai = window, ai
+            def isChecked(self):
+                return bool(self._window._home_ai) if self._ai else not self._window._home_ai
+            def setChecked(self, on):
+                if on:
+                    self._window._set_home_mode(self._ai)
+        self.home_online_mode = _Mode(self, False)
+        self.home_ai_mode = _Mode(self, True)
+        self._style_home_mode()
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText(
             tr("课程名称（可选），例如：正比例函数",
@@ -1720,29 +1803,35 @@ class FloatingWindow(QWidget):
 
         self.btn_today = _btn(tr("开始听课 →", "Start lesson →"), "Accent", self._start_today,
                               tr("开一节新课，Echo 开始听你的网课", "Start a new lesson and Echo will begin listening"))
-        self.btn_today.setFixedHeight(34)
+        self.btn_today.setFixedHeight(38)
+        self.btn_today.setStyleSheet('font-size:14px;font-weight:600;padding:6px 18px;')
         start_actions=QHBoxLayout()
         self.home_lesson_hint=_label(tr('播放网课后，Echo 会开始听','Echo listens when your course plays'),
-            f'color:{Colors.TEXT_SECONDARY};font-size:11px;',wrap=True)
+            f'color:{Colors.TEXT_SECONDARY};font-size:12px;',wrap=True)
         start.addWidget(self.home_lesson_hint)
         start_actions.addStretch()
         start_actions.addWidget(self.btn_today)
         start.addLayout(start_actions)
-        self.home_ai_mode.toggled.connect(lambda checked:self._home_lesson_mode_changed(True) if checked else None)
-        self.home_online_mode.toggled.connect(lambda checked:self._home_lesson_mode_changed(False) if checked else None)
         self.home_booklet_card = QFrame()
         self.home_booklet_card.setObjectName('BookletHero')
         self.home_booklet_card.setStyleSheet('QFrame#BookletHero{background:transparent;border:0;}')
         booklet = QVBoxLayout(self.home_booklet_card)
         booklet.setContentsMargins(0,0,0,0)
-        booklet.setSpacing(8)
+        booklet.setSpacing(10)
+        # AI 助手放在右列最顶上（用户指定）：主题色描边以示强调
+        self.home_agent_card = self._home_card(tr('AI 助手 · Beta','AI assistant · Beta'),
+            tr('学习 agent：查资料、看进度、出练习题、写学习计划书','Learning agent: notes, progress, quizzes and study plans'),
+            tr('打开','Open'), self._open_agent_chat)
+        self.home_agent_card.setStyleSheet(f'QFrame#HomeCard{{background:{Colors.ACCENT_SOFT};'
+                                           f'border:1px solid {Colors.ACCENT_BORDER}; border-radius: {Radius.MD}px; }}')
+        booklet.addWidget(self.home_agent_card)
         self.home_notebook_entry = self._home_card(tr('我的小本','My notebook'),
             tr('收集相关知识，按大类和章节复习','Review related topics by chapter'),tr('打开','Open'),self._open_booklets)
         booklet.addWidget(self.home_notebook_entry)
         self.home_exam_entry = self._home_card(tr('试卷与练习','Papers and practice'),
             tr('查看云端试卷，在本机答题与错题重做','Open cloud papers, answer and retry locally'),tr('进入','Enter'),self._open_exam)
         booklet.addWidget(self.home_exam_entry)
-        hero.addWidget(self.home_booklet_card,3)
+        hero.addWidget(self.home_booklet_card,1)
 
         self.home_review_card = self._home_card(
             tr("错题复习", "Review mistakes"), tr("把掉队过的知识点再过一遍", "Go over the points you missed"),
@@ -1755,17 +1844,18 @@ class FloatingWindow(QWidget):
         self.home_courses_card = self._home_card(
             tr("课程管理", "Course manager"), tr("回看、搜索、重命名、批量管理历史课程", "Review, search, rename, and manage past lessons"),
             tr("管理", "Manage"), self._show_courses)
-        self.home_features_grid.addWidget(self.home_courses_card,0,2)
+        self.home_features_grid.addWidget(self.home_courses_card,1,0)
         self.home_learned_card = self._home_card(
             tr("已学内容", "Learned so far"),
             tr("所有历史学过的知识点，一张按学科分区的大思维导图", "Every topic you've learned, in one subject-grouped mind map"),
             tr("查看", "View"), self._show_learned)
-        self.home_features_grid.addWidget(self.home_learned_card,1,0)
+        self.home_features_grid.addWidget(self.home_learned_card,1,1)
         self.home_weekly_card = self._home_card(
             tr("一周学习回响", "Weekly review"),
             tr("最近 7 天学过的知识点，一页看全", "What you learned in the last 7 days, at a glance"),
             tr("查看", "View"), self._show_weekly)
-        self.home_features_grid.addWidget(self.home_weekly_card,1,1)
+        self.home_features_grid.addWidget(self.home_weekly_card,2,0)
+
         self.home_cloud_paper_card = self._home_card(
             tr('清卷 · 本地出卷','Qingjuan · Compose'),
             tr('本机配置蓝图、编辑卷稿与导出，AI由Echo云端命题','Local authoring and export with Echo cloud AI'),
@@ -1773,19 +1863,43 @@ class FloatingWindow(QWidget):
         self.home_account_card = self._home_card(
             tr("用户中心", "Account center"), tr("自动同步、网页复习与学习点余额", "Cloud sync, web review and learning credits"),
             tr("打开", "Open"), self._show_account_center)
-        booklet.addWidget(self.home_account_card)
         # 学习计划：原来的「学习目标 / 今日安排·Beta」两条 Link 文字按钮换成和
         # 上面一致的入口卡片，合并成一个入口；清卷本地出卷也挪到这排下面。
         self.home_plan_card = self._home_card(
             tr('学习计划', 'Study plan'),
             tr('学习目标与今日安排，按计划推进 · Beta', 'Goals and today\'s plan, at your pace · Beta'),
             tr('打开', 'Open'), self._open_learning_path)
+        booklet.addWidget(self.home_account_card)
         booklet.addWidget(self.home_plan_card)
         booklet.addWidget(self.home_cloud_paper_card)
         self.home_tools_toggle = _btn(tr('更多 ▾','More ▾'),'Link',self._toggle_home_tools)
         self.home_tools_toggle.setCheckable(True)
         lay.addLayout(hero)
         lay.addLayout(attention)
+        # 管理员公告卡（Echo 风格）：默认隐藏，启动后拉一次 /v1/announcements/current，
+        # 有内容才显示。见 _fetch_announcement。
+        self.announcement_card = QFrame()
+        self.announcement_card.setObjectName('AnnouncementCard')
+        card_lay = QHBoxLayout(self.announcement_card)
+        card_lay.setContentsMargins(14, 10, 14, 10)
+        card_lay.setSpacing(10)
+        icon = _label('公告', 'color: {0}; font-size: 11px; font-weight: 600;'.format(Colors.ACCENT))
+        icon.setStyleSheet('background: transparent;')
+        card_lay.addWidget(icon, 0, Qt.AlignTop)
+        body = QVBoxLayout()
+        body.setSpacing(2)
+        self.announcement_text_lbl = _label('', 'color: {0}; font-size: 12px;'.format(Colors.TEXT_PRIMARY), wrap=True)
+        body.addWidget(self.announcement_text_lbl)
+        self.announcement_link_btn = _btn(tr('查看 →', 'Open →'), 'Link', self._open_announcement_link)
+        self.announcement_link_btn.hide()
+        body.addWidget(self.announcement_link_btn, 0, Qt.AlignLeft)
+        card_lay.addLayout(body, 1)
+        close = _btn('×', 'Link', self._dismiss_announcement)
+        close.setFixedWidth(28)
+        close.setToolTip(tr('关闭这条公告', 'Dismiss'))
+        card_lay.addWidget(close, 0, Qt.AlignTop)
+        self.announcement_card.hide()
+        lay.addWidget(self.announcement_card)
         lay.addWidget(self.home_tools_toggle,0,Qt.AlignLeft)
         lay.addWidget(self.home_tools_panel)
         return page
@@ -1801,6 +1915,48 @@ class FloatingWindow(QWidget):
                 pass
         self.home_tools_toggle.setText(tr('收起 ▴','Less ▴') if expanded else tr('更多 ▾','More ▾'))
         self._fit()
+
+    def _agent_create_paper(self, subject, goal):
+        from echo.widgets.qingjuan_workbench import open_qingjuan_workbench
+        self._qingjuan_workbench = open_qingjuan_workbench(parent=self)
+        w = self._qingjuan_workbench
+        try:
+            if subject and getattr(w.fields.get("subject"), "setCurrentText", None):
+                w.fields["subject"].setCurrentText(subject)
+            if goal and getattr(w.fields.get("title"), "setEditText", None):
+                w.fields["title"].setEditText(goal)
+            w.apply_template()
+            QTimer.singleShot(300, w.generate)
+        except Exception as exc:
+            from echo.widgets import dialogs
+            dialogs.warn(w, tr("出卷未开始", "Couldn't start composing"), str(exc))
+
+    def _open_agent_chat(self):
+        from echo.widgets.agent_window import open_agent_window
+        existing = getattr(self, '_agent_window', None)
+        window = open_agent_window(engine=getattr(getattr(self, 'echo', None), 'engine', None), parent=self)
+        if window is not existing:
+            window.open_view_requested.connect(self._agent_open_view)
+            window.start_lesson_requested.connect(self._agent_start_lesson)
+            window.open_ai_class_requested.connect(self._open_ai_class)
+            window.create_paper_requested.connect(self._agent_create_paper)
+            window.open_booklets_requested.connect(lambda: self._open_booklets())
+            window.open_plans_requested.connect(self._open_learning_path)
+        self._agent_window = window
+
+    def _agent_open_view(self, name):
+        mapping = {"review": REVIEW, "practice": PRACTICE, "courses": COURSES,
+                   "mindmap": MINDMAP, "learned": LEARNED, "weekly": WEEKLY,
+                   "home": HOME, "错题复习": REVIEW, "练习": PRACTICE, "课程管理": COURSES,
+                   "知识地图": MINDMAP, "已学内容": LEARNED, "一周回响": WEEKLY, "主页": HOME}
+        target = mapping.get(str(name).strip())
+        if target is not None:
+            self._show_page(target)
+
+    def _agent_start_lesson(self, title):
+        if title:
+            self.title_edit.setText(title)
+        self._start_today()
 
     def _open_exam(self):
         from echo.widgets.exam_window import open_exam_window
@@ -1818,7 +1974,7 @@ class FloatingWindow(QWidget):
         from echo.widgets.qingjuan_workbench import open_qingjuan_workbench
         self._qingjuan_workbench=open_qingjuan_workbench(parent=self)
 
-    def _open_booklets(self, current=False):
+    def _open_booklets(self, current=False, group=''):
         from echo.widgets.booklet_window import BookletWindow
         if not getattr(self,'_booklets',None):
             self._booklets = BookletWindow(getattr(getattr(self,'echo',None),'engine',None),self)
@@ -1826,6 +1982,12 @@ class FloatingWindow(QWidget):
         self._booklets.refresh()
         self._booklets.show()
         self._booklets.raise_()
+        if group:
+            def _select_group():
+                idx = self._booklets.filter.findText(group)
+                if idx >= 0:
+                    self._booklets.filter.setCurrentIndex(idx)
+            QTimer.singleShot(0, _select_group)
         if current:
             QTimer.singleShot(0,lambda:self._booklets.create(current=True))
 
@@ -2227,16 +2389,45 @@ class FloatingWindow(QWidget):
     def _start_today(self):
         """主页上「开始今天的学习」：名字取自输入框。"""
         name = self.title_edit.text().strip()
-        if self.home_ai_mode.isChecked():
+        if self.home_ai_mode_on():
             self._open_ai_class(name)
             return
         self.title_edit.clear()
         self._begin_lesson(name)
 
+    def home_ai_mode_on(self):
+        return bool(getattr(self, '_home_ai', False))
+
+    def _home_mode_tile(self, title, desc, ai):
+        tile = QFrame()
+        tile.setObjectName('HomeMode')
+        tile.setCursor(QCursor(Qt.PointingHandCursor))
+        lay = QVBoxLayout(tile)
+        lay.setContentsMargins(12, 10, 12, 10)
+        lay.setSpacing(4)
+        head = _label(title, f'color:{Colors.TEXT_PRIMARY};font-size:14px;font-weight:600;')
+        body = _label(desc, f'color:{Colors.TEXT_SECONDARY};font-size:12px;', wrap=True)
+        lay.addWidget(head)
+        lay.addWidget(body)
+        tile.mousePressEvent = lambda e, mode=ai: self._set_home_mode(mode) if e.button() == Qt.LeftButton else None
+        return tile
+
+    def _set_home_mode(self, ai):
+        self._home_ai = bool(ai)
+        self._style_home_mode()
+        self._home_lesson_mode_changed(self._home_ai)
+
+    def _style_home_mode(self):
+        on = f'QFrame#HomeMode{{background:{Colors.ACCENT_SOFT};border:1px solid {Colors.ACCENT};border-radius:12px;}}'
+        off = f'QFrame#HomeMode{{background:{Colors.SURFACE};border:1px solid {Colors.BORDER};border-radius:12px;}}'
+        if hasattr(self, 'home_online_tile'):
+            self.home_online_tile.setStyleSheet(off if self._home_ai else on)
+            self.home_ai_tile.setStyleSheet(on if self._home_ai else off)
+
     def _home_lesson_mode_changed(self,ai):
-        self.btn_today.setText(tr('打开 AI 课堂 →','Open AI class →') if ai else tr('开始听课 →','Start lesson →'))
-        self.home_lesson_hint.setText(tr('Studio 独立实验室 · 先规划，再确认制作','Studio lab · Plan, then approve production') if ai else tr('播放网课后，Echo 会开始听','Echo listens when your course plays'))
-        self.title_edit.setPlaceholderText(tr('想学什么？例如：一次函数的斜率','What would you like to learn?') if ai else tr('课程名称（可选）','Lesson title (optional)'))
+        self.btn_today.setText(tr('打开互动课堂 →','Open live class →') if ai else tr('开始听课 →','Start lesson →'))
+        self.home_lesson_hint.setText(tr('给一个主题，Echo 生成会回应你的课。板书、提问、随堂测都在这一页。','Give a topic. Echo builds a live board with questions.') if ai else tr('播放网课后，Echo 会开始听','Echo listens when your course plays'))
+        self.title_edit.setPlaceholderText(tr('想学什么？例如：一次函数的斜率','What would you like to learn?') if ai else tr('课程名称（可选），例如：正比例函数','Lesson title (optional)'))
         self._fit()
 
     def _open_ai_class(self,topic=''):

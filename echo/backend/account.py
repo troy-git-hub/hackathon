@@ -39,13 +39,27 @@ def managed_models():
 
 def request(path, data=None, timeout=25, max_bytes=262144, auth_token=None):
     if not path.startswith('/v1/') or '..' in path: raise AccountError('账户请求路径无效。')
-    headers={'Content-Type':'application/json','X-Echo-CSRF':'1','User-Agent':'Echo-Desktop/Account-1'}
+    headers={'Content-Type':'application/json','X-Echo-CSRF':'1','User-Agent':'Echo-Desktop/Account-1',
+             'Accept-Encoding':'gzip'}
     session=_token if auth_token is None else auth_token
     if session: headers['Authorization']='Bearer '+session
-    req=urllib.request.Request(API_ORIGIN+path,data=json.dumps(data).encode() if data is not None else None,headers=headers)
+    body=None
+    if data is not None:
+        # ensure_ascii=False + 紧凑分隔符：中文 body 先省 30-50%，再进 gzip。
+        body=json.dumps(data,ensure_ascii=False,separators=(',',':')).encode()
+        if len(body)>8192:
+            # 大请求体（学习档案同步、课堂归档）压缩上传；服务端会解压并按原限额校验。
+            import gzip as _gzip_mod
+            body=_gzip_mod.compress(body,6)
+            headers['Content-Encoding']='gzip'
+    req=urllib.request.Request(API_ORIGIN+path,data=body,headers=headers)
     try:
         with urllib.request.build_opener(_NoRedirect()).open(req,timeout=timeout) as reply:
             raw=reply.read(max_bytes+1)
+            if (reply.headers.get('Content-Encoding') or '').strip().lower()=='gzip':
+                import gzip as _gzip_mod
+                try:raw=_gzip_mod.decompress(raw)
+                except OSError:raise AccountError('账户服务返回内容异常，请稍后重试。') from None
         if len(raw)>max_bytes: raise AccountError('账户服务响应过大。')
         try:return json.loads(raw)
         except (ValueError,TypeError):raise AccountError('账户服务返回内容异常，请稍后重试；登录凭据不会因此删除。') from None
@@ -182,7 +196,14 @@ def inference_stream(task,context,purpose=None):
           'context':copy.deepcopy(context),'stream':True}
     headers={'Content-Type':'application/json','Accept':'text/event-stream','X-Echo-CSRF':'1',
              'Authorization':'Bearer '+session,'User-Agent':'Echo-Desktop/Account-2'}
-    req=urllib.request.Request(API_ORIGIN+'/v1/echo/inference',data=json.dumps(body).encode(),headers=headers)
+    body_bytes=json.dumps(body,ensure_ascii=False,separators=(',',':')).encode()
+    if len(body_bytes)>8192:
+        # 长 context / vision 图片的流式请求同样压缩上传（>8KB）；
+        # 服务端安全中间件会解压后按原限额校验，与 request() 同一链路。
+        import gzip as _gzip_mod
+        body_bytes=_gzip_mod.compress(body_bytes,6)
+        headers['Content-Encoding']='gzip'
+    req=urllib.request.Request(API_ORIGIN+'/v1/echo/inference',data=body_bytes,headers=headers)
     try:
         with urllib.request.build_opener(_NoRedirect()).open(req,timeout=130 if task=='vision' else 100) as reply:
             if 'text/event-stream' not in reply.headers.get('Content-Type',''):

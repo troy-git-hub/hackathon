@@ -108,6 +108,50 @@ class EchoTitleBar(QWidget):
     def mouseReleaseEvent(self,event):self.offset=None
 
 
+def set_taskbar_appid(widget, appid):
+    """Give a top-level window its own Windows taskbar identity (not grouped with Echo).
+
+    Must run after the window has a native HWND (showEvent is the right place).
+    Qingjuan uses 'Echo.Qingjuan'; the AI assistant uses 'Echo.Agent'.
+    """
+    import os
+    if os.name != 'nt':
+        return
+    try:
+        import ctypes, uuid
+        from ctypes import wintypes
+        class GUID(ctypes.Structure):
+            _fields_ = [('data', ctypes.c_ubyte * 16)]
+        def guid(value):
+            return GUID((ctypes.c_ubyte * 16).from_buffer_copy(uuid.UUID(value).bytes_le))
+        class Key(ctypes.Structure):
+            _fields_ = [('fmtid', GUID), ('pid', wintypes.DWORD)]
+        class Value(ctypes.Structure):
+            _fields_ = [('vt', ctypes.c_ushort), ('r1', ctypes.c_ushort),
+                        ('r2', ctypes.c_ushort), ('r3', ctypes.c_ushort),
+                        ('value', ctypes.c_void_p), ('padding', ctypes.c_void_p)]
+        shell = ctypes.WinDLL('shell32')
+        fn = shell.SHGetPropertyStoreForWindow
+        fn.argtypes = [wintypes.HWND, ctypes.POINTER(GUID), ctypes.POINTER(ctypes.c_void_p)]
+        fn.restype = ctypes.c_long
+        iid = guid('886d8eeb-8cf2-4446-8d02-cdba1dbdcf99')
+        store = ctypes.c_void_p()
+        if fn(int(widget.winId()), ctypes.byref(iid), ctypes.byref(store)) < 0:
+            return
+        table = ctypes.cast(store, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
+        key = Key(guid('9f4c2855-9f79-4b39-a8d0-e1d42de1d5f3'), 5)
+        text = ctypes.create_unicode_buffer(appid)
+        value = Value(); value.vt = 31; value.value = ctypes.cast(text, ctypes.c_void_p)
+        try:
+            ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.POINTER(Key), ctypes.POINTER(Value))(table[6])(
+                store, ctypes.byref(key), ctypes.byref(value))
+            ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p)(table[7])(store)
+        finally:
+            ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(table[2])(store)
+    except Exception:
+        pass
+
+
 def install_chrome(dialog,layout,title=None,minimize=False):
     """Install after the window stylesheet; close uses the dialog's closeEvent."""
     # Owned dialogs can collapse into a tiny native caption instead of the taskbar.

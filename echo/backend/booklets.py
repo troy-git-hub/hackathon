@@ -65,11 +65,13 @@ def load():
         if not file.exists(): return []
         try:
             data = json.loads(file.read_text(encoding='utf-8'))
-            if not isinstance(data,list) or any(not isinstance(item,dict) or not all(key in item for key in ('id','title','category','topics','intro','chapters','sources','mode')) for item in data):
-                raise ValueError()
-            return data
-        except (OSError,ValueError) as exc:
+        except (OSError, ValueError) as exc:
             raise ValueError('复习小册文件无法读取，未覆盖原文件；请查看日志。') from exc
+        if not isinstance(data, list):
+            raise ValueError('复习小册文件无法读取，未覆盖原文件；请查看日志。')
+        needed = ('id', 'title', 'category', 'topics', 'intro', 'chapters', 'sources', 'mode')
+        # 跳过字段不齐的条目（旧版 agent 曾写入不完整的「计划」记录），不让整份小本读不出来。
+        return [item for item in data if isinstance(item, dict) and all(key in item for key in needed)]
 
 
 def save(booklet):

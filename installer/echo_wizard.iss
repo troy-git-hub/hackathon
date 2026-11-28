@@ -159,7 +159,16 @@ procedure CurPageChanged(CurPageID: Integer);
 begin
   WizardForm.MainPanel.Visible := False;
   WizardForm.BackButton.Visible := False;
-  if CurPageID = EchoPage.ID then begin
+  if CurPageID = wpLicense then begin
+    Eyebrow.Caption := '00 / A SHORT NOTE.';
+    StageTitle.Caption := '先看一眼，'#13#10'就这几句。';
+    StageHint.Caption := '不长，看完再决定要不要装。';
+    WizardForm.LicenseMemo.Color := $00171511;
+    WizardForm.LicenseMemo.Font.Color := $00E4EEE5;
+    WizardForm.LicenseAcceptedRadio.Font.Color := $00E4EEE5;
+    WizardForm.LicenseNotAcceptedRadio.Font.Color := $00E4EEE5;
+    WizardForm.NextButton.Caption := '继续  →';
+  end else if CurPageID = EchoPage.ID then begin
     WizardForm.NextButton.Caption := '安顿好 Echo  →';
   end else if CurPageID = wpInstalling then begin
     Eyebrow.Caption := '02 / MAKING ROOM.';

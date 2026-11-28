@@ -83,6 +83,7 @@ class _Canvas(QWidget):
         self._user_moved = False   # 学生自己拖过/缩放过之后，就别再自动改他的视图
         self._course = {}
         self._course_headers = []
+        self._header_anchors = {}   # (学科idx, 课程名) → 布局时定好的顶行节点；虚线只挂它们
 
     # ---------------- 数据 ----------------
     def set_graph(self, graph: dict, selected: str = "", keep_positions: bool = False,
@@ -147,6 +148,7 @@ class _Canvas(QWidget):
         self._pos = {}
         self._columns = {}
         self._course_headers = []
+        self._header_anchors = {}
         x, height = float(PAD), 320.0
         for idx in sorted(cols):
             self._columns[idx] = x
@@ -164,6 +166,10 @@ class _Canvas(QWidget):
                 by_level = {}
                 for topic in topics:
                     by_level.setdefault(self._levels.get(topic, 0), []).append(topic)
+                first_level = min(by_level) if by_level else 0
+                # 虚线锚点在布局时定死：拖动顶行节点时曲线跟着它走，不会突然
+                # 换锚点「跳走」（每帧取最小 y 的话，拖上节点线就断了）。
+                self._header_anchors[(idx, course)] = list(by_level.get(first_level, []))
                 for level in sorted(by_level):
                     row = by_level[level]
                     for start in range(0, len(row), columns):
@@ -361,13 +367,16 @@ class _Canvas(QWidget):
             p.setFont(font(11, 600))
             text = QFontMetrics(p.font()).elidedText(course, Qt.ElideRight, int(header.width()) - 16)
             p.drawText(header.adjusted(8, 0, -8, 0), Qt.AlignCenter, text)
-            topics = [t for t, _s, _tc in self._nodes if self._subject_index.get(t) == idx and self._course.get(t) == course]
-            top = min((self._pos[t].y() for t in topics), default=0)
+            anchors = self._header_anchors.get((idx, course))
+            if not anchors:
+                topics = [t for t, _s, _tc in self._nodes if self._subject_index.get(t) == idx and self._course.get(t) == course]
+                top = min((self._pos[t].y() for t in topics), default=0)
+                anchors = [t for t in topics if self._pos[t].y() == top]
             p.setPen(QPen(QColor(Colors.BORDER if dim else Colors.ACCENT_BORDER), 1, Qt.DashLine))
-            for topic in topics:
-                node = self._rect(topic)
-                if node.top() != top:
+            for topic in anchors:
+                if topic not in self._pos:
                     continue
+                node = self._rect(topic)
                 path = QPainterPath(QPointF(header.center().x(), header.bottom()))
                 mid = (header.bottom() + node.top()) / 2
                 path.cubicTo(header.center().x(), mid, node.center().x(), mid, node.center().x(), node.top())

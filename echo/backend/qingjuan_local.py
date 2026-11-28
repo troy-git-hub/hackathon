@@ -344,12 +344,11 @@ def ai(document,operation,payload,fresh=False,on_progress=None):
             parsed=result
         else:
             progress(2,'请求已发送，等待模型处理')
-            receipt=account.request('/v1/echo/inference',{'protocol':'echo.inference/2','account_id':document['owner'],
-              'request_id':pending['id'],'task':'text','purpose':PURPOSE,'context':context},timeout=90,max_bytes=1024*1024,auth_token=session)
-            if receipt.get('protocol') not in ('echo.inference/1','echo.inference/2') or receipt.get('account',{}).get('id')!=document['owner']:raise account.AccountError('清卷AI账户响应不匹配。')
+            receipt=account.request('/v1/echo/test',{'protocol':'echo.test/1',
+              'request_id':pending['id'],'operation':operation,'payload':payload},timeout=90,max_bytes=1024*1024,auth_token=session)
+            if receipt.get('protocol')!='echo.test/1':raise account.AccountError('清卷服务响应不匹配。')
             result=receipt['result']
-            from echo.backend.llm import parse_json
-            parsed=parse_json(result['text'])
+            parsed=result
         if owner()!=document['owner'] or account.token()!=session:raise account.AccountError('账户已变化，回复未写入此卷稿。')
         progress(3,'已收到结果，准备保存本机领取记录')
         pending['state']='received'

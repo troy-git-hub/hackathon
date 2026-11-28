@@ -7,7 +7,7 @@ import sys
 
 from PyQt5.QtGui import QColor, QFont, QPalette
 from PyQt5.QtCore import QObject, QEvent, Qt, QSettings
-from PyQt5.QtWidgets import QComboBox, QApplication, QWidget
+from PyQt5.QtWidgets import QComboBox, QApplication, QWidget, QAbstractSpinBox
 
 THEMES = {"auto": "跟随系统", "light": "纸白", "dark": "石墨夜读",
           "forest": "森林书屋", "ocean": "海盐蓝", "sakura": "樱花手记", "parchment": "羊皮纸"}
@@ -497,6 +497,10 @@ class _ComboWheelGuard(QObject):
         while widget is not None:
             if isinstance(widget, QComboBox):
                 return True         # 合上时：滚轮不改选项
+            if isinstance(widget, QAbstractSpinBox):
+                # 数字框（清卷的题量/分值/时长等）：没聚焦时滚轮不改值；
+                # 聚焦中（用户正在编辑）滚轮仍可用。
+                return not widget.hasFocus()
             widget = widget.parentWidget()
         return False
 
