@@ -186,7 +186,7 @@ class AgentWindow(QDialog):
         self._chat_index = []; self._chat_cache = {}; self._steps_cache = {}
         if not owner: return
         try:
-            value = credential_backup.load('Echo.Assistant.History.' + owner) or {}
+            value = credential_backup.load('Echo.Assistant.History.' + owner,max_bytes=2*1024*1024) or {}
             if isinstance(value,dict):
                 self._chat_index = value.get('index',[])[:40]
                 self._chat_cache = value.get('chats',{})
@@ -200,11 +200,16 @@ class AgentWindow(QDialog):
         if not self._cache_owner or self._identity() != self._cache_owner: return
         try:
             from echo.backend import credential_backup
-            ids = [item['id'] for item in self._chat_index[:30]]
-            credential_backup.save('Echo.Assistant.History.' + self._cache_owner, {
+            import json
+            current = self.panel.chat_id()
+            ids = [current] + [item['id'] for item in self._chat_index[:30] if item['id'] != current]
+            snapshot = {
                 'index':self._chat_index[:30],
                 'chats':{cid:self._chat_cache[cid][-24:] for cid in ids if cid in self._chat_cache},
-                'steps':{cid:self._steps_cache[cid][-6:] for cid in ids if cid in self._steps_cache}})
+                'steps':{cid:self._steps_cache[cid][-6:] for cid in ids if cid in self._steps_cache}}
+            while len(json.dumps(snapshot,ensure_ascii=False).encode()) > 1500000 and len(ids)>1:
+                expired=ids.pop();snapshot['chats'].pop(expired,None);snapshot['steps'].pop(expired,None)
+            credential_backup.save('Echo.Assistant.History.' + self._cache_owner,snapshot)
         except Exception: pass
 
     def _refresh_chats(self, force=False):

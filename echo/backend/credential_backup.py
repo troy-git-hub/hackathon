@@ -40,10 +40,10 @@ def save(service,value):
         if temp:temp.unlink(missing_ok=True)
 
 
-def load(service):
+def load(service,max_bytes=65536):
     file=_file(service)
     if not file.exists():return None
-    if file.stat().st_size>65536:raise ValueError('Protected credential record is too large')
+    if not 0 < max_bytes <= 2*1024*1024 or file.stat().st_size>max_bytes:raise ValueError('Protected credential record is too large')
     return json.loads(_crypt(file.read_bytes(),service,False).decode())
 
 
